@@ -5,6 +5,6 @@
 // instagram  Optional. An Instagram handle without the @. Shown as a fallback when
 //            ordering is closed or busy, so customers know where to send a DM.
 window.SJ_CONFIG = {
-  endpoint: 'PASTE_THE_WEB_APP_ADDRESS_HERE',
-  instagram: ''
+  endpoint: 'https://script.google.com/macros/s/AKfycbwx1ERePNCH2Y556jKXElN7xkciMgwCHP4pAY7YcVI8FixDGvpq1N4qKAXZdvdLoyoJzA/exec',
+  instagram: 'gregbolus02'
 };
