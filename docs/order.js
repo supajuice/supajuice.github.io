@@ -53,6 +53,7 @@
   function readForm() {
     return {
       name: $('name').value.trim(),
+      email: $('email').value.trim(),
       contact: $('contact').value.trim(),
       address: $('address').value.trim(),
       notes: $('notes').value.trim(),
@@ -63,7 +64,8 @@
 
   function validate(d) {
     if (!d.name) return { id: 'name', message: 'Enter your name.' };
-    if (d.contact.length < 3) return { id: 'contact', message: 'Add an Instagram handle or phone number so we can reach you.' };
+    if (!d.email) return { id: 'email', message: 'Enter your email address so we can send your invoice.' };
+    if (!SJ.isEmail(d.email)) return { id: 'email', message: 'Check your email address. It should look like name@example.com.' };
     if (!d.address) return { id: 'address', message: 'Enter your delivery address.' };
     if (!d.areaConfirmed) return { id: 'area-ok', message: 'Tick the box to confirm your address is in ' + config.area + '.' };
     return null;
@@ -113,7 +115,7 @@
       return;
     }
 
-    var sig = JSON.stringify([data.name, data.contact, data.address, data.notes, data.qty]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 
     setSubmitting(true);
@@ -179,6 +181,11 @@
       sub.appendChild(el('span', { class: 'nowrap' }, o.invoice));
       sub.appendChild(document.createTextNode(' as the reference.'));
     }
+
+    var emailNote = $('done-email');
+    emailNote.hidden = restored || !o.email;
+    if (o.emailedOn) emailNote.textContent = 'We have emailed your invoice to ' + o.email + '. Check your spam folder if it is not there.';
+    else emailNote.textContent = 'We could not email your invoice just now. Take a screenshot of this page instead.';
 
     var bib = $('bib');
     SJ.clear(bib);

@@ -112,6 +112,21 @@ class MockSpreadsheet {
   deleteSheet(s) { this.sheets = this.sheets.filter((x) => x !== s); }
 }
 
+// A blob that remembers its source. Converting HTML to PDF keeps the HTML, so tests can read what the PDF shows.
+class MockBlob {
+  constructor(data, type, name) {
+    Object.assign(this, { data: String(data), type, name });
+  }
+  getAs(type) {
+    if (type === 'application/pdf' && this.type !== 'text/html') throw new Error('mock only converts HTML to PDF');
+    return new MockBlob(this.data, type, this.name);
+  }
+  setName(name) { this.name = name; return this; }
+  getName() { return this.name; }
+  getContentType() { return this.type; }
+  getDataAsString() { return this.data; }
+}
+
 function formatDate(date, tz, fmt) {
   if (fmt !== 'yyyy-MM-dd HH:mm') throw new Error('mock formatDate only supports yyyy-MM-dd HH:mm');
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -131,6 +146,7 @@ function createGas() {
   const store = new Map();
   const cacheStore = new Map();
   const lock = { failNext: false, held: false };
+  const mailQuota = { left: 100 }; // a consumer Gmail account's daily limit
 
   class FakeDate extends Date {
     constructor(...a) { if (a.length === 0) super(clock.now); else super(...a); }
@@ -172,10 +188,19 @@ function createGas() {
     Utilities: {
       getUuid: () => crypto.randomUUID(),
       formatDate,
-      sleep: (ms) => sleeps.push(ms)
+      sleep: (ms) => sleeps.push(ms),
+      newBlob: (data, type, name) => new MockBlob(data, type, name)
     },
     Session: { getScriptTimeZone: () => 'Africa/Johannesburg' },
-    MailApp: { sendEmail: (to, subject, body) => { mail.push({ to, subject, body }); } }
+    MailApp: {
+      // Both forms Apps Script accepts: (to, subject, body) and ({ to, subject, body, attachments, ... }).
+      sendEmail: (to, subject, body) => {
+        if (mailQuota.left < 1) throw new Error('Service invoked too many times for one day: email.');
+        mailQuota.left--;
+        mail.push(typeof to === 'object' ? Object.assign({}, to) : { to, subject, body });
+      },
+      getRemainingDailyQuota: () => mailQuota.left
+    }
   };
 
   const ctx = vm.createContext(sandbox);
@@ -183,7 +208,7 @@ function createGas() {
   vm.runInContext(code, ctx, { filename: 'Code.gs' });
 
   const gas = {
-    ctx, ss, clock, mail, logs, errors, sleeps, lock, store, cacheStore,
+    ctx, ss, clock, mail, mailQuota, logs, errors, sleeps, lock, store, cacheStore,
     // Send one request through doPost, like the pages do.
     call(body) {
       const out = ctx.doPost({ postData: { contents: JSON.stringify(body), type: 'text/plain' } });

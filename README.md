@@ -2,9 +2,9 @@
 
 Orders and invoices for a one-product running gel business.
 
-- Customers order from a page linked in the Instagram bio, see the bank details and get an invoice number.
-- Greg can also enter an order himself when someone sends a DM, then paste the invoice into the chat.
-- Payment is by bank transfer. Greg checks his bank statement, marks the order paid, and sends the paid invoice.
+- Customers order from a page linked in the Instagram bio, see the bank details and get an invoice number. The invoice is also emailed to them as a PDF.
+- Greg can also enter an order himself when someone sends a DM, then paste the invoice into the chat. If he adds their email, they get the PDF too.
+- Payment is by bank transfer. Greg checks his bank statement and marks the order paid. The paid invoice is emailed automatically, and he can paste it into the DM as well.
 - Everything is stored in a Google Sheet. No monthly cost.
 
 ```
@@ -85,11 +85,13 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 ## Greg's cheat sheet
 
-**An order comes in from the order page.** It shows under **Awaiting payment** and an alert email is sent. The customer has the bank details and an invoice number to use as the payment reference.
+**An order comes in from the order page.** It shows under **Awaiting payment** and an alert email is sent. The customer has the bank details and an invoice number to use as the payment reference, and the invoice PDF in their email.
 
-**An order comes in by DM.** Open **New order**, enter the quantity and the customer's name (the rest is optional), and tap **Create order**. Tap **Copy invoice** and paste it into the DM. It has the bank details and the reference.
+**An order comes in by DM.** Open **New order**, enter the quantity and the customer's name (the rest is optional), and tap **Create order**. Tap **Copy invoice** and paste it into the DM. It has the bank details and the reference. If you filled in their email, the PDF is emailed as well.
 
-**Money arrives.** Find the invoice number in the bank statement reference. In the app tap **Mark paid** on that order, then **Yes, mark paid**. The order moves to **Paid** with a **Copy invoice** button. Paste the paid invoice into the DM.
+**Money arrives.** Find the invoice number in the bank statement reference. In the app tap **Mark paid** on that order, then **Yes, mark paid**. If the order has an email address, the paid invoice PDF is emailed straight away. The order moves to **Paid** with a **Copy invoice** button, so you can paste the paid invoice into the DM too.
+
+**Customer cannot find the email.** Tap **More** on the order, then **Email invoice**. It sends the invoice as it is now: unpaid with bank details, or paid. The order shows when the invoice was last emailed. To add or fix an email address, edit the **Email** column in the sheet.
 
 **Delivered.** Tap **Mark delivered** on the order under **Paid**. Tap an address to open it in Maps and a phone number to call.
 
@@ -108,7 +110,7 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 - **Price, delivery fee, bank details, brand, alert email:** the **Settings** tab on Greg's page. Orders already placed keep the price they were placed at.
 - **The same settings in the sheet:** the **Settings** tab of the Google Sheet works too. The page is safer because it checks what you type.
-- **Changing `Code.gs`:** after pasting new code choose **Deploy > Manage deployments**, click the pencil, set **Version** to **New version**, and **Deploy**. The web app address stays the same. Without this step the live service keeps running the old code.
+- **Changing `Code.gs`:** paste the new code, save, and run `setup` once more (it keeps your settings, key and orders, and adds any new columns). Then choose **Deploy > Manage deployments**, click the pencil, set **Version** to **New version**, and **Deploy**. The web app address stays the same. Without this step the live service keeps running the old code. If Google asks for permission again, allow it as in Part 1.
 - **If the admin key leaks or Greg loses his phone:** run `rotateAdminKey` in the script editor. The old link stops working. Give Greg the new key and link.
 - **Invoice prefix:** `SJ` by default, changeable in Settings. Numbers always continue; a number is never reused, even if you delete rows.
 
@@ -133,14 +135,16 @@ Nothing is tied to your accounts except where the pieces live, so moving is a fe
 - **Admin actions** need the admin key. Customers never see it, and the bank details are only returned to someone who has just placed an order, or to Greg.
 - **Customer text** is never trusted: it is shown as plain text, length-limited, and stored so Sheets cannot read it as a formula.
 - **Spam:** the order page has a hidden field that bots fill in, and accepts at most 12 orders an hour. Orders Greg enters himself are not limited.
+- **Invoice emails** are made on the server: the invoice is written as a page and Apps Script turns it into a PDF. They come from the Google account that deployed the script, show the brand name as the sender, and replies go to the **Email me new orders** address. A failed email never fails the order; it shows as an invoice that was not emailed, and **Email invoice** tries again.
+- **Email limits:** a free Google account can send to about 100 addresses a day. Each order from the order page uses two (Greg's alert and the customer's invoice), and marking it paid uses one more. That is plenty for a small shop. A Google Workspace account allows 1,500.
 
 ### Not included, on purpose
 
-One product only. No stock counts. No card payments. No automatic bank matching. No refunds or partial payments. No emails to customers: the invoice is pasted into the DM. Fake orders from the order page are possible; they sit under **Awaiting payment** and can be cancelled.
+One product only. No stock counts. No card payments. No automatic bank matching. No refunds or partial payments. No email reminders for unpaid orders. Fake orders from the order page are possible; they sit under **Awaiting payment** and can be cancelled. Someone could type a stranger's email into the order page, who would then get one invoice email; the hourly cap limits this.
 
 ### Privacy
 
-The sheet holds customers' names, contacts and delivery addresses. Do not share the sheet. Share only the admin link, and only with the person who runs the orders.
+The sheet holds customers' names, contacts, email addresses and delivery addresses. Do not share the sheet. Share only the admin link, and only with the person who runs the orders.
 
 ## Troubleshooting
 
@@ -154,6 +158,8 @@ The sheet holds customers' names, contacts and delivery addresses. Do not share 
 | A code change has no effect | The live web app still runs the old version | **Deploy > Manage deployments > pencil > New version** |
 | Times are wrong | The script time zone | Use `apps-script/appsscript.json` (Part 1, step 4) |
 | No alert emails | Email blank or mistyped, or in spam | Check **Settings > Email me new orders**. Mail comes from the Google account that deployed the script |
+| A customer got no invoice email | Spam folder, a mistyped address, or the daily email limit | Ask them to check spam. Check the **Email** column. Then **More > Email invoice**. If it says it could not be sent, try again tomorrow |
+| Orders have no **Email** column | `setup` was not run after updating `Code.gs` | Run `setup` once. It adds the columns and keeps everything else |
 | Copy invoice does nothing | The in-app browser blocks copying | The invoice text is shown on the screen. Press and hold to select it |
 
 ## Trying it on your computer

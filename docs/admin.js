@@ -408,6 +408,7 @@
     row.appendChild(el('span', null, 'Ordered ' + SJ.formatWhen(o.created)));
     if (o.paidOn) row.appendChild(el('span', null, 'Paid ' + SJ.formatWhen(o.paidOn)));
     if (o.deliveredOn) row.appendChild(el('span', null, 'Delivered ' + SJ.formatWhen(o.deliveredOn)));
+    if (o.emailedOn) row.appendChild(el('span', null, 'Invoice emailed ' + SJ.formatWhen(o.emailedOn)));
     row.appendChild(el('span', null, o.source === 'kiosk' ? 'From the order page' : 'DM order'));
     return row;
   }
@@ -441,6 +442,7 @@
 
     var contact = contactNode(o.contact);
     if (contact) card.appendChild(labelled('Contact', contact));
+    if (o.email) card.appendChild(labelled('Email', el('a', { href: 'mailto:' + o.email }, o.email)));
     if (o.address) card.appendChild(labelled('Address', addressNode(o.address)));
     if (o.notes) card.appendChild(labelled('Note', o.notes));
 
@@ -542,25 +544,27 @@
     }
 
     var saving = 'Saving…';
+    // Only orders with an email address can have the invoice emailed again.
+    var resend = o.email ? [{ label: 'Email invoice', role: 'email', run: function () { emailInvoice(o); } }] : [];
     var row = el('div', { class: 'order-actions' });
     if (o.status === AWAITING) {
       row.appendChild(actionButton(working ? saving : 'Mark paid', 'btn-primary', 'mark-paid', function () { askConfirm(o, 'paid'); }, working));
       row.appendChild(invoiceButton(o, working));
-      row.appendChild(moreMenu(o, [
+      row.appendChild(moreMenu(o, resend.concat([
         { label: 'Cancel order', role: 'cancel', danger: true, run: function () { askConfirm(o, 'cancel'); } }
-      ], working));
+      ]), working));
     } else if (o.status === PAID) {
       row.appendChild(actionButton(working ? saving : 'Mark delivered', 'btn-primary', 'mark-delivered', function () { setStatus(o, DELIVERED); }, working));
       row.appendChild(invoiceButton(o, working));
-      row.appendChild(moreMenu(o, [
+      row.appendChild(moreMenu(o, resend.concat([
         { label: 'Undo paid', role: 'undo-paid', run: function () { setStatus(o, AWAITING); } },
         { label: 'Cancel order', role: 'cancel', danger: true, run: function () { askConfirm(o, 'cancel'); } }
-      ], working));
+      ]), working));
     } else if (o.status === DELIVERED) {
       row.appendChild(invoiceButton(o, working));
-      row.appendChild(moreMenu(o, [
+      row.appendChild(moreMenu(o, resend.concat([
         { label: 'Undo delivered', role: 'undo-delivered', run: function () { setStatus(o, PAID); } }
-      ], working));
+      ]), working));
     } else if (o.status === CANCELLED) {
       row.appendChild(actionButton(working ? saving : 'Reopen order', 'btn-quiet', 'reopen', function () { setStatus(o, AWAITING); }, working));
     }
@@ -604,7 +608,9 @@
         state.filter = 'paid';
         state.focus = { invoice: inv, role: 'copy' };
         flashOrder(inv);
-        SJ.toast(inv + ' marked paid. Copy the invoice to send it.');
+        if (res.emailed === true) SJ.toast(inv + ' marked paid. The paid invoice was emailed to ' + res.order.email + '.');
+        else if (res.emailed === false) SJ.toast(inv + ' marked paid, but the invoice email did not send. Copy the invoice, or try More > Email invoice later.', 'bad');
+        else SJ.toast(inv + ' marked paid. Copy the invoice to send it.');
       } else {
         renderOrders();
         if (target === PAID) SJ.toast(inv + ' is back under Paid.');
@@ -612,6 +618,31 @@
         else if (target === CANCELLED) SJ.toast(inv + ' cancelled.');
         else SJ.toast(inv + ' is waiting for payment again.');
       }
+    } catch (err) {
+      state.working = null;
+      if (err.code === 'unauthorized') {
+        lock(err.message);
+        return;
+      }
+      SJ.toast(err.message, 'bad');
+      if (err.code === 'invalid' || err.code === 'not_found') refresh({ quiet: true });
+      else renderOrders();
+    }
+  }
+
+  async function emailInvoice(o) {
+    if (state.working) return;
+    state.working = o.invoice;
+    state.preview = null;
+    renderOrders();
+    try {
+      var res = await SJ.api('sendInvoice', { key: state.key, invoice: o.invoice });
+      state.version++;
+      replaceOrder(res.order);
+      state.working = null;
+      state.focus = { invoice: o.invoice, role: primaryRole(res.order) };
+      renderOrders();
+      SJ.toast('Invoice ' + o.invoice + ' emailed to ' + res.order.email + '.');
     } catch (err) {
       state.working = null;
       if (err.code === 'unauthorized') {
@@ -668,6 +699,7 @@
 
     var data = {
       name: $('n-name').value.trim(),
+      email: $('n-email').value.trim(),
       contact: $('n-contact').value.trim(),
       address: $('n-address').value.trim(),
       notes: $('n-notes').value.trim(),
@@ -678,8 +710,13 @@
       $('n-name').focus();
       return;
     }
+    if (data.email && !SJ.isEmail(data.email)) {
+      showNewError('Check the email address. It should look like name@example.com.');
+      $('n-email').focus();
+      return;
+    }
 
-    var sig = JSON.stringify([data.name, data.contact, data.address, data.notes, data.qty]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty]);
     if (!newPending || newPending.sig !== sig) newPending = { sig: sig, id: SJ.newRequestId() };
 
     setNewBusy(true);
@@ -725,7 +762,9 @@
 
     result.appendChild(el('div', null,
       el('h2', { class: 'section-title', id: 'created-title', tabindex: '-1' }, o.invoice + ' created'),
-      el('p', { class: 'lede' }, 'Send this to ' + o.name + ' in your DM. It has the bank details and the reference to use.')));
+      el('p', { class: 'lede' }, 'Send this to ' + o.name + ' in your DM. It has the bank details and the reference to use.'),
+      res.emailed === true ? el('p', { class: 'fine' }, 'The invoice PDF was also emailed to ' + o.email + '.') : null,
+      res.emailed === false ? el('p', { class: 'fine' }, 'The invoice email to ' + o.email + ' did not send. You can try again from the order under More.') : null));
     result.appendChild(preview);
     result.appendChild(copy);
     result.appendChild(el('div', { class: 'actions actions--pair' },
@@ -753,7 +792,7 @@
 
   function resetNewForm() {
     newPending = null;
-    ['n-name', 'n-contact', 'n-address', 'n-notes'].forEach(function (id) { $(id).value = ''; });
+    ['n-name', 'n-email', 'n-contact', 'n-address', 'n-notes'].forEach(function (id) { $(id).value = ''; });
     if (newStepper) newStepper.set(1);
     $('n-error').hidden = true;
     $('new-form').hidden = false;

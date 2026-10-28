@@ -100,6 +100,11 @@
     return null;
   }
 
+  // The same rule as the server.
+  function isEmail(s) {
+    return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s || ''));
+  }
+
   function newRequestId() {
     if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID().replace(/-/g, '');
     var bytes = new Uint8Array(16);
@@ -334,6 +339,7 @@
     formatDay: formatDay,
     dayOf: dayOf,
     instagramUrl: instagramUrl,
+    isEmail: isEmail,
     newRequestId: newRequestId,
     invoiceText: invoiceText,
     el: el,

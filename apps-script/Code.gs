@@ -11,8 +11,11 @@
  * which avoids a CORS preflight request (Apps Script cannot answer one).
  *
  * Public actions   config, order
- * Admin actions    list, create, setStatus, getSettings, saveSettings
+ * Admin actions    list, create, setStatus, sendInvoice, getSettings, saveSettings
  *                  (all need the admin key kept in Script properties)
+ *
+ * Customers with an email address get their invoice as a PDF: the unpaid one
+ * when the order is placed, the paid one when it is marked paid.
  *
  * Run setup() once after pasting this in. See README.md.
  */
@@ -33,14 +36,19 @@ const MAX_ORDERS_LISTED = 500;
 
 const HEADERS = [
   'Invoice', 'Created', 'Source', 'Name', 'Contact', 'Address', 'Notes',
-  'Qty', 'Unit price', 'Delivery fee', 'Total', 'Status', 'Paid on', 'Delivered on', 'Request ID'
+  'Qty', 'Unit price', 'Delivery fee', 'Total', 'Status', 'Paid on', 'Delivered on', 'Request ID',
+  'Email', 'Invoice emailed'
 ];
+// New columns go at the end, so rows written by an older version still line up.
 const COL = {
   INVOICE: 0, CREATED: 1, SOURCE: 2, NAME: 3, CONTACT: 4, ADDRESS: 5, NOTES: 6,
-  QTY: 7, PRICE: 8, FEE: 9, TOTAL: 10, STATUS: 11, PAID: 12, DELIVERED: 13, REQUEST: 14
+  QTY: 7, PRICE: 8, FEE: 9, TOTAL: 10, STATUS: 11, PAID: 12, DELIVERED: 13, REQUEST: 14,
+  EMAIL: 15, EMAILED: 16
 };
 // Text columns are stored as plain text so Sheets never turns input into a formula or a date.
-const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@'];
+const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@'];
+
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const STATUS = {
   AWAITING: 'Awaiting payment',
@@ -119,6 +127,7 @@ function handle_(body) {
       case 'list': return listOrders_();
       case 'create': return createOrder_(body, 'dm');
       case 'setStatus': return setStatus_(body);
+      case 'sendInvoice': return sendInvoice_(body);
       case 'getSettings': return { ok: true, values: readSettings_() };
       case 'saveSettings': return saveSettings_(body);
       default: throw fail_('bad_request', 'Unknown action.');
@@ -159,13 +168,15 @@ function createOrder_(body, source) {
 
   const name = clean_(body.name, 80);
   const contact = clean_(body.contact, 80);
+  const email = clean_(body.email, 120);
   const address = clean_(body.address, 300);
   const notes = clean_(body.notes, 300);
   const qty = Number(body.qty);
   const requestId = /^[A-Za-z0-9_-]{8,64}$/.test(String(body.requestId || '')) ? String(body.requestId) : '';
 
   if (!name) throw fail_('invalid', 'Please enter a name.');
-  if (kiosk && contact.length < 3) throw fail_('invalid', 'Please add an Instagram handle or phone number so we can reach you.');
+  if (kiosk && !email) throw fail_('invalid', 'Please enter your email address so we can send your invoice.');
+  if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
   if (kiosk && !address) throw fail_('invalid', 'Please enter your delivery address.');
   if (kiosk && body.areaConfirmed !== true) throw fail_('invalid', 'Please confirm your address is inside the delivery area.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
@@ -209,7 +220,8 @@ function createOrder_(body, source) {
       invoice, nowString_(), source,
       safe_(name), safe_(contact), safe_(address), safe_(notes),
       qty, settings.price, settings.fee, total,
-      STATUS.AWAITING, '', '', requestId
+      STATUS.AWAITING, '', '', requestId,
+      safe_(email), ''
     ];
     writeRow_(sheet, sheet.getLastRow() + 1, row);
     SpreadsheetApp.flush();
@@ -219,12 +231,15 @@ function createOrder_(body, source) {
   }
 
   if (kiosk) sendAlert_(order, settings);
-  return orderResponse_(order, settings);
+  const emailed = order.email ? emailInvoice_(order, settings) : undefined;
+  return orderResponse_(order, settings, emailed);
 }
 
-function orderResponse_(order, s) {
+// emailed: true or false when an invoice email was attempted, left out otherwise.
+function orderResponse_(order, s, emailed) {
   return {
     ok: true,
+    emailed: emailed,
     order: order,
     brand: s.brand,
     product: s.product,
@@ -259,6 +274,8 @@ function setStatus_(body) {
   } catch (err) {
     throw fail_('busy', 'Busy right now. Please try again.');
   }
+  let order;
+  let sendPaidInvoice = false;
   try {
     const sheet = ordersSheet_();
     const rowNum = findRow_(sheet, invoice);
@@ -284,10 +301,30 @@ function setStatus_(body) {
     }
     sheet.getRange(rowNum, COL.STATUS + 1, 1, 3).setValues([[row[COL.STATUS], row[COL.PAID], row[COL.DELIVERED]]]);
     SpreadsheetApp.flush();
-    return { ok: true, order: rowToOrder_(row) };
+    order = rowToOrder_(row);
+    // Only a fresh payment sends the paid invoice. Undoing "delivered" does not send it again.
+    sendPaidInvoice = current === STATUS.AWAITING && target === STATUS.PAID && !!order.email;
   } finally {
     lock.releaseLock();
   }
+  const out = { ok: true, order: order };
+  if (sendPaidInvoice) out.emailed = emailInvoice_(order, readTypedSettings_());
+  return out;
+}
+
+// Greg sends the invoice again, for example when the customer cannot find it.
+function sendInvoice_(body) {
+  const invoice = clean_(body.invoice, 32);
+  const sheet = ordersSheet_();
+  const rowNum = findRow_(sheet, invoice);
+  if (!rowNum) throw fail_('not_found', 'Order ' + invoice + ' was not found.');
+  const order = rowToOrder_(sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0]);
+  if (!order.email) throw fail_('invalid', 'Order ' + order.invoice + ' has no email address.');
+  if (order.status === STATUS.CANCELLED) throw fail_('invalid', 'Order ' + order.invoice + ' is cancelled.');
+  if (!emailInvoice_(order, readTypedSettings_())) {
+    throw fail_('email_failed', 'The invoice email could not be sent. Please try again later.');
+  }
+  return { ok: true, order: order, emailed: true };
 }
 
 function rowToOrder_(r) {
@@ -305,7 +342,9 @@ function rowToOrder_(r) {
     total: Number(r[COL.TOTAL]) || 0,
     status: str_(r[COL.STATUS]),
     paidOn: str_(r[COL.PAID]),
-    deliveredOn: str_(r[COL.DELIVERED])
+    deliveredOn: str_(r[COL.DELIVERED]),
+    email: str_(r[COL.EMAIL]),
+    emailedOn: str_(r[COL.EMAILED])
   };
 }
 
@@ -369,7 +408,7 @@ function takeKioskSlot_() {
 }
 
 function sendAlert_(order, s) {
-  if (!s.alertEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.alertEmail)) return;
+  if (!EMAIL_PATTERN.test(s.alertEmail)) return;
   try {
     const subject = 'New order ' + order.invoice + ': ' + order.qty + ' x ' + s.product + ' (' + money_(order.total, s.currency) + ')';
     const lines = [
@@ -389,6 +428,142 @@ function sendAlert_(order, s) {
   } catch (err) {
     console.error('Alert email failed: ' + err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Invoice emails
+// ---------------------------------------------------------------------------
+
+// Emails the invoice to the customer as a PDF and notes the time on the order.
+// Returns true when sent. Never throws: a failed email must not fail the order.
+function emailInvoice_(order, s) {
+  if (!EMAIL_PATTERN.test(order.email)) return false;
+  try {
+    if (MailApp.getRemainingDailyQuota() < 1) throw new Error('the daily email quota is used up');
+    const pdf = Utilities.newBlob(invoiceHtml_(order, s), 'text/html', order.invoice + '.html')
+      .getAs('application/pdf')
+      .setName(order.invoice + '.pdf');
+    const message = {
+      to: order.email,
+      subject: s.brand + ' invoice ' + order.invoice + (isPaid_(order) ? ' (paid)' : ''),
+      body: 'Hi ' + order.name + ',\n\nYour invoice is attached.\n\n' + invoiceText_(order, s),
+      name: s.brand,
+      attachments: [pdf]
+    };
+    // Mail comes from the account that deployed the script. Replies go to Greg.
+    if (EMAIL_PATTERN.test(s.alertEmail)) message.replyTo = s.alertEmail;
+    MailApp.sendEmail(message);
+  } catch (err) {
+    console.error('Invoice email failed for ' + order.invoice + ': ' + err);
+    return false;
+  }
+  order.emailedOn = nowString_();
+  try {
+    const sheet = ordersSheet_();
+    const rowNum = findRow_(sheet, order.invoice);
+    if (rowNum) sheet.getRange(rowNum, COL.EMAILED + 1).setNumberFormat('@').setValue(order.emailedOn);
+  } catch (err) {
+    console.error('Could not note the invoice email for ' + order.invoice + ': ' + err);
+  }
+  return true;
+}
+
+function isPaid_(order) {
+  return order.status === STATUS.PAID || order.status === STATUS.DELIVERED;
+}
+
+// The same wording as the invoice Greg copies into DMs (invoiceText in docs/shared.js).
+function invoiceText_(o, s) {
+  const paid = isPaid_(o);
+  const b = s.bank;
+  const lines = [
+    s.brand.toUpperCase(),
+    'Invoice ' + o.invoice + (paid ? ' (PAID)' : ''),
+    'Date: ' + formatDay_(o.created)
+  ];
+  if (paid && o.paidOn) lines.push('Paid: ' + formatDay_(o.paidOn));
+  lines.push('', 'For: ' + o.name);
+  lines.push(o.qty + ' x ' + s.product + ' @ ' + money_(o.price, s.currency) + ' = ' + money_(lineTotal_(o), s.currency));
+  lines.push('Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free'));
+  lines.push((paid ? 'Total paid: ' : 'Total due: ') + money_(o.total, s.currency));
+  if (paid) {
+    lines.push('', 'Thank you for your order.');
+  } else {
+    lines.push('', 'Pay by bank transfer');
+    if (b.name) lines.push('Bank: ' + b.name);
+    if (b.holder) lines.push('Account holder: ' + b.holder);
+    if (b.number) lines.push('Account number: ' + b.number);
+    if (b.branch) lines.push('Branch code: ' + b.branch);
+    if (b.type) lines.push('Account type: ' + b.type);
+    lines.push('Amount: ' + money_(o.total, s.currency));
+    lines.push('Reference: ' + o.invoice);
+    if (s.paymentNote) lines.push('', s.paymentNote);
+  }
+  return lines.join('\n');
+}
+
+// The PDF invoice, written as HTML for Apps Script to convert. Every value is escaped.
+function invoiceHtml_(o, s) {
+  const paid = isPaid_(o);
+  const b = s.bank;
+  const m = function (n) { return esc_(money_(n, s.currency)); };
+  const detail = function (label, value) {
+    return value ? '<tr><td class="k">' + esc_(label) + '</td><td>' + esc_(value) + '</td></tr>' : '';
+  };
+
+  const parts = [];
+  parts.push(
+    '<html><head><meta charset="utf-8"><style>',
+    'body{font-family:Arial,Helvetica,sans-serif;color:#0b1d3a;font-size:12pt;margin:32px}',
+    'h1{font-size:26pt;margin:0;letter-spacing:1px}',
+    '.top{border-bottom:4px solid #ffd21f;padding-bottom:12px;margin-bottom:20px}',
+    '.no{font-size:16pt;font-weight:bold;margin:6px 0 0}',
+    '.stamp{color:#1d7a46;border:2px solid #1d7a46;padding:2px 8px;font-size:11pt}',
+    'table{border-collapse:collapse;width:100%;margin:12px 0}',
+    'td,th{padding:7px 4px;text-align:left;border-bottom:1px solid #d6dbe4}',
+    'th{font-size:10pt;color:#4a5872;text-transform:uppercase}',
+    '.r{text-align:right}',
+    '.total td{font-weight:bold;font-size:13pt;border-bottom:none}',
+    '.k{color:#4a5872;width:40%}',
+    'h2{font-size:13pt;margin:24px 0 4px}',
+    'p{margin:4px 0}',
+    '.note{color:#4a5872;font-size:10pt;margin-top:16px}',
+    '</style></head><body>'
+  );
+  parts.push(
+    '<div class="top"><h1>' + esc_(s.brand.toUpperCase()) + '</h1>',
+    '<p class="no">Invoice ' + esc_(o.invoice) + (paid ? ' <span class="stamp">PAID</span>' : '') + '</p>',
+    '<p>Date: ' + esc_(formatDay_(o.created)) + '</p>',
+    paid && o.paidOn ? '<p>Paid: ' + esc_(formatDay_(o.paidOn)) + '</p>' : '',
+    '</div>'
+  );
+  parts.push('<p><strong>For:</strong> ' + esc_(o.name) + '</p>');
+  if (o.address) parts.push('<p><strong>Deliver to:</strong> ' + esc_(o.address) + '</p>');
+  parts.push(
+    '<table><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>',
+    '<tr><td>' + esc_(s.product) + '</td><td class="r">' + o.qty + '</td><td class="r">' + m(o.price) + '</td><td class="r">' + m(lineTotal_(o)) + '</td></tr>',
+    '<tr><td>Delivery</td><td></td><td></td><td class="r">' + (o.fee > 0 ? m(o.fee) : 'Free') + '</td></tr>',
+    '<tr class="total"><td>' + (paid ? 'Total paid' : 'Total due') + '</td><td></td><td></td><td class="r">' + m(o.total) + '</td></tr>',
+    '</table>'
+  );
+  if (paid) {
+    parts.push('<h2>Thank you for your order.</h2>');
+  } else {
+    parts.push(
+      '<h2>Pay by bank transfer</h2><table>',
+      detail('Bank', b.name), detail('Account holder', b.holder), detail('Account number', b.number),
+      detail('Branch code', b.branch), detail('Account type', b.type),
+      detail('Amount', money_(o.total, s.currency)), detail('Reference', o.invoice),
+      '</table>'
+    );
+    if (s.paymentNote) parts.push('<p class="note">' + esc_(s.paymentNote) + '</p>');
+  }
+  parts.push('</body></html>');
+  return parts.join('');
+}
+
+function lineTotal_(o) {
+  return Math.round(o.price * 100) * o.qty / 100;
 }
 
 // ---------------------------------------------------------------------------
@@ -523,7 +698,7 @@ function validateSetting_(key, value) {
       if (!/^[A-Za-z0-9]{1,6}$/.test(text)) throw fail_('invalid', 'Invoice prefix must be 1 to 6 letters or digits.');
       return text.toUpperCase();
     case 'alert_email':
-      if (text !== '' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text)) throw fail_('invalid', 'That email address does not look right.');
+      if (text !== '' && !EMAIL_PATTERN.test(text)) throw fail_('invalid', 'That email address does not look right.');
       return text;
     case 'brand_name':
     case 'product_name':
@@ -617,6 +792,20 @@ function nowString_() {
   return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "2026-10-28 15:41" -> "28 Oct 2026"
+function formatDay_(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '');
+  return m ? Number(m[3]) + ' ' + MONTHS[Number(m[2]) - 1] + ' ' + m[1] : str_(s);
+}
+
+// Text for HTML.
+function esc_(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ---------------------------------------------------------------------------
 // One-off functions, run from the Apps Script editor
 // ---------------------------------------------------------------------------
@@ -634,7 +823,7 @@ function setup() {
   FORMATS.forEach(function (format, i) {
     orders.getRange(2, i + 1, orders.getMaxRows() - 1, 1).setNumberFormat(format);
   });
-  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120].forEach(function (w, i) {
+  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130].forEach(function (w, i) {
     orders.setColumnWidth(i + 1, w);
   });
 

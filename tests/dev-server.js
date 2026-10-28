@@ -59,19 +59,19 @@ function seed(gas, key) {
   const move = (invoice, status) => expectOk(gas.call({ action: 'setStatus', key, invoice, status }));
 
   at(gas, '2026-10-26T06:12:00Z');
-  kiosk({ name: 'Thandi Mokoena', contact: '@thandi.runs', address: '14 Beach Rd, Sea Point', qty: 3 });
+  kiosk({ name: 'Thandi Mokoena', email: 'thandi@example.com', contact: '@thandi.runs', address: '14 Beach Rd, Sea Point', qty: 3 });
   at(gas, '2026-10-26T08:03:00Z');
   move('SJ-0001', 'Paid');
   at(gas, '2026-10-26T15:30:00Z');
   move('SJ-0001', 'Delivered');
 
   at(gas, '2026-10-26T10:00:00Z');
-  kiosk({ name: 'Naledi Khumalo', contact: '@naledik', address: '8 Church St, Woodstock', qty: 2 });
+  kiosk({ name: 'Naledi Khumalo', email: 'naledi@example.com', contact: '@naledik', address: '8 Church St, Woodstock', qty: 2 });
   at(gas, '2026-10-26T11:20:00Z');
   move('SJ-0002', 'Cancelled');
 
   at(gas, '2026-10-27T17:40:00Z');
-  kiosk({ name: 'Liam Peters', contact: '082 555 0147', address: '3 Kloof Nek Rd, Tamboerskloof', qty: 1, notes: 'Leave with the guard' });
+  kiosk({ name: 'Liam Peters', email: 'liam@example.com', contact: '082 555 0147', address: '3 Kloof Nek Rd, Tamboerskloof', qty: 1, notes: 'Leave with the guard' });
   at(gas, '2026-10-27T19:05:00Z');
   move('SJ-0003', 'Paid');
 
@@ -80,7 +80,7 @@ function seed(gas, key) {
 
   at(gas, '2026-10-28T05:30:00Z');
   kiosk({
-    name: 'Pieter van der Merwe', contact: '0719876543', address: '22 Main Rd, Claremont', qty: 5,
+    name: 'Pieter van der Merwe', email: 'pieter@example.com', contact: '0719876543', address: '22 Main Rd, Claremont', qty: 5,
     notes: 'Gate code 4412. Please call on arrival.'
   });
 

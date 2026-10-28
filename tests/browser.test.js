@@ -53,11 +53,12 @@ async function openAdmin(t, opts) {
 
 async function fillKiosk(page, over) {
   const d = Object.assign({
-    name: 'Jane Doe', contact: '@jane.runs', address: '12 Beach Rd, Sea Point', notes: '', area: true, more: 0
+    name: 'Jane Doe', email: 'jane@example.com', contact: '@jane.runs', address: '12 Beach Rd, Sea Point', notes: '', area: true, more: 0
   }, over);
   await page.waitForSelector('#order-form:not([hidden])');
   for (let i = 0; i < d.more; i++) await page.click('[aria-label="One more"]');
   await page.fill('#name', d.name);
+  await page.fill('#email', d.email);
   await page.fill('#contact', d.contact);
   await page.fill('#address', d.address);
   await page.fill('#notes', d.notes);
@@ -126,9 +127,14 @@ test('order page: placing an order shows the invoice number and bank details, an
   assert.equal(rows[0].Status, 'Awaiting payment');
   assert.equal(rows[0].Notes, 'Ring twice');
 
-  // Greg is emailed.
-  assert.equal(dev.gas.mail.length, 1);
+  assert.equal(rows[0].Email, 'jane@example.com');
+
+  // Greg is emailed, and so is the customer, with the invoice PDF.
+  assert.equal(dev.gas.mail.length, 2);
   assert.match(dev.gas.mail[0].subject, /New order SJ-0001: 3 x Running gel sachet \(R150\)/);
+  assert.equal(dev.gas.mail[1].to, 'jane@example.com');
+  assert.equal(dev.gas.mail[1].attachments[0].getName(), 'SJ-0001.pdf');
+  assert.match(await text(page, '#done-email'), /We have emailed your invoice to jane@example.com/);
 
   // The page talks to the service the way Apps Script needs: text/plain, so no preflight.
   const posts = dev.calls.filter((c) => c.method === 'POST');
@@ -151,7 +157,7 @@ test('order page: copy buttons put the right text on the clipboard', async (t) =
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'SJ-0001');
 
   await page.click('#copy-invoice');
-  const invoice = await page.evaluate(() => navigator.clipboard.readText());
+  const invoice = (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n');
   assert.match(invoice, /^SUPA JUICE\nInvoice SJ-0001\nDate: 28 Oct 2026\n/);
   assert.match(invoice, /2 x Running gel sachet @ R40 = R80\nDelivery: R30\nTotal due: R110/);
   assert.match(invoice, /Account number: 0012345678\n/);
@@ -187,11 +193,15 @@ test('order page: missing details are caught before anything is sent', async (t)
   assert.equal(await page.evaluate(() => document.activeElement.id), 'name');
 
   await page.fill('#name', 'Jane');
-  await page.fill('#contact', 'ab');
   await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Instagram handle or phone/);
+  assert.match(await text(page, '#form-error'), /Enter your email address/);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'email');
 
-  await page.fill('#contact', '@jane');
+  await page.fill('#email', 'jane@example');
+  await page.click('#submit');
+  assert.match(await text(page, '#form-error'), /Check your email address/);
+
+  await page.fill('#email', 'jane@example.com');
   await page.click('#submit');
   assert.match(await text(page, '#form-error'), /delivery address/);
 
@@ -336,7 +346,8 @@ const store = (page, key) => page.evaluate((k) => {
   return v === null ? null : JSON.parse(v);
 }, key);
 
-const clipboard = (page) => page.evaluate(() => navigator.clipboard.readText());
+// Windows hands back copied line breaks as \r\n.
+const clipboard = (page) => page.evaluate(() => navigator.clipboard.readText()).then((s) => s.replace(/\r\n/g, '\n'));
 
 async function chip(page, id) {
   await page.click('[data-role="chip-' + id + '"]');
@@ -500,7 +511,7 @@ test('admin: marking an order paid asks first, then moves it to Paid, ready to c
 
   await c5.locator('[data-role="mark-paid"]').click();
   await c5.getByRole('button', { name: 'Yes, mark paid' }).click();
-  await toast(page, 'SJ-0005 marked paid. Copy the invoice to send it.');
+  await toast(page, 'SJ-0005 marked paid. The paid invoice was emailed to pieter@example.com.');
 
   // Greg lands on the Paid list with the order highlighted and the Copy button ready.
   assert.equal(await page.getAttribute('[data-role="chip-paid"]', 'aria-pressed'), 'true');
@@ -648,7 +659,7 @@ test('admin: Refresh and coming back to the page pick up new orders', async (t) 
   const { dev, page } = await openAdmin(t);
   await page.waitForSelector('.order');
   const place = (name) => dev.gas.call({
-    action: 'order', name, contact: '@x_' + name.toLowerCase(), address: '1 Test St', notes: '', qty: 1,
+    action: 'order', email: 'buyer@example.com', name, contact: '@x_' + name.toLowerCase(), address: '1 Test St', notes: '', qty: 1,
     areaConfirmed: true, requestId: 'req' + name + '0123456789', expectedTotal: 70, website: ''
   });
 
@@ -704,7 +715,7 @@ test('admin: customer text is shown as plain text, never as page code', async (t
   const { dev, page } = await open(t);
   const evil = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>';
   const res = dev.gas.call({
-    action: 'order', name: evil, contact: '@evil_one', address: '<b>1 Test St</b>', notes: evil, qty: 1,
+    action: 'order', email: 'buyer@example.com', name: evil, contact: '@evil_one', address: '<b>1 Test St</b>', notes: evil, qty: 1,
     areaConfirmed: true, requestId: 'evilrequest0123456', expectedTotal: 70, website: ''
   });
   assert.equal(res.ok, true);
@@ -767,6 +778,53 @@ test('admin: a DM order is created, shows the invoice to send, and appears in th
   await page.getByRole('button', { name: 'New order' }).last().click();
   assert.equal(await page.inputValue('#n-name'), '');
   assert.equal(await page.inputValue('#n-qty'), '1');
+  noErrors(errors);
+});
+
+test('admin: a DM order with an email gets the invoice PDF, and a bad address is caught first', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await page.click('.tab[data-tab="new"]');
+  await page.fill('#n-name', 'Zanele Dlamini');
+  await page.fill('#n-email', 'zanele@example');
+  await page.click('#n-submit');
+  assert.match(await text(page, '#n-error'), /Check the email address/);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'n-email');
+
+  const mailBefore = dev.gas.mail.length;
+  await page.fill('#n-email', 'zanele@example.com');
+  await page.click('#n-submit');
+  await page.waitForSelector('#new-result:not([hidden])');
+  assert.match(await text(page, '#new-result'), /The invoice PDF was also emailed to zanele@example.com/);
+  assert.equal(dev.gas.mail.length, mailBefore + 1);
+  assert.equal(dev.gas.mail[mailBefore].to, 'zanele@example.com');
+  assert.equal(serverStatus(dev, 'SJ-0006').Email, 'zanele@example.com');
+  noErrors(errors);
+});
+
+test('admin: an order shows its email and when the invoice was emailed, and can email it again', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  const c5 = card(page, 'SJ-0005');
+  const link = c5.getByRole('link', { name: 'pieter@example.com' });
+  assert.equal(await link.getAttribute('href'), 'mailto:pieter@example.com');
+  assert.match(await c5.innerText(), /Invoice emailed Wed 28 Oct, 07:30/);
+
+  // The DM order without an email has nothing to resend.
+  await card(page, 'SJ-0004').locator('details.more > summary').click();
+  assert.equal(await card(page, 'SJ-0004').locator('[data-role="email"]').count(), 0);
+
+  const mailBefore = dev.gas.mail.length;
+  await more(page, 'SJ-0005', 'Email invoice');
+  await toast(page, 'Invoice SJ-0005 emailed to pieter@example.com.');
+  assert.equal(dev.gas.mail.length, mailBefore + 1);
+  assert.match(await card(page, 'SJ-0005').innerText(), /Invoice emailed Wed 28 Oct, 15:41/);
+
+  // When sending fails, Greg is told and the order is unchanged.
+  dev.gas.mailQuota.left = 0;
+  await more(page, 'SJ-0005', 'Email invoice');
+  await toast(page, /could not be sent/);
+  assert.equal(serverStatus(dev, 'SJ-0005').Status, 'Awaiting payment');
   noErrors(errors);
 });
 
@@ -947,7 +1005,7 @@ test('storage blocked: Greg can still sign in with his link and work through the
   await page.waitForSelector('.order');
   await card(page, 'SJ-0005').locator('[data-role="mark-paid"]').click();
   await card(page, 'SJ-0005').getByRole('button', { name: 'Yes, mark paid' }).click();
-  await toast(page, 'SJ-0005 marked paid. Copy the invoice to send it.');
+  await toast(page, 'SJ-0005 marked paid. The paid invoice was emailed to pieter@example.com.');
   noErrors(errors);
 });
 
@@ -1148,7 +1206,7 @@ for (const width of [320, 390, 768, 1280]) {
 
     const a = await open(t, { mode: 'seeded', width, mobile: width < 768 });
     a.dev.gas.call({
-      action: 'order', name: 'Averyveryveryveryverylongnamewithoutanybreakswhatsoever Surname', contact: '@a_really_long_handle_that_goes_on',
+      action: 'order', email: 'buyer@example.com', name: 'Averyveryveryveryverylongnamewithoutanybreakswhatsoever Surname', contact: '@a_really_long_handle_that_goes_on',
       address: 'Unit1204TheExtraordinarilyLongBuildingNameWithoutSpaces 123456789 Street', notes: 'x'.repeat(250), qty: 20,
       areaConfirmed: true, requestId: 'longrequest0123456789', expectedTotal: 830, website: ''
     });
