@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Supa Juice orders</title>
+  <meta name="theme-color" content="#eef2f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#08142b" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23ffd21f'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-family='Arial Narrow,Arial,sans-serif' font-weight='800' font-size='36' fill='%230b1d3a'%3ESJ%3C/text%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/big-shoulders-display-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="topbar" id="topbar" hidden>
+    <div class="topbar-inner">
+      <div class="topbar-row">
+        <h1 class="wordmark" id="brand">Supa Juice</h1>
+        <button type="button" class="btn btn-quiet btn-small" id="lock">Lock</button>
+      </div>
+      <nav class="tabs" aria-label="Sections">
+        <button type="button" class="tab" data-tab="orders">Orders</button>
+        <button type="button" class="tab" data-tab="new">New order</button>
+        <button type="button" class="tab" data-tab="settings">Settings</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page page--wide" id="main">
+    <p id="loading" class="fine" role="status">Loading orders&hellip;</p>
+
+    <section id="login" class="stack-lg" hidden>
+      <div>
+        <h1 class="wordmark">Supa Juice</h1>
+        <p class="lede">Order desk. Open the private link you were given, or paste your admin key.</p>
+      </div>
+      <form id="login-form" class="stack" novalidate>
+        <div class="field">
+          <label for="key">Admin key</label>
+          <input id="key" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+          <p class="hint">It stays on this phone.</p>
+        </div>
+        <div class="alert alert-bad" id="login-error" role="alert" hidden></div>
+        <button type="submit" class="btn btn-primary btn-block">Open orders</button>
+      </form>
+    </section>
+
+    <section id="load-error" class="stack" hidden>
+      <h2 class="section-title">Orders did not load</h2>
+      <p id="load-error-text"></p>
+      <button type="button" class="btn btn-primary" id="load-retry">Try again</button>
+    </section>
+
+    <section id="panel-orders" class="stack-lg" hidden></section>
+
+    <section id="panel-new" class="stack-lg" hidden>
+      <div id="new-warning"></div>
+      <form id="new-form" class="stack-lg" novalidate>
+        <h2 class="section-title">Order from a DM</h2>
+        <div id="new-qty-slot"></div>
+        <div class="field">
+          <label for="n-name">Customer name</label>
+          <input id="n-name" type="text" autocomplete="off" maxlength="80">
+        </div>
+        <div class="field">
+          <label for="n-contact">Instagram handle or phone (optional)</label>
+          <input id="n-contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
+        </div>
+        <div class="field">
+          <label for="n-address">Delivery address (optional)</label>
+          <textarea id="n-address" rows="2" autocomplete="off" maxlength="300"></textarea>
+        </div>
+        <div class="field">
+          <label for="n-notes">Notes (optional)</label>
+          <input id="n-notes" type="text" autocomplete="off" maxlength="300">
+        </div>
+        <hr class="tear">
+        <dl class="summary" id="n-summary"></dl>
+        <div class="alert alert-bad" id="n-error" role="alert" hidden></div>
+        <button type="submit" class="btn btn-primary btn-block" id="n-submit">Create order</button>
+      </form>
+      <div id="new-result" class="stack-lg" hidden></div>
+    </section>
+
+    <section id="panel-settings" class="stack-lg" hidden>
+      <div id="settings-body"></div>
+    </section>
+
+    <noscript><p class="alert alert-bad">This page needs JavaScript.</p></noscript>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

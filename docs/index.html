@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Supa Juice</title>
+  <meta name="description" content="Order running gel sachets and pay by bank transfer.">
+  <meta name="theme-color" content="#eef2f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#08142b" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="Order from Supa Juice">
+  <meta property="og:description" content="Order running gel sachets and pay by bank transfer.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23ffd21f'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-family='Arial Narrow,Arial,sans-serif' font-weight='800' font-size='36' fill='%230b1d3a'%3ESJ%3C/text%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/big-shoulders-display-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main class="page stack-lg" id="app">
+    <header>
+      <h1 class="wordmark" id="brand">Supa Juice</h1>
+      <p class="lede" id="lede">Order below. Pay by bank transfer.</p>
+    </header>
+
+    <p id="view-loading" class="fine" role="status">Loading prices&hellip;</p>
+
+    <form id="order-form" class="stack-lg" novalidate hidden>
+      <div id="qty-slot"></div>
+
+      <div class="field">
+        <label for="name">Your name</label>
+        <input id="name" type="text" autocomplete="name" maxlength="80">
+      </div>
+
+      <div class="field">
+        <label for="contact">Instagram handle or phone number</label>
+        <input id="contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
+        <p class="hint">So we can confirm your payment and send your invoice.</p>
+      </div>
+
+      <div class="field">
+        <label for="address">Delivery address</label>
+        <textarea id="address" autocomplete="street-address" rows="3" maxlength="300"></textarea>
+        <label class="check">
+          <input id="area-ok" type="checkbox">
+          <span id="area-label">My address is in Cape Town</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label for="notes">Notes (optional)</label>
+        <input id="notes" type="text" maxlength="300">
+      </div>
+
+      <div class="hp" aria-hidden="true">
+        <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
+      </div>
+
+      <hr class="tear">
+      <dl class="summary" id="summary"></dl>
+
+      <div class="alert alert-bad" id="form-error" role="alert" hidden></div>
+      <button type="submit" class="btn btn-primary btn-block" id="submit">Place order</button>
+      <p class="fine">Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.</p>
+    </form>
+
+    <section id="view-done" class="stack-lg" hidden>
+      <div>
+        <h2 class="done-title" id="done-title" tabindex="-1">Order received</h2>
+        <p class="lede" id="done-sub"></p>
+      </div>
+      <div class="bib" id="bib"></div>
+      <div class="stack">
+        <h3 class="section-title">Pay by bank transfer</h3>
+        <div class="pay" id="pay"></div>
+        <p class="fine" id="pay-note"></p>
+      </div>
+      <div class="actions actions--pair">
+        <button type="button" class="btn btn-quiet" id="copy-invoice">Copy invoice</button>
+        <button type="button" class="btn btn-quiet" id="new-order">Place another order</button>
+      </div>
+      <p class="fine">Take a screenshot of this page to keep your invoice number.</p>
+    </section>
+
+    <section id="view-closed" class="closed stack" hidden>
+      <h2 id="closed-title">Ordering is closed</h2>
+      <p id="closed-text"></p>
+      <button type="button" class="btn btn-primary" id="closed-retry" hidden>Try again</button>
+      <div id="closed-dm"></div>
+    </section>
+
+    <noscript><p class="alert alert-bad">This page needs JavaScript to take orders.</p></noscript>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+  <script src="order.js"></script>
+</body>
+</html>
