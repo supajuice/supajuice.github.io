@@ -162,10 +162,6 @@
       copyValue ? SJ.copyButton(copyValue, 'Copy') : null);
   }
 
-  function pin(position) {
-    return el('span', { class: 'pin pin-' + position, 'aria-hidden': 'true' });
-  }
-
   function showDone(res, restored) {
     current = res;
     var o = res.order;
@@ -190,10 +186,6 @@
     var bib = $('bib');
     SJ.clear(bib);
     bib.className = 'bib' + (restored ? '' : ' bib--arrive');
-    bib.appendChild(pin('tl'));
-    bib.appendChild(pin('tr'));
-    bib.appendChild(pin('bl'));
-    bib.appendChild(pin('br'));
     bib.appendChild(el('div', { class: 'bib-main' },
       el('p', { class: 'bib-brand' }, res.brand),
       el('p', { class: 'bib-number' }, o.invoice),

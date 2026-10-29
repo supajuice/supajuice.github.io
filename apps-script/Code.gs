@@ -514,20 +514,20 @@ function invoiceHtml_(o, s) {
   const parts = [];
   parts.push(
     '<html><head><meta charset="utf-8"><style>',
-    'body{font-family:Arial,Helvetica,sans-serif;color:#0b1d3a;font-size:12pt;margin:32px}',
-    'h1{font-size:26pt;margin:0;letter-spacing:1px}',
-    '.top{border-bottom:4px solid #ffd21f;padding-bottom:12px;margin-bottom:20px}',
+    'body{font-family:Arial,Helvetica,sans-serif;color:#111111;font-size:11pt;margin:32px}',
+    'h1{font-size:20pt;margin:0;letter-spacing:0}',
+    '.top{border-bottom:2px solid #111111;padding-bottom:12px;margin-bottom:20px}',
     '.no{font-size:16pt;font-weight:bold;margin:6px 0 0}',
-    '.stamp{color:#1d7a46;border:2px solid #1d7a46;padding:2px 8px;font-size:11pt}',
+    '.stamp{color:#ffffff;background:#111111;padding:2px 8px;font-size:10pt}',
     'table{border-collapse:collapse;width:100%;margin:12px 0}',
-    'td,th{padding:7px 4px;text-align:left;border-bottom:1px solid #d6dbe4}',
-    'th{font-size:10pt;color:#4a5872;text-transform:uppercase}',
+    'td,th{padding:7px 4px;text-align:left;border-bottom:1px solid #dddddd}',
+    'th{font-size:9pt;color:#555555;text-transform:uppercase}',
     '.r{text-align:right}',
     '.total td{font-weight:bold;font-size:13pt;border-bottom:none}',
-    '.k{color:#4a5872;width:40%}',
+    '.k{color:#555555;width:40%}',
     'h2{font-size:13pt;margin:24px 0 4px}',
     'p{margin:4px 0}',
-    '.note{color:#4a5872;font-size:10pt;margin-top:16px}',
+    '.note{color:#555555;font-size:10pt;margin-top:16px}',
     '</style></head><body>'
   );
   parts.push(
