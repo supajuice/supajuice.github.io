@@ -879,6 +879,126 @@ test('admin: Greg sets a minimum order and the DM form starts from it', async (t
   noErrors(errors);
 });
 
+// --- Order page photo ---
+
+// A real 2400 x 1600 PNG, drawn in the browser, bigger than the admin page sends.
+const bigPng = (page) => page.evaluate(() => {
+  const c = document.createElement('canvas');
+  c.width = 2400;
+  c.height = 1600;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 2400, 1600);
+  g.addColorStop(0, '#222');
+  g.addColorStop(1, '#ddd');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 2400, 1600);
+  for (let i = 0; i < 400; i++) {
+    x.fillStyle = 'rgb(' + (i * 37 % 255) + ',' + (i * 91 % 255) + ',' + (i * 53 % 255) + ')';
+    x.fillRect(i * 97 % 2400, i * 61 % 1600, 40 + i % 90, 30 + i % 70);
+  }
+  return c.toDataURL('image/png').split(',')[1];
+}).then((b64) => Buffer.from(b64, 'base64'));
+
+const photoCalls = (dev) => dev.calls.filter((c) => c.action === 'photo').length;
+
+async function openPhotoSettings(page) {
+  await page.click('.tab[data-tab="settings"]');
+  await page.waitForSelector('#photo-section h2');
+}
+
+test('admin: Greg adds a photo, it is made smaller on the phone, and the order page shows it', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await openPhotoSettings(page);
+  assert.equal(await page.locator('#photo-pick').innerText(), 'Add photo');
+  assert.equal(await page.locator('#photo-preview').count(), 0);
+
+  await page.fill('#photo-alt', 'Gel sachets on a trail run');
+  await page.setInputFiles('#photo-file', { name: 'trail.png', mimeType: 'image/png', buffer: await bigPng(page) });
+  await toast(page, 'Photo saved. It now shows on your order page.');
+  assert.equal(await page.locator('#photo-pick').innerText(), 'Replace photo');
+  await page.waitForFunction(() => {
+    const img = document.getElementById('photo-preview');
+    return img && img.complete && img.naturalWidth > 0;
+  });
+
+  // What reached the sheet: a JPEG no wider than 1600 px and under 350 KB.
+  const stored = dev.gas.call({ action: 'photo' }).photo;
+  assert.equal(stored.type, 'image/jpeg');
+  assert.ok(stored.data.length * 3 / 4 <= 350 * 1024, 'about ' + Math.round(stored.data.length * 3 / 4 / 1024) + ' KB');
+  const cfg = dev.gas.call({ action: 'config' }).config.photo;
+  assert.deepEqual([cfg.width, cfg.height, cfg.alt], [1600, 1067, 'Gel sachets on a trail run']);
+
+  // The customer sees it above the form, with the space kept free while it loads.
+  const callsBefore = photoCalls(dev);
+  const customer = await page.context().newPage();
+  await customer.goto(kioskUrl(dev));
+  await customer.waitForSelector('#order-form:not([hidden])');
+  await customer.waitForFunction(() => {
+    const img = document.getElementById('photo-img');
+    return !document.getElementById('photo').hidden && img.complete && img.naturalWidth === 1600;
+  });
+  assert.equal(await customer.getAttribute('#photo-img', 'alt'), 'Gel sachets on a trail run');
+  assert.equal(await customer.evaluate(() => document.getElementById('photo').style.aspectRatio), '1600 / 1067');
+  assert.equal(photoCalls(dev), callsBefore + 1);
+
+  // A second visit uses the copy saved on the phone.
+  await customer.reload();
+  await customer.waitForFunction(() => document.getElementById('photo-img').naturalWidth === 1600);
+  assert.equal(photoCalls(dev), callsBefore + 1, 'not downloaded again');
+
+  // The photo belongs to the form: it is not shown with the order confirmation.
+  await fillKiosk(customer);
+  await customer.click('#submit');
+  await customer.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await customer.locator('#photo').isHidden(), true);
+  noErrors(errors);
+});
+
+test('admin: the photo description can be changed, and the photo removed', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await openPhotoSettings(page);
+  await page.setInputFiles('#photo-file', { name: 'trail.png', mimeType: 'image/png', buffer: await bigPng(page) });
+  await toast(page, 'Photo saved. It now shows on your order page.');
+  const version = dev.gas.call({ action: 'config' }).config.photo.version;
+
+  await page.fill('#photo-alt', 'Sachets lined up at a race');
+  await page.click('[data-role="photo-alt-save"]');
+  await toast(page, 'Photo description saved.');
+  const after = dev.gas.call({ action: 'config' }).config.photo;
+  assert.equal(after.alt, 'Sachets lined up at a race');
+  assert.equal(after.version, version, 'same picture, so phones keep their copy');
+
+  const customer = await page.context().newPage();
+  await customer.goto(kioskUrl(dev));
+  await customer.waitForFunction(() => document.getElementById('photo-img').naturalWidth > 0);
+  assert.equal(await customer.getAttribute('#photo-img', 'alt'), 'Sachets lined up at a race');
+
+  await page.click('[data-role="photo-remove"]');
+  await toast(page, 'Photo removed from your order page.');
+  assert.equal(await page.locator('#photo-pick').innerText(), 'Add photo');
+  assert.equal(dev.gas.call({ action: 'config' }).config.photo, null);
+
+  await customer.reload();
+  await customer.waitForSelector('#order-form:not([hidden])');
+  await customer.waitForFunction(() => document.getElementById('photo').hidden && !document.getElementById('photo-img').getAttribute('src'));
+  assert.equal(await customer.evaluate(() => window.localStorage.getItem('sj_photo')), null, 'the saved copy is cleared');
+  noErrors(errors);
+});
+
+test('admin: a file that is not a picture is refused and nothing changes', async (t) => {
+  const { dev, page } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await openPhotoSettings(page);
+  await page.setInputFiles('#photo-file', { name: 'notes.png', mimeType: 'image/png', buffer: Buffer.from('these are not pixels') });
+  await toast(page, 'The photo was not changed.');
+  assert.match(await text(page, '#photo-status'), /could not be opened here/);
+  assert.equal(await page.locator('#photo-pick').isDisabled(), false, 'Greg can try again');
+  assert.equal(dev.gas.call({ action: 'config' }).config.photo, null);
+  assert.equal(dev.gas.sheet('Photo'), null);
+});
+
 test('admin: a DM order needs a name, and a double tap makes one order', async (t) => {
   const { dev, page } = await openAdmin(t, { latency: 400 });
   await page.waitForSelector('.order');

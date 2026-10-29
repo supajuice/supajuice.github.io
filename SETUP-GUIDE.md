@@ -217,6 +217,7 @@ Put your **order page address** in your Instagram bio. That's it, you're open.
 | **Customer lost the email** | On the order tap **More** → **Email invoice**. |
 | **You made a mistake** | **More** → **Undo paid**, **Undo delivered** or **Cancel order**. A cancelled order can be reopened. |
 | **Change price or bank details** | Admin page → **Settings**. Orders already placed keep their old price. |
+| **Add a photo to the order page** | Admin page → **Settings** → **Order page photo** → **Add photo**. Pick one from your phone and add a short description. |
 
 ---
 

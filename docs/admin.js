@@ -220,6 +220,7 @@
     state.focus = null;
     state.settings = null;
     state.settingsLoaded = false;
+    photoSrc = null;
     refreshBtn = null;
     cards = {};
     resetNewForm();
@@ -864,6 +865,8 @@
       el('p', { class: 'fine' }, 'Put this link in your Instagram bio.'),
       el('div', { class: 'pay' }, orderLinkRow())));
 
+    wrap.appendChild(el('section', { class: 'stack', id: 'photo-section' }));
+
     var form = el('form', { id: 'settings-form', class: 'stack-xl', novalidate: true });
     SETTINGS_LAYOUT.forEach(function (section) {
       var grid = el('div', { class: 'form-grid form-grid--two' });
@@ -875,6 +878,173 @@
     form.addEventListener('submit', onSaveSettings);
     wrap.appendChild(form);
     body.appendChild(wrap);
+    renderPhotoSection();
+    loadPhotoPreview();
+  }
+
+  // ---------- Settings: order page photo ----------
+
+  // Photos are made smaller on the phone before they are sent: at most this many pixels on
+  // the long side, as JPEG, stepping the quality down until the file is under the target size.
+  var PHOTO_MAX_SIDE = 1600;
+  var PHOTO_TARGET_BYTES = 350 * 1024;
+  var photoBusy = false;
+  var photoSrc = null; // data URL of the current photo, for the preview
+
+  function renderPhotoSection(status) {
+    var box = $('photo-section');
+    if (!box) return;
+    var p = state.config && state.config.photo;
+    // While saving, keep what was typed rather than the saved description.
+    var altValue = photoBusy && $('photo-alt') ? $('photo-alt').value : (p ? p.alt : '');
+    SJ.clear(box);
+
+    var file = el('input', { type: 'file', id: 'photo-file', accept: 'image/*', hidden: true });
+    file.addEventListener('change', function () {
+      var chosen = file.files && file.files[0];
+      file.value = '';
+      if (chosen) uploadPhoto(chosen);
+    });
+    var pick = el('button', {
+      type: 'button', class: 'btn btn-small ' + (p ? 'btn-quiet' : 'btn-primary'), id: 'photo-pick', disabled: photoBusy
+    }, p ? 'Replace photo' : 'Add photo');
+    pick.addEventListener('click', function () { file.click(); });
+
+    box.appendChild(el('h2', { class: 'section-title' }, 'Order page photo'));
+    box.appendChild(el('p', { class: 'fine' }, p
+      ? 'This photo shows at the top of your order page.'
+      : 'Add a photo to show at the top of your order page. It is made smaller on this phone before it is sent.'));
+    if (p) {
+      box.appendChild(el('figure', { class: 'photo photo-preview' },
+        el('img', { id: 'photo-preview', alt: p.alt || 'Your order page photo', src: photoSrc || null })));
+    }
+    box.appendChild(el('div', { class: 'field' },
+      el('label', { for: 'photo-alt' }, 'Describe the photo'),
+      el('input', { type: 'text', id: 'photo-alt', maxlength: '150', autocomplete: 'off', 'aria-describedby': 'photo-alt-hint', value: altValue }),
+      el('p', { class: 'hint', id: 'photo-alt-hint' }, 'Read out to customers who use a screen reader. For example: Gel sachets on a trail run.')));
+    box.appendChild(el('p', { class: 'fine', id: 'photo-status', role: 'status' }, status || ''));
+    box.appendChild(el('div', { class: 'order-actions' },
+      pick,
+      p ? actionButton('Save description', 'btn-quiet', 'photo-alt-save', saveAlt, photoBusy) : null,
+      p ? actionButton('Remove photo', 'btn-danger', 'photo-remove', removePhoto, photoBusy) : null,
+      file));
+  }
+
+  async function loadPhotoPreview() {
+    if (!state.config || !state.config.photo || photoSrc) return;
+    try {
+      var res = await SJ.api('photo');
+      if (!res.photo) return;
+      photoSrc = 'data:' + res.photo.type + ';base64,' + res.photo.data;
+      var img = $('photo-preview');
+      if (img) img.src = photoSrc;
+    } catch (err) { /* the preview is only a convenience */ }
+  }
+
+  function readImage(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('unreadable')); };
+      img.src = url;
+    });
+  }
+
+  // Returns { type, data (base64), dataUrl, width, height }.
+  async function shrinkPhoto(file) {
+    var img;
+    try {
+      img = await readImage(file);
+    } catch (err) {
+      throw new SJ.ApiError('photo', 'This photo could not be opened here. Try a JPEG or PNG photo.');
+    }
+    var scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+    var width = Math.max(1, Math.round(img.naturalWidth * scale));
+    var height = Math.max(1, Math.round(img.naturalHeight * scale));
+    var canvas = document.createElement('canvas');
+    for (var attempt = 0; attempt < 6; attempt++) {
+      canvas.width = width;
+      canvas.height = height;
+      var ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff'; // JPEG has no transparency
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      var qualities = [0.85, 0.75, 0.65];
+      for (var i = 0; i < qualities.length; i++) {
+        var dataUrl = canvas.toDataURL('image/jpeg', qualities[i]);
+        var data = dataUrl.slice(dataUrl.indexOf(',') + 1);
+        if (data.length * 3 / 4 <= PHOTO_TARGET_BYTES) {
+          return { type: 'image/jpeg', data: data, dataUrl: dataUrl, width: width, height: height };
+        }
+      }
+      width = Math.max(1, Math.round(width * 0.8));
+      height = Math.max(1, Math.round(height * 0.8));
+    }
+    throw new SJ.ApiError('photo', 'This photo is too detailed to send. Please choose another one.');
+  }
+
+  function photoFailed(err) {
+    photoBusy = false;
+    if (err.code === 'unauthorized') {
+      lock(err.message);
+      return;
+    }
+    renderPhotoSection(err.message);
+    SJ.toast('The photo was not changed.', 'bad');
+  }
+
+  async function uploadPhoto(file) {
+    if (photoBusy) return;
+    photoBusy = true;
+    var alt = $('photo-alt') ? $('photo-alt').value.trim() : '';
+    renderPhotoSection('Preparing the photo…');
+    try {
+      var prepared = await shrinkPhoto(file);
+      renderPhotoSection('Sending the photo…');
+      var res = await SJ.api('setPhoto', {
+        key: state.key, type: prepared.type, data: prepared.data, width: prepared.width, height: prepared.height, alt: alt
+      });
+      photoBusy = false;
+      state.config.photo = res.photo;
+      photoSrc = prepared.dataUrl;
+      renderPhotoSection();
+      SJ.toast('Photo saved. It now shows on your order page.');
+    } catch (err) {
+      photoFailed(err);
+    }
+  }
+
+  async function saveAlt() {
+    if (photoBusy) return;
+    photoBusy = true;
+    var alt = $('photo-alt').value.trim();
+    renderPhotoSection('Saving…');
+    try {
+      var res = await SJ.api('setPhoto', { key: state.key, alt: alt });
+      photoBusy = false;
+      state.config.photo = res.photo;
+      renderPhotoSection();
+      SJ.toast('Photo description saved.');
+    } catch (err) {
+      photoFailed(err);
+    }
+  }
+
+  async function removePhoto() {
+    if (photoBusy) return;
+    photoBusy = true;
+    renderPhotoSection('Removing…');
+    try {
+      await SJ.api('removePhoto', { key: state.key });
+      photoBusy = false;
+      state.config.photo = null;
+      photoSrc = null;
+      renderPhotoSection();
+      SJ.toast('Photo removed from your order page.');
+    } catch (err) {
+      photoFailed(err);
+    }
   }
 
   async function onSaveSettings(ev) {

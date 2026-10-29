@@ -35,8 +35,14 @@ class MockRange {
     }
     return out;
   }
+  getValue() {
+    return this.getValues()[0][0];
+  }
   _write(cell, v) {
     if (v === undefined || v === null) v = '';
+    if (typeof v === 'string' && v.length > 50000) {
+      throw new Error('Your input contains more than the maximum of 50000 characters in a single cell.');
+    }
     if (cell.fmt === '@') {
       cell.v = String(v);
       cell.formula = false;
@@ -73,6 +79,10 @@ class MockRange {
     return this;
   }
   setFontWeight() { return this; }
+  clearContent() {
+    this._each((r, c) => { const cell = this.sheet._cell(r, c); cell.v = ''; cell.formula = false; });
+    return this;
+  }
 }
 
 class MockSheet {
@@ -102,6 +112,8 @@ class MockSheet {
   setFrozenRows(n) { this.frozen = n; }
   setColumnWidth() {}
   insertRowsAfter(after, n) { this.maxRows += n; }
+  hideSheet() { this.hidden = true; return this; }
+  isSheetHidden() { return !!this.hidden; }
 }
 
 class MockSpreadsheet {
@@ -189,7 +201,12 @@ function createGas() {
       getUuid: () => crypto.randomUUID(),
       formatDate,
       sleep: (ms) => sleeps.push(ms),
-      newBlob: (data, type, name) => new MockBlob(data, type, name)
+      newBlob: (data, type, name) => new MockBlob(data, type, name),
+      // Like Apps Script: signed bytes, and an error for text that is not base64.
+      base64Decode: (s) => {
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s) || s.length % 4 === 1) throw new Error('Could not decode string.');
+        return Array.from(Buffer.from(s, 'base64'), (b) => (b > 127 ? b - 256 : b));
+      }
     },
     Session: { getScriptTimeZone: () => 'Africa/Johannesburg' },
     MailApp: {
