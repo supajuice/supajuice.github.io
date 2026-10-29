@@ -53,7 +53,7 @@ This makes order times show in South African time.
 10. Tick **Show "appsscript.json" manifest file in editor**.
 11. Click the **< >** icon on the far left to go back to the editor. A file called `appsscript.json` now shows in the file list. Click it.
 12. Select everything in it (**⌘ + A**) and delete it.
-13. In Finder, right-click `apps-script` → **appsscript.json** → **Open With** → **TextEdit**. Copy everything (**⌘ + A**, then **⌘ + C**) and paste it into the editor (**⌘ + V**).
+13. In Finder, open `apps-script`, then right-click **appsscript.json** → **Open With** → **TextEdit**. Copy everything (**⌘ + A**, then **⌘ + C**) and paste it into the editor (**⌘ + V**).
 14. Press **⌘ + S** to save.
 
 ### Run the setup
