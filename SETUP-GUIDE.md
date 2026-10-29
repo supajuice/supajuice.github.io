@@ -21,10 +21,10 @@ It costs nothing to run.
 
 ## Step 1. Download the files
 
-1. Open this link: **https://github.com/vishweshhampali/supa-juice/archive/refs/heads/main.zip**
-   It downloads a file called `supa-juice-main.zip`. You do not need an account for this.
-2. Open **Finder** and go to **Downloads**. If you see a zip file called `supa-juice-main.zip`, double-click it to unzip it. (Safari often unzips it for you, so the folder may already be there.)
-3. You now have a folder called `supa-juice-main`. Inside it are two folders you will use:
+1. Open this link: **https://github.com/supajuice/supajuice.github.io/archive/refs/heads/main.zip**
+   It downloads a file called `supajuice.github.io-main.zip`. You do not need an account for this.
+2. Open **Finder** and go to **Downloads**. If you see a zip file called `supajuice.github.io-main.zip`, double-click it to unzip it. (Safari often unzips it for you, so the folder may already be there.)
+3. You now have a folder called `supajuice.github.io-main`. Inside it are two folders you will use:
    - `apps-script`: the part that runs inside Google
    - `docs`: the website
 
@@ -39,7 +39,7 @@ It costs nothing to run.
 ### Paste in the code
 
 4. In the editor you will see a file called `Code.gs` with a few lines in it. Click inside that text, press **⌘ + A** to select it all, and press **Delete**.
-5. In Finder, open `supa-juice-main` → `apps-script`. Right-click **Code.gs** → **Open With** → **TextEdit**.
+5. In Finder, open `supajuice.github.io-main` → `apps-script`. Right-click **Code.gs** → **Open With** → **TextEdit**.
    (If TextEdit is not in the list, choose **Other…**, pick **TextEdit**, and click **Open**.)
 6. In TextEdit press **⌘ + A**, then **⌘ + C** to copy everything.
 7. Go back to the Apps Script tab, click in the empty editor and press **⌘ + V** to paste.
@@ -122,7 +122,7 @@ GitHub will host your website for free.
 ### Upload the website files
 
 5. On the next page, find the line **"…or upload an existing file"** and click **uploading an existing file**.
-6. In Finder, open `supa-juice-main` → **`docs`**. You should see files like `index.html`, `admin.html`, `config.js` and a `fonts` folder.
+6. In Finder, open `supajuice.github.io-main` → **`docs`**. You should see files like `index.html`, `admin.html`, `config.js` and a `fonts` folder.
 7. Click inside that Finder window, press **⌘ + A** to select everything **inside** the `docs` folder, and drag it all onto the GitHub page where it says **Drag files here**.
    Upload what is *inside* `docs`, not the `docs` folder itself.
    Tip: put the Finder window and the browser side by side first, so you can drag from one to the other.
