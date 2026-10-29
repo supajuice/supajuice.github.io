@@ -93,6 +93,8 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Money arrives.** Find the invoice number in the bank statement reference. In the app tap **Mark paid** on that order, then **Yes, mark paid**. If the order has an email address, the paid invoice PDF is emailed straight away. The order moves to **Paid** with a **Copy invoice** button, so you can paste the paid invoice into the DM too.
 
+**A photo on the order page.** **Settings > Order page photo > Add photo** and pick one from the phone. It is made smaller on the phone first, then shows above the order form. **Replace photo** swaps it, **Remove photo** takes it off. Add a short description for customers who use a screen reader.
+
 **Customer cannot find the email.** Tap **More** on the order, then **Email invoice**. It sends the invoice as it is now: unpaid with bank details, or paid. The order shows when the invoice was last emailed. To add or fix an email address, edit the **Email** column in the sheet.
 
 **Delivered.** Tap **Mark delivered** on the order under **Paid**. Tap an address to open it in Maps and a phone number to call.
@@ -138,6 +140,7 @@ Nothing is tied to your accounts except where the pieces live, so moving is a fe
 - **Customer text** is never trusted: it is shown as plain text, length-limited, and stored so Sheets cannot read it as a formula.
 - **Spam:** the order page has a hidden field that bots fill in, and accepts at most 12 orders an hour. Orders Greg enters himself are not limited.
 - **Invoice emails** are made on the server: the invoice is written as a page and Apps Script turns it into a PDF. They come from the Google account that deployed the script, show the brand name as the sender, and replies go to the **Email me new orders** address. A failed email never fails the order; it shows as an invoice that was not emailed, and **Email invoice** tries again.
+- **The order page photo** is kept in a hidden **Photo** tab of the sheet, as text split over a few cells (one cell holds at most 50,000 characters). That way no Google Drive permission is needed. Leave that tab alone; change the photo from the admin page. Each phone downloads a photo once and keeps it until it is replaced.
 - **Email limits:** a free Google account can send to about 100 addresses a day. Each order from the order page uses two (Greg's alert and the customer's invoice), and marking it paid uses one more. That is plenty for a small shop. A Google Workspace account allows 1,500.
 
 ### Not included, on purpose

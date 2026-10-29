@@ -10,17 +10,60 @@
   var CONFIG_KEY = 'sj_config';
   var LAST_KEY = 'sj_last_order';
   var LAST_MAX_AGE = 48 * 3600 * 1000;
+  var PHOTO_KEY = 'sj_photo';
 
   var config = null;     // prices and settings, without bank details
   var stepper = null;
   var pending = null;    // { sig, id }: a retry of the same order reuses one request id
   var busy = false;
   var current = null;    // the order response being shown on the done view
+  var photo = null;      // { version, alt, width, height } from the config, or null
 
   function showView(id) {
     VIEWS.forEach(function (v) { $(v).hidden = v !== id; });
-    // "Order below..." only makes sense above the form.
+    // "Order below..." and the photo only make sense above the form.
     $('lede').hidden = id !== 'order-form';
+    $('photo').hidden = !photo || id !== 'order-form';
+  }
+
+  // ---------- Photo ----------
+
+  // The photo is optional: if anything goes wrong it is simply left out.
+  // Each version is downloaded once and then kept on the phone.
+  async function applyPhoto(want) {
+    var box = $('photo');
+    var img = $('photo-img');
+    if (!want) {
+      photo = null;
+      box.hidden = true;
+      img.removeAttribute('src');
+      SJ.store.remove(PHOTO_KEY);
+      return;
+    }
+    var sameVersion = photo && photo.version === want.version;
+    photo = want;
+    img.alt = want.alt || '';
+    // Keep the photo's space free while it loads, so the form does not jump.
+    box.style.aspectRatio = want.width && want.height ? want.width + ' / ' + want.height : '';
+    box.hidden = $('order-form').hidden;
+    if (sameVersion && img.getAttribute('src')) return;
+
+    var saved = SJ.store.get(PHOTO_KEY);
+    var picture = saved && saved.version === want.version && saved.data ? saved : null;
+    if (!picture) {
+      try {
+        var res = await SJ.api('photo');
+        picture = res.photo;
+      } catch (err) {
+        picture = null;
+      }
+      if (!picture || !photo || picture.version !== photo.version) {
+        if (!picture) { photo = null; box.hidden = true; }
+        return;
+      }
+      SJ.store.set(PHOTO_KEY, picture);
+    }
+    img.src = 'data:' + picture.type + ';base64,' + picture.data;
   }
 
   // ---------- Form ----------
@@ -42,6 +85,7 @@
     stepper.setItem(SJ.itemLine(c));
     $('area-label').textContent = 'My address is in ' + c.area;
     renderTotals();
+    applyPhoto(c.photo || null);
   }
 
   function renderTotals() {

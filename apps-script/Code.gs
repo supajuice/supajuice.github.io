@@ -10,8 +10,9 @@
  * The pages call this with POST requests. The body is JSON sent as text/plain,
  * which avoids a CORS preflight request (Apps Script cannot answer one).
  *
- * Public actions   config, order
- * Admin actions    list, create, setStatus, sendInvoice, getSettings, saveSettings
+ * Public actions   config, order, photo
+ * Admin actions    list, create, setStatus, sendInvoice, getSettings, saveSettings,
+ *                  setPhoto, removePhoto
  *                  (all need the admin key kept in Script properties)
  *
  * Customers with an email address get their invoice as a PDF: the unpaid one
@@ -121,6 +122,7 @@ function handle_(body) {
     // Public actions.
     if (body.action === 'config') return { ok: true, config: publicConfig_(readTypedSettings_()) };
     if (body.action === 'order') return placeKioskOrder_(body);
+    if (body.action === 'photo') return { ok: true, photo: readPhoto_() };
 
     // Everything else needs the admin key.
     requireAdmin_(body.key);
@@ -131,6 +133,8 @@ function handle_(body) {
       case 'sendInvoice': return sendInvoice_(body);
       case 'getSettings': return { ok: true, values: readSettings_() };
       case 'saveSettings': return saveSettings_(body);
+      case 'setPhoto': return setPhoto_(body);
+      case 'removePhoto': return removePhoto_();
       default: throw fail_('bad_request', 'Unknown action.');
     }
   } catch (err) {
@@ -613,6 +617,7 @@ function readTypedSettings_() {
     alertEmail: raw.alert_email,
     bank: bank,
     paymentNote: raw.payment_note,
+    photo: publicPhoto_(photoMeta_()),
     ready: price > 0 && !!bank.name && !!bank.holder && !!bank.number
   };
 }
@@ -628,6 +633,7 @@ function publicConfig_(s) {
     area: s.area,
     minQty: s.minQty,
     maxQty: s.maxQty,
+    photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
     ready: s.ready
   };
 }
@@ -729,6 +735,140 @@ function validateSetting_(key, value) {
     default:
       return text;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Order page photo
+// ---------------------------------------------------------------------------
+
+// One photo, kept in a hidden "Photo" tab as base64 text, so no Google Drive permission is needed.
+//   A1        what the tab is for
+//   A2        { type, alt, version, pieces } as JSON
+//   A3 down   the picture, in pieces, because one cell holds at most 50,000 characters
+// The admin page shrinks the photo before sending it, so it is normally 100 to 300 KB.
+const PHOTO_TAB = 'Photo';
+const PHOTO_MAX_BYTES = 600 * 1024;
+const PHOTO_PIECE = 45000;
+// The first bytes of each kind of image, to check a file is what it says it is.
+const PHOTO_TYPES = {
+  'image/jpeg': [0xff, 0xd8, 0xff],
+  'image/png': [0x89, 0x50, 0x4e, 0x47],
+  'image/webp': [0x52, 0x49, 0x46, 0x46]
+};
+
+// The stored { type, alt, version, pieces }, or null when there is no photo.
+function photoMeta_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss && ss.getSheetByName(PHOTO_TAB);
+  if (!sheet || sheet.getLastRow() < 3) return null;
+  const text = str_(sheet.getRange(2, 1).getValue());
+  let meta = null;
+  try {
+    meta = JSON.parse(text);
+  } catch (err) {
+    return null; // edited by hand: treat as no photo rather than break the order page
+  }
+  return meta && meta.version && meta.pieces > 0 ? meta : null;
+}
+
+// What the pages need to know without downloading the picture. The version changes with every new photo.
+// The size lets the order page keep the right space free while the picture loads.
+function publicPhoto_(meta) {
+  if (!meta) return null;
+  const out = { version: meta.version, alt: meta.alt || '' };
+  if (meta.width && meta.height) {
+    out.width = meta.width;
+    out.height = meta.height;
+  }
+  return out;
+}
+
+function readPhoto_() {
+  const meta = photoMeta_();
+  if (!meta) return null;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PHOTO_TAB);
+  const data = sheet.getRange(3, 1, meta.pieces, 1).getValues().map(function (r) { return String(r[0]); }).join('');
+  return { version: meta.version, alt: meta.alt || '', type: meta.type, data: data };
+}
+
+// Saves a new photo, or with no data, changes only the description of the current one.
+function setPhoto_(body) {
+  const alt = clean_(body.alt, 150);
+  const hasData = body.data !== undefined && body.data !== null && body.data !== '';
+  const type = String(body.type || '');
+  let data = '';
+  if (hasData) {
+    if (!PHOTO_TYPES[type]) throw fail_('invalid', 'The photo must be a JPEG, PNG or WebP image.');
+    data = String(body.data).replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) throw fail_('invalid', 'The photo could not be read. Please try another one.');
+    if (Math.floor(data.length * 3 / 4) > PHOTO_MAX_BYTES) throw fail_('invalid', 'The photo is too large. Please choose a smaller one.');
+    let bytes;
+    try {
+      bytes = Utilities.base64Decode(data);
+    } catch (err) {
+      throw fail_('invalid', 'The photo could not be read. Please try another one.');
+    }
+    const magic = PHOTO_TYPES[type];
+    for (let i = 0; i < magic.length; i++) {
+      if (((bytes[i] || 0) & 0xff) !== magic[i]) throw fail_('invalid', 'That file is not a JPEG, PNG or WebP image.');
+    }
+  }
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    throw fail_('busy', 'Busy right now. Please try again.');
+  }
+  let meta;
+  try {
+    const current = photoMeta_();
+    if (!hasData && !current) throw fail_('invalid', 'Add a photo first.');
+    const sheet = photoSheet_();
+    if (hasData) {
+      const pieces = [];
+      for (let i = 0; i < data.length; i += PHOTO_PIECE) pieces.push([data.slice(i, i + PHOTO_PIECE)]);
+      const last = sheet.getLastRow();
+      if (last >= 3) sheet.getRange(3, 1, last - 2, 1).clearContent();
+      sheet.getRange(3, 1, pieces.length, 1).setNumberFormat('@').setValues(pieces);
+      meta = { type: type, alt: alt, version: Utilities.getUuid().replace(/-/g, '').slice(0, 12), pieces: pieces.length };
+      const width = Number(body.width);
+      const height = Number(body.height);
+      if (Math.floor(width) === width && Math.floor(height) === height && width >= 1 && height >= 1 && width <= 10000 && height <= 10000) {
+        meta.width = width;
+        meta.height = height;
+      }
+    } else {
+      meta = Object.assign({}, current, { alt: alt });
+    }
+    sheet.getRange(2, 1).setNumberFormat('@').setValue(JSON.stringify(meta));
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return { ok: true, photo: publicPhoto_(meta) };
+}
+
+function removePhoto_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss && ss.getSheetByName(PHOTO_TAB);
+  if (sheet && sheet.getLastRow() >= 2) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).clearContent();
+    SpreadsheetApp.flush();
+  }
+  return { ok: true, photo: null };
+}
+
+// The Photo tab, made the first time a photo is saved and hidden so it stays out of the way.
+function photoSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(PHOTO_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(PHOTO_TAB);
+    sheet.getRange(1, 1).setValue('The order page photo, stored as text. Change it from the admin page, not here.');
+    sheet.hideSheet();
+  }
+  return sheet;
 }
 
 // ---------------------------------------------------------------------------

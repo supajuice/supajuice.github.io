@@ -79,7 +79,7 @@ test('public config shows the price but no bank details', () => {
   const cfg = gas.call({ action: 'config' }).config;
   assert.deepEqual(cfg, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30,
-    currency: 'R', area: 'Cape Town', minQty: 1, maxQty: 20, ready: true
+    currency: 'R', area: 'Cape Town', minQty: 1, maxQty: 20, photo: null, ready: true
   });
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
 });
@@ -637,4 +637,127 @@ test('no alert email address means no email', () => {
   assert.equal(gas.mail.length, 1, 'only the customer invoice');
   assert.equal(gas.mail[0].to, 'jane@example.com');
   assert.equal(gas.mail[0].replyTo, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Order page photo
+// ---------------------------------------------------------------------------
+
+// A fake image of the given size whose first bytes say what it is.
+function image(type, bytes) {
+  const head = { jpeg: [0xff, 0xd8, 0xff, 0xe0], png: [0x89, 0x50, 0x4e, 0x47], webp: [0x52, 0x49, 0x46, 0x46] }[type];
+  const buf = Buffer.alloc(bytes);
+  for (let i = 0; i < bytes; i++) buf[i] = (i * 7 + 3) % 256;
+  head.forEach((b, i) => { buf[i] = b; });
+  return buf.toString('base64');
+}
+
+test('there is no photo until Greg adds one, and adding one needs the key', () => {
+  const { gas } = ready();
+  assert.equal(gas.call({ action: 'config' }).config.photo, null);
+  assert.deepEqual(gas.call({ action: 'photo' }), { ok: true, photo: null });
+  const r = gas.call({ action: 'setPhoto', type: 'image/jpeg', data: image('jpeg', 1000) });
+  assert.equal(r.error, 'unauthorized');
+  assert.equal(r.ok, false);
+  assert.equal(gas.call({ action: 'removePhoto' }).error, 'unauthorized');
+  assert.equal(gas.sheet('Photo'), null);
+});
+
+test('a photo is stored in a hidden tab in pieces and comes back exactly as sent', () => {
+  const { gas, key } = ready();
+  const data = image('jpeg', 300 * 1024); // about 400,000 characters of base64
+  const r = gas.call({ action: 'setPhoto', key, type: 'image/jpeg', data: 'data:image/jpeg;base64,' + data, alt: 'Runner holding a gel sachet' });
+  assert.equal(r.ok, true, JSON.stringify(r).slice(0, 200));
+  assert.match(r.photo.version, /^[0-9a-f]{12}$/);
+  assert.equal(r.photo.alt, 'Runner holding a gel sachet');
+
+  const sheet = gas.sheet('Photo');
+  assert.equal(sheet.isSheetHidden(), true);
+  const pieces = sheet.getLastRow() - 2;
+  assert.ok(pieces >= 9, 'split across ' + pieces + ' cells');
+  for (let row = 3; row < 3 + pieces; row++) assert.ok(String(sheet.cells.get(row + ',1').v).length <= 50000);
+
+  const back = gas.call({ action: 'photo' }).photo;
+  assert.equal(back.data, data);
+  assert.equal(back.type, 'image/jpeg');
+  assert.equal(back.version, r.photo.version);
+  assert.deepEqual(gas.call({ action: 'config' }).config.photo, { version: r.photo.version, alt: 'Runner holding a gel sachet' });
+  assert.deepEqual(gas.call({ action: 'list', key }).config.photo, r.photo, 'the admin page sees it too');
+});
+
+test('photo pieces are stored as text, so one starting with + or / is never read as a formula', () => {
+  const { gas, key } = ready();
+  // Base64 uses + and /, and any piece after the first can start with one of them.
+  const r = gas.call({ action: 'setPhoto', key, type: 'image/png', data: image('png', 46000 * 3) });
+  assert.equal(r.ok, true);
+  const sheet = gas.sheet('Photo');
+  assert.ok(sheet.getLastRow() >= 5);
+  for (let row = 2; row <= sheet.getLastRow(); row++) {
+    const cell = sheet.cells.get(row + ',1');
+    assert.equal(cell.fmt, '@', 'row ' + row + ' is a text cell');
+    assert.equal(cell.formula, false);
+  }
+  assert.equal(gas.call({ action: 'photo' }).photo.data, image('png', 46000 * 3));
+});
+
+test('a new photo replaces the old one completely and gets a new version', () => {
+  const { gas, key } = ready();
+  const first = gas.call({ action: 'setPhoto', key, type: 'image/jpeg', data: image('jpeg', 200 * 1024) }).photo;
+  const small = image('webp', 5000);
+  const second = gas.call({ action: 'setPhoto', key, type: 'image/webp', data: small, alt: 'New' }).photo;
+  assert.notEqual(second.version, first.version);
+  assert.equal(gas.sheet('Photo').getLastRow(), 3, 'old pieces cleared');
+  const back = gas.call({ action: 'photo' }).photo;
+  assert.equal(back.data, small);
+  assert.equal(back.type, 'image/webp');
+});
+
+test('the description can be changed without sending the photo again', () => {
+  const { gas, key } = ready();
+  assert.match(gas.call({ action: 'setPhoto', key, alt: 'Nothing yet' }).message, /Add a photo first/);
+  const first = gas.call({ action: 'setPhoto', key, type: 'image/jpeg', data: image('jpeg', 2000), alt: 'Old' }).photo;
+  const r = gas.call({ action: 'setPhoto', key, alt: 'Sachets on a trail' });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.photo, { version: first.version, alt: 'Sachets on a trail' }, 'same version, so phones keep their saved copy');
+  assert.equal(gas.call({ action: 'photo' }).photo.data, image('jpeg', 2000));
+});
+
+test('files that are not images, or too big, are refused and nothing changes', () => {
+  const { gas, key } = ready();
+  const ok = gas.call({ action: 'setPhoto', key, type: 'image/jpeg', data: image('jpeg', 1000) }).photo;
+  const bad = [
+    [{ type: 'image/gif', data: image('jpeg', 1000) }, /JPEG, PNG or WebP/],
+    [{ type: 'text/html', data: Buffer.from('<script>').toString('base64') }, /JPEG, PNG or WebP/],
+    [{ type: 'image/png', data: image('jpeg', 1000) }, /not a JPEG, PNG or WebP/],
+    [{ type: 'image/jpeg', data: Buffer.from('MZ this is a program').toString('base64') }, /not a JPEG, PNG or WebP/],
+    [{ type: 'image/jpeg', data: 'not base64 at all!' }, /could not be read/],
+    [{ type: 'image/jpeg', data: image('jpeg', 700 * 1024) }, /too large/]
+  ];
+  for (const [over, message] of bad) {
+    const r = gas.call(Object.assign({ action: 'setPhoto', key }, over));
+    assert.equal(r.error, 'invalid', JSON.stringify(over).slice(0, 80));
+    assert.match(r.message, message);
+  }
+  assert.equal(gas.call({ action: 'photo' }).photo.version, ok.version, 'the old photo is still there');
+});
+
+test('removing the photo takes it off the order page', () => {
+  const { gas, key } = ready();
+  assert.equal(gas.call({ action: 'removePhoto', key }).ok, true, 'removing when there is none is fine');
+  gas.call({ action: 'setPhoto', key, type: 'image/jpeg', data: image('jpeg', 100 * 1024) });
+  const r = gas.call({ action: 'removePhoto', key });
+  assert.deepEqual(r, { ok: true, photo: null });
+  assert.equal(gas.call({ action: 'config' }).config.photo, null);
+  assert.equal(gas.call({ action: 'photo' }).photo, null);
+  // And a new one can be added afterwards.
+  assert.equal(gas.call({ action: 'setPhoto', key, type: 'image/jpeg', data: image('jpeg', 1000) }).ok, true);
+});
+
+test('a broken Photo tab, for example edited by hand, means no photo instead of an error', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'setPhoto', key, type: 'image/jpeg', data: image('jpeg', 1000) });
+  gas.sheet('Photo').getRange(2, 1).setValue('{oops');
+  assert.equal(gas.call({ action: 'config' }).config.photo, null);
+  assert.equal(gas.call({ action: 'photo' }).photo, null);
+  assert.equal(gas.call(order()).ok, true, 'orders still work');
 });
