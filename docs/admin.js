@@ -34,7 +34,8 @@
       fields: [
         { key: 'price', label: 'Price per sachet', hint: 'A number, for example 40', mode: 'decimal', max: 12 },
         { key: 'delivery_fee', label: 'Delivery fee', hint: '0 means free delivery', mode: 'decimal', max: 12 },
-        { key: 'delivery_area', label: 'Delivery area', hint: 'Customers tick a box to say their address is inside it', max: 60 },
+        { key: 'delivery_area', label: 'Delivery area', hint: 'Customers tick a box to say their address is inside it', wide: true, max: 60 },
+        { key: 'min_quantity', label: 'Fewest sachets per order', hint: 'The quantity starts here. 1 means no minimum', mode: 'numeric', max: 3 },
         { key: 'max_quantity', label: 'Most sachets per order', mode: 'numeric', max: 3 }
       ]
     },
@@ -667,8 +668,8 @@
   function applyConfigToNew() {
     var c = state.config;
     if (!c || !newStepper) return;
-    newStepper.setMax(c.maxQty);
-    newStepper.setItem(c.product + ', ' + SJ.money(c.price, c.currency) + ' each');
+    newStepper.setRange(c.minQty, c.maxQty);
+    newStepper.setItem(SJ.itemLine(c));
     var warn = $('new-warning');
     SJ.clear(warn);
     if (!c.ready) warn.appendChild(setupBanner('Add the price and your bank details in Settings before you create orders.'));
@@ -793,7 +794,7 @@
   function resetNewForm() {
     newPending = null;
     ['n-name', 'n-email', 'n-contact', 'n-address', 'n-notes'].forEach(function (id) { $(id).value = ''; });
-    if (newStepper) newStepper.set(1);
+    if (newStepper) newStepper.reset();
     $('n-error').hidden = true;
     $('new-form').hidden = false;
     $('new-result').hidden = true;

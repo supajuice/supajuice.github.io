@@ -93,6 +93,35 @@ test('order page: shows the shop, the price and a total that follows the quantit
   noErrors(errors);
 });
 
+test('order page: with a minimum order the quantity starts there and cannot go below it', async (t) => {
+  const { dev, page, errors } = await open(t, { mode: 'ready' });
+  dev.gas.call({ action: 'saveSettings', key: dev.key, values: { min_quantity: '3' } });
+  await page.goto(kioskUrl(dev));
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await page.inputValue('#qty'), '3');
+  assert.equal(await page.locator('[aria-label="One fewer"]').isDisabled(), true);
+  assert.match(await text(page, '.qty-item'), /Running gel sachet, R40 each\. Minimum order 3\./);
+  assert.equal(await text(page, '#submit'), 'Place order for R150');
+
+  // Typing a smaller number is corrected to the minimum.
+  await page.fill('#qty', '1');
+  await page.locator('#qty').blur();
+  assert.equal(await page.inputValue('#qty'), '3');
+
+  await page.click('[aria-label="One more"]');
+  assert.equal(await page.locator('[aria-label="One fewer"]').isDisabled(), false);
+  await fillKiosk(page);
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(orderRows(dev)[0].Qty, 4);
+
+  // Another order starts at the minimum again.
+  await page.click('#new-order');
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await page.inputValue('#qty'), '3');
+  noErrors(errors);
+});
+
 test('order page: free delivery is shown as Free', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready', fee: 0 });
   await page.waitForSelector('#order-form:not([hidden])');
@@ -828,6 +857,28 @@ test('admin: an order shows its email and when the invoice was emailed, and can 
   noErrors(errors);
 });
 
+test('admin: Greg sets a minimum order and the DM form starts from it', async (t) => {
+  const { page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await page.click('.tab[data-tab="settings"]');
+  await page.waitForSelector('#settings-form');
+  assert.equal(await page.inputValue('#s-min_quantity'), '1');
+
+  await page.fill('#s-min_quantity', '30');
+  await page.click('#settings-save');
+  await page.waitForFunction(() => /cannot be more than/.test(document.getElementById('settings-error').textContent));
+
+  await page.fill('#s-min_quantity', '2');
+  await page.click('#settings-save');
+  await toast(page, 'Settings saved.');
+
+  await page.click('.tab[data-tab="new"]');
+  assert.equal(await page.inputValue('#n-qty'), '2');
+  assert.match(await text(page, '#n-summary'), /Total\s+R110/);
+  assert.equal(await page.locator('#panel-new [aria-label="One fewer"]').isDisabled(), true);
+  noErrors(errors);
+});
+
 test('admin: a DM order needs a name, and a double tap makes one order', async (t) => {
   const { dev, page } = await openAdmin(t, { latency: 400 });
   await page.waitForSelector('.order');
@@ -883,7 +934,7 @@ test('admin: settings show the current values and the order page link', async (t
     return out;
   });
   assert.deepEqual(values, {
-    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', max_quantity: '20',
+    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', min_quantity: '1', max_quantity: '20',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',
     brand_name: 'Supa Juice', product_name: 'Running gel sachet', currency_symbol: 'R', invoice_prefix: 'SJ',

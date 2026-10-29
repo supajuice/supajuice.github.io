@@ -71,6 +71,7 @@ const SETTING_DEFS = [
   { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
   { key: 'delivery_area', value: 'Cape Town', note: 'Customers tick a box to confirm their address is inside this area.' },
+  { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
   { key: 'invoice_prefix', value: 'SJ', note: 'Letters before the invoice number, for example SJ-0001. Up to 6 letters or digits.' },
   { key: 'alert_email', value: '', note: 'New orders from the order page are emailed here. Leave blank for no emails.' },
@@ -193,6 +194,7 @@ function createOrder_(body, source) {
   try {
     settings = readTypedSettings_();
     if (!settings.ready) throw fail_('not_ready', 'Ordering is not open yet.');
+    if (qty < settings.minQty) throw fail_('invalid', 'The smallest order is ' + settings.minQty + '.');
     if (qty > settings.maxQty) throw fail_('invalid', 'The most you can order at once is ' + settings.maxQty + '.');
 
     const sheet = ordersSheet_();
@@ -596,6 +598,7 @@ function readTypedSettings_() {
     branch: raw.branch_code,
     type: raw.account_type
   };
+  const maxQty = Math.min(200, Math.max(1, Math.floor(parseNumber_(raw.max_quantity, 20))));
   return {
     brand: raw.brand_name || 'Supa Juice',
     product: raw.product_name || 'Running gel sachet',
@@ -603,7 +606,9 @@ function readTypedSettings_() {
     fee: fee,
     currency: raw.currency_symbol || 'R',
     area: raw.delivery_area || 'Cape Town',
-    maxQty: Math.min(200, Math.max(1, Math.floor(parseNumber_(raw.max_quantity, 20)))),
+    // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
+    minQty: Math.min(maxQty, Math.max(1, Math.floor(parseNumber_(raw.min_quantity, 1)))),
+    maxQty: maxQty,
     prefix: (raw.invoice_prefix || 'SJ').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'SJ',
     alertEmail: raw.alert_email,
     bank: bank,
@@ -621,6 +626,7 @@ function publicConfig_(s) {
     fee: s.fee,
     currency: s.currency,
     area: s.area,
+    minQty: s.minQty,
     maxQty: s.maxQty,
     ready: s.ready
   };
@@ -643,6 +649,14 @@ function saveSettings_(body) {
   SETTING_DEFS.forEach(function (d) {
     if (Object.prototype.hasOwnProperty.call(incoming, d.key)) checked[d.key] = validateSetting_(d.key, incoming[d.key]);
   });
+
+  // The two limits are checked together, using the saved value for whichever one is not being changed.
+  if (checked.min_quantity !== undefined || checked.max_quantity !== undefined) {
+    const saved = readSettings_();
+    const min = Number(checked.min_quantity !== undefined ? checked.min_quantity : saved.min_quantity);
+    const max = Number(checked.max_quantity !== undefined ? checked.max_quantity : saved.max_quantity);
+    if (min > max) throw fail_('invalid', 'Fewest per order cannot be more than most per order.');
+  }
 
   const lock = LockService.getScriptLock();
   try {
@@ -688,6 +702,12 @@ function validateSetting_(key, value) {
       const n = parseNumber_(text, NaN);
       if (!isFinite(n) || n < 0 || n > 100000) throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
       return String(round2_(n));
+    }
+    case 'min_quantity': {
+      if (text === '') return '1';
+      const n = parseNumber_(text, NaN);
+      if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 200) throw fail_('invalid', 'Fewest per order must be a whole number from 1 to 200.');
+      return String(n);
     }
     case 'max_quantity': {
       const n = parseNumber_(text, NaN);

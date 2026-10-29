@@ -38,8 +38,8 @@
     document.title = c.brand;
     $('lede').textContent = 'Order below. Pay by bank transfer. We deliver in ' + c.area + '.';
     if (!stepper) buildForm();
-    stepper.setMax(c.maxQty);
-    stepper.setItem(c.product + ', ' + SJ.money(c.price, c.currency) + ' each');
+    stepper.setRange(c.minQty, c.maxQty);
+    stepper.setItem(SJ.itemLine(c));
     $('area-label').textContent = 'My address is in ' + c.area;
     renderTotals();
   }
@@ -213,7 +213,7 @@
     current = null;
     pending = null;
     $('notes').value = '';
-    if (stepper) stepper.set(1);
+    if (stepper) stepper.reset();
     hideError();
     showView(config && config.ready ? 'order-form' : 'view-loading');
     window.scrollTo(0, 0);
