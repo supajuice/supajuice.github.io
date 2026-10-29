@@ -257,10 +257,11 @@
 
   function qtyStepper(opts) {
     var id = opts.id;
+    var min = opts.min || 1;
     var max = opts.max || 20;
     var listeners = [];
     var input = el('input', {
-      id: id, class: 'qty-input', type: 'number', inputmode: 'numeric', min: '1', max: String(max), value: '1',
+      id: id, class: 'qty-input', type: 'number', inputmode: 'numeric', min: String(min), max: String(max), value: String(min),
       'aria-describedby': id + '-item'
     });
     var down = el('button', { type: 'button', class: 'qty-btn', 'aria-label': 'One fewer' }, '−');
@@ -274,11 +275,11 @@
 
     function read() {
       var n = parseInt(input.value, 10);
-      return isFinite(n) ? Math.max(1, Math.min(max, n)) : 1;
+      return isFinite(n) ? Math.max(min, Math.min(max, n)) : min;
     }
     function sync() {
       var n = read();
-      down.disabled = n <= 1;
+      down.disabled = n <= min;
       up.disabled = n >= max;
     }
     function changed() {
@@ -286,7 +287,7 @@
       listeners.forEach(function (fn) { fn(read()); });
     }
     function set(n) {
-      input.value = String(Math.max(1, Math.min(max, n)));
+      input.value = String(Math.max(min, Math.min(max, n)));
       changed();
     }
     down.addEventListener('click', function () { set(read() - 1); });
@@ -301,15 +302,25 @@
       input: input,
       get: read,
       set: set,
-      setMax: function (n) {
-        max = n;
-        input.max = String(n);
-        if (parseInt(input.value, 10) > n) input.value = String(n);
-        changed();
+      reset: function () { set(min); },
+      // Sets both limits. A count that was sitting at the old minimum moves to the new one.
+      setRange: function (lo, hi) {
+        var wasAtMin = read() === min;
+        min = Math.max(1, lo || 1);
+        max = Math.max(min, hi || min);
+        input.min = String(min);
+        input.max = String(max);
+        set(wasAtMin ? min : read());
       },
       setItem: function (text) { item.textContent = text; },
       onChange: function (fn) { listeners.push(fn); }
     };
+  }
+
+  // The line under the quantity, e.g. "Running gel sachet, R40 each. Minimum order 3."
+  function itemLine(c) {
+    var text = c.product + ', ' + money(c.price, c.currency) + ' each';
+    return (c.minQty || 1) > 1 ? text + '. Minimum order ' + c.minQty + '.' : text;
   }
 
   // The "3 x sachet / Delivery / Total" block.
@@ -349,6 +360,7 @@
     toast: toast,
     store: store,
     qtyStepper: qtyStepper,
+    itemLine: itemLine,
     renderSummary: renderSummary
   };
 })();

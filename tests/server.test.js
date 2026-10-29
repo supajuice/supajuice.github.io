@@ -79,7 +79,7 @@ test('public config shows the price but no bank details', () => {
   const cfg = gas.call({ action: 'config' }).config;
   assert.deepEqual(cfg, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30,
-    currency: 'R', area: 'Cape Town', maxQty: 20, ready: true
+    currency: 'R', area: 'Cape Town', minQty: 1, maxQty: 20, ready: true
   });
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
 });
@@ -200,6 +200,39 @@ test('invalid kiosk input is rejected with a readable message', () => {
   assert.equal(gas.rows('Orders').length, 0);
   assert.equal(gas.call(order({ qty: '2', expectedTotal: 110 })).ok, true, 'numeric string quantity is fine');
   assert.equal(gas.call(order({ contact: '' })).ok, true, 'Instagram handle or phone is optional');
+});
+
+test('a minimum order is enforced on the server for every kind of order', () => {
+  const { gas, key } = ready();
+  const saved = gas.call({ action: 'saveSettings', key, values: { min_quantity: '3' } });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(saved.config.minQty, 3);
+  assert.equal(gas.call({ action: 'config' }).config.minQty, 3, 'the order page is told the minimum');
+
+  const small = gas.call(order({ qty: 2, expectedTotal: 110 }));
+  assert.equal(small.error, 'invalid');
+  assert.match(small.message, /smallest order is 3/);
+  assert.equal(gas.call(dm(key, { qty: 2 })).error, 'invalid', 'DM orders follow the same minimum');
+  assert.equal(gas.rows('Orders').length, 0);
+  assert.equal(gas.call(order({ qty: 3, expectedTotal: 150 })).ok, true);
+});
+
+test('minimum and maximum order settings must make sense together', () => {
+  const { gas, key } = ready();
+  for (const values of [{ min_quantity: '0' }, { min_quantity: '2.5' }, { min_quantity: 'abc' }, { min_quantity: '201' }]) {
+    assert.equal(gas.call({ action: 'saveSettings', key, values }).error, 'invalid', JSON.stringify(values));
+  }
+  // Checked against the saved maximum (20) when only the minimum changes, and the other way round.
+  assert.match(gas.call({ action: 'saveSettings', key, values: { min_quantity: '25' } }).message, /cannot be more than/);
+  gas.call({ action: 'saveSettings', key, values: { min_quantity: '5' } });
+  assert.match(gas.call({ action: 'saveSettings', key, values: { max_quantity: '4' } }).message, /cannot be more than/);
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { min_quantity: '2', max_quantity: '4' } }).ok, true, 'both at once');
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { min_quantity: '' } }).values.min_quantity, '1', 'blank means no minimum');
+
+  // A minimum typed into the sheet above the maximum is pulled down instead of blocking every order.
+  const rows = gas.rows('Settings').map((r) => r.Key);
+  gas.sheet('Settings').getRange(rows.indexOf('min_quantity') + 2, 2).setValue('50');
+  assert.equal(gas.call({ action: 'config' }).config.minQty, 4);
 });
 
 test('long and multi-line text is trimmed and flattened', () => {
