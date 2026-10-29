@@ -11,7 +11,9 @@ When you are done you will have:
 It costs nothing to run.
 
 **Time:** about 45 minutes, in one sitting.
-**You need:** a computer (not a phone) with Chrome or Edge, a Google (Gmail) account, and your bank details.
+**You need:** a Mac with Chrome or Safari, a Google (Gmail) account, and your bank details.
+
+> On a Mac, **⌘** is the **Command** key, next to the space bar. **Right-click** means clicking with two fingers on the trackpad, or holding **Control** while you click.
 
 > Tip: keep a notes app open while you work. You will copy three things into it along the way: your **admin key**, your **web app address** and your **website address**.
 
@@ -21,7 +23,7 @@ It costs nothing to run.
 
 1. Open this link: **https://github.com/vishweshhampali/supa-juice/archive/refs/heads/main.zip**
    It downloads a file called `supa-juice-main.zip`. You do not need an account for this.
-2. Open your **Downloads** folder, right-click the zip file and choose **Extract All**, then **Extract**.
+2. Open **Finder** and go to **Downloads**. If you see a zip file called `supa-juice-main.zip`, double-click it to unzip it. (Safari often unzips it for you, so the folder may already be there.)
 3. You now have a folder called `supa-juice-main`. Inside it are two folders you will use:
    - `apps-script`: the part that runs inside Google
    - `docs`: the website
@@ -36,11 +38,12 @@ It costs nothing to run.
 
 ### Paste in the code
 
-4. In the editor you will see a file called `Code.gs` with a few lines in it. Click inside that text, press **Ctrl + A** to select it all, and press **Delete**.
-5. On your computer, open `supa-juice-main` → `apps-script`. Right-click **Code.gs** → **Open with** → **Notepad**.
-6. In Notepad press **Ctrl + A**, then **Ctrl + C** to copy everything.
-7. Go back to the Apps Script tab, click in the empty editor and press **Ctrl + V** to paste.
-8. Press **Ctrl + S** to save. (Or click the disk icon.)
+4. In the editor you will see a file called `Code.gs` with a few lines in it. Click inside that text, press **⌘ + A** to select it all, and press **Delete**.
+5. In Finder, open `supa-juice-main` → `apps-script`. Right-click **Code.gs** → **Open With** → **TextEdit**.
+   (If TextEdit is not in the list, choose **Other…**, pick **TextEdit**, and click **Open**.)
+6. In TextEdit press **⌘ + A**, then **⌘ + C** to copy everything.
+7. Go back to the Apps Script tab, click in the empty editor and press **⌘ + V** to paste.
+8. Press **⌘ + S** to save. (Or click the disk icon.)
 
 ### Set the time zone
 
@@ -49,9 +52,9 @@ This makes order times show in South African time.
 9. On the far left of the Apps Script page, click the **gear icon** (Project Settings).
 10. Tick **Show "appsscript.json" manifest file in editor**.
 11. Click the **< >** icon on the far left to go back to the editor. A file called `appsscript.json` now shows in the file list. Click it.
-12. Select everything in it (**Ctrl + A**) and delete it.
-13. On your computer, open `apps-script` → **appsscript.json** with Notepad, copy everything, and paste it into the editor.
-14. Press **Ctrl + S** to save.
+12. Select everything in it (**⌘ + A**) and delete it.
+13. In Finder, right-click `apps-script` → **appsscript.json** → **Open With** → **TextEdit**. Copy everything (**⌘ + A**, then **⌘ + C**) and paste it into the editor (**⌘ + V**).
+14. Press **⌘ + S** to save.
 
 ### Run the setup
 
@@ -119,9 +122,10 @@ GitHub will host your website for free.
 ### Upload the website files
 
 5. On the next page, find the line **"…or upload an existing file"** and click **uploading an existing file**.
-6. On your computer, open `supa-juice-main` → **`docs`**. You should see files like `index.html`, `admin.html`, `config.js` and a `fonts` folder.
-7. Press **Ctrl + A** to select everything **inside** the `docs` folder, and drag it all into the GitHub page where it says **Drag files here**.
+6. In Finder, open `supa-juice-main` → **`docs`**. You should see files like `index.html`, `admin.html`, `config.js` and a `fonts` folder.
+7. Click inside that Finder window, press **⌘ + A** to select everything **inside** the `docs` folder, and drag it all onto the GitHub page where it says **Drag files here**.
    Upload what is *inside* `docs`, not the `docs` folder itself.
+   Tip: put the Finder window and the browser side by side first, so you can drag from one to the other.
 8. Wait until all files are listed (about 8 files and the fonts folder).
 9. Scroll down and click the green **Commit changes** button.
 
@@ -240,7 +244,7 @@ Put your **order page address** in your Instagram bio. That's it, you're open.
 
 If you are sent a new `Code.gs`:
 
-1. Apps Script → `Code.gs` → select all, delete, paste the new code, **Ctrl + S**.
+1. Apps Script → `Code.gs` → select all, delete, paste the new code, **⌘ + S**.
 2. Choose **setup** and click **Run**. It keeps your orders, settings and key.
 3. Click **Deploy → Manage deployments**, click the **pencil icon**, set **Version** to **New version**, and click **Deploy**.
 
