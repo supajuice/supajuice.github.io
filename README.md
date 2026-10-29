@@ -1,5 +1,7 @@
 # Supa Juice orders
 
+> **Setting this up for yourself, without any coding?** Follow **[SETUP-GUIDE.md](SETUP-GUIDE.md)**. It needs only a web browser.
+
 Orders and invoices for a one-product running gel business.
 
 - Customers order from a page linked in the Instagram bio, see the bank details and get an invoice number. The invoice is also emailed to them as a PDF.
