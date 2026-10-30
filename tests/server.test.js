@@ -184,8 +184,6 @@ test('invalid kiosk input is rejected with a readable message', () => {
     [{ email: 'jane at example.com' }, /email address does not look right/],
     [{ email: 'jane@example' }, /email address does not look right/],
     [{ address: '' }, /address/i],
-    [{ areaConfirmed: false }, /delivery area/],
-    [{ areaConfirmed: 'true' }, /delivery area/],
     [{ qty: 0 }, /quantity/],
     [{ qty: -2 }, /quantity/],
     [{ qty: 1.5 }, /quantity/],
@@ -819,10 +817,11 @@ test('a page that shows the delivery total cannot slip in a collection order, or
   assert.equal(r.order.fee, 30);
 });
 
-test('delivery orders still need an address and the area tick', () => {
+test('delivery orders need an address, and no longer a delivery-area tick', () => {
   const { gas } = readyWithCollection();
   assert.match(gas.call(order({ address: '' })).message, /delivery address/);
-  assert.match(gas.call(order({ areaConfirmed: false })).message, /delivery area/);
+  const r = gas.call(order({ areaConfirmed: undefined }));
+  assert.equal(r.ok, true, 'Greg checks the address himself');
 });
 
 test('Greg can enter a collection order by DM even when collection is not offered on the order page', () => {

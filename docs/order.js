@@ -114,7 +114,6 @@
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
     stepper.setItem(SJ.itemLine(c));
-    $('area-label').textContent = 'My address is in ' + c.area;
     syncFulfil();
     applyPhoto(c.photo || null);
   }
@@ -137,8 +136,7 @@
       address: $('address').value.trim(),
       notes: $('notes').value.trim(),
       qty: stepper.get(),
-      collect: collecting(),
-      areaConfirmed: $('area-ok').checked
+      collect: collecting()
     };
   }
 
@@ -148,7 +146,6 @@
     if (!SJ.isEmail(d.email)) return { id: 'email', message: 'Check your email address. It should look like name@example.com.' };
     if (d.collect) return null;
     if (!d.address) return { id: 'address', message: 'Enter your delivery address.' };
-    if (!d.areaConfirmed) return { id: 'area-ok', message: 'Tick the box to confirm your address is in ' + config.area + '.' };
     return null;
   }
 
@@ -197,10 +194,7 @@
     }
 
     // A collection order does not send the address that is hidden on the form.
-    if (data.collect) {
-      data.address = '';
-      data.areaConfirmed = false;
-    }
+    if (data.collect) data.address = '';
     var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 

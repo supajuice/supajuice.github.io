@@ -80,7 +80,7 @@ const SETTING_DEFS = [
   { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery. When fees are confirmed per order, customers see it as "from" and it is suggested when you accept a request.' },
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
-  { key: 'delivery_area', value: 'Cape Town', note: 'Customers tick a box to confirm their address is inside this area.' },
+  { key: 'delivery_area', value: 'Cape Town', note: 'Shown on the order page, for example "We deliver in Cape Town".' },
   { key: 'collection_note', value: '', note: 'Where and how customers collect, for example "Sea Point. We DM you to arrange a time." Collection is free. Leave blank to offer delivery only.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
@@ -197,7 +197,6 @@ function createOrder_(body, source) {
   if (kiosk && !email) throw fail_('invalid', 'Please enter your email address so we can send your invoice.');
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
   if (kiosk && !collect && !address) throw fail_('invalid', 'Please enter your delivery address.');
-  if (kiosk && !collect && body.areaConfirmed !== true) throw fail_('invalid', 'Please confirm your address is inside the delivery area.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
   // Greg can set the delivery fee for a DM order himself. Customers never can.
   const customFee = !kiosk && body.fee !== undefined && body.fee !== null && body.fee !== '' ? parseNumber_(body.fee, NaN) : null;

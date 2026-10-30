@@ -53,7 +53,7 @@ async function openAdmin(t, opts) {
 
 async function fillKiosk(page, over) {
   const d = Object.assign({
-    name: 'Jane Doe', email: 'jane@example.com', contact: '@jane.runs', address: '12 Beach Rd, Sea Point', notes: '', area: true, more: 0
+    name: 'Jane Doe', email: 'jane@example.com', contact: '@jane.runs', address: '12 Beach Rd, Sea Point', notes: '', more: 0
   }, over);
   await page.waitForSelector('#order-form:not([hidden])');
   for (let i = 0; i < d.more; i++) await page.click('[aria-label="One more"]');
@@ -62,7 +62,6 @@ async function fillKiosk(page, over) {
   await page.fill('#contact', d.contact);
   await page.fill('#address', d.address);
   await page.fill('#notes', d.notes);
-  if (d.area) await page.check('#area-ok');
 }
 
 const orderRows = (dev) => dev.gas.rows('Orders');
@@ -321,10 +320,7 @@ test('order page: missing details are caught before anything is sent', async (t)
   await page.fill('#email', 'jane@example.com');
   await page.click('#submit');
   assert.match(await text(page, '#form-error'), /delivery address/);
-
-  await page.fill('#address', '1 Long St');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /confirm your address is in Cape Town|Tick the box/);
+  assert.equal(await page.locator('#area-ok').count(), 0, 'there is no delivery-area tick box');
 
   assert.equal(dev.calls.length, before, 'nothing was sent');
   assert.equal(orderRows(dev).length, 0);
