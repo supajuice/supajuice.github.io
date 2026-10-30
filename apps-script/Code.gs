@@ -80,7 +80,7 @@ const SETTING_DEFS = [
   { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery. When fees are confirmed per order, customers see it as "from" and it is suggested when you accept a request.' },
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
-  { key: 'delivery_area', value: 'Cape Town', note: 'Shown on the order page, for example "We deliver in Cape Town".' },
+  { key: 'delivery_area', value: 'Cape Town', note: 'Added to addresses when you open them in Maps from the admin page, so the right street is found. Customers do not see it.' },
   { key: 'collection_note', value: '', note: 'Where and how customers collect, for example "Sea Point. We DM you to arrange a time." Collection is free. Leave blank to offer delivery only.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
@@ -953,7 +953,7 @@ function validateSetting_(key, value) {
     case 'product_name':
     case 'currency_symbol':
     case 'delivery_area':
-      if (text === '') throw fail_('invalid', 'Brand, product, currency and delivery area cannot be blank.');
+      if (text === '') throw fail_('invalid', 'Brand, product, currency and area for Maps cannot be blank.');
       return text;
     default:
       return text;

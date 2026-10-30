@@ -80,7 +80,8 @@ test('order page: shows the shop, the price and a total that follows the quantit
   const { page, errors } = await openKiosk(t, { mode: 'ready' });
   await page.waitForSelector('#order-form:not([hidden])');
   assert.equal(await text(page, '#brand'), 'Supa Juice');
-  assert.match(await text(page, '#lede'), /Cape Town/);
+  assert.equal(await text(page, '#lede'), 'Order below. Pay by bank transfer. We deliver, or you can collect.');
+  assert.doesNotMatch(await page.locator('#order-form').innerText(), /Cape Town/, 'no delivery area is shown to customers');
   assert.match(await text(page, '.qty-item'), /Running gel sachet, R40 each/);
   assert.equal(await text(page, '#submit'), 'Place order for R70');
   await page.click('[aria-label="One more"]');
@@ -124,7 +125,7 @@ test('order page: with a minimum order the quantity starts there and cannot go b
 test('order page: a customer can choose to collect, and the delivery fee comes off', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
   await page.waitForSelector('#order-form:not([hidden])');
-  assert.match(await text(page, '#lede'), /or you can collect/);
+  assert.match(await text(page, '#lede'), /We deliver, or you can collect/);
   assert.equal(await text(page, '#fulfil-delivery-label'), 'Delivery, R30');
   assert.equal(await page.locator('#collect-note').isHidden(), true);
   assert.equal(await text(page, '#submit'), 'Place order for R70');
@@ -1417,7 +1418,9 @@ test('admin: saving settings changes what customers see and what the invoices sa
   await customer.goto(dev.siteUrl + '/');
   await customer.waitForSelector('#order-form:not([hidden])');
   assert.equal(await customer.locator('#brand').innerText(), 'Supa Juice Co');
-  assert.match(await customer.locator('#lede').innerText(), /Southern Suburbs/);
+  assert.doesNotMatch(await customer.locator('#lede').innerText(), /Southern Suburbs/, 'the area is not shown to customers');
+  const mapsLink = await page.locator('article.order a[href*="google.com/maps"]').first().getAttribute('href');
+  assert.ok(mapsLink.includes(encodeURIComponent('Southern Suburbs')), 'but it helps Maps find addresses');
   assert.equal(await customer.locator('#submit').innerText(), 'Place order for R45');
   noErrors(errors);
 });

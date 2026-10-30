@@ -38,7 +38,7 @@
         { key: 'price', label: 'Price per sachet', hint: 'A number, for example 40', mode: 'decimal', max: 12 },
         { key: 'delivery_fee', label: 'Delivery fee', hint: '0 means free delivery. With the box below ticked, customers see it as "from".', mode: 'decimal', max: 12 },
         { key: 'delivery_quote', label: 'Confirm the delivery fee for each order', hint: 'Delivery orders from your order page wait under New requests until you set the fee and accept them. The invoice is emailed then. Untick to charge the fee above straight away.', type: 'checkbox', wide: true },
-        { key: 'delivery_area', label: 'Delivery area', hint: 'Shown on your order page: "We deliver in Cape Town".', wide: true, max: 60 },
+        { key: 'delivery_area', label: 'Area for Maps', hint: 'Added when you tap an address, so Maps finds the right street. Customers do not see it.', wide: true, max: 60 },
         { key: 'collection_note', label: 'Collection', hint: 'Where and how customers collect, for example: Sea Point. We DM you to arrange a time. Collection is free. Leave blank to offer delivery only.', long: true, wide: true, max: 200 },
         { key: 'min_quantity', label: 'Fewest sachets per order', hint: 'The quantity starts here. 1 means no minimum', mode: 'numeric', max: 3 },
         { key: 'max_quantity', label: 'Most sachets per order', mode: 'numeric', max: 3 }

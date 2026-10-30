@@ -110,7 +110,7 @@
     config = c;
     $('brand').textContent = c.brand;
     document.title = c.brand;
-    $('lede').textContent = 'Order below. Pay by bank transfer. We deliver in ' + c.area + (c.collectNote ? ', or you can collect.' : '.');
+    $('lede').textContent = 'Order below. Pay by bank transfer.' + (c.collectNote ? ' We deliver, or you can collect.' : '');
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
     stepper.setItem(SJ.itemLine(c));
