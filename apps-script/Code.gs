@@ -86,11 +86,10 @@ const SETTING_DEFS = [
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
   { key: 'delivery_area', value: 'Cape Town', note: 'Added to addresses when you open them in Maps from the admin page, so the right street is found. Customers do not see it.' },
   { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page, invoices and calendar invites. Collection is free.' },
-  { key: 'collection_days', value: 'mon,tue,wed,thu,fri,sat', note: 'Days customers can collect, separated by commas: mon,tue,wed,thu,fri,sat,sun.' },
+  { key: 'collection_dates', value: '', note: 'Dates customers can collect, for example 2026-11-03, separated by commas. Tick them on the admin page, which shows the next 30 days.' },
   { key: 'collection_hours', value: '17:00-19:00', note: 'Collection hours, for example 17:00-19:00.' },
   { key: 'collection_slot_minutes', value: '30', note: 'Length of one collection time in minutes: 15, 30 or 60.' },
   { key: 'collection_per_slot', value: '1', note: 'How many customers can book the same collection time.' },
-  { key: 'collection_days_ahead', value: '14', note: 'How many days ahead customers can book a collection. Bookings start tomorrow.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
   { key: 'invoice_prefix', value: 'SJ', note: 'Letters before the invoice number, for example SJ-0001. Up to 6 letters or digits.' },
@@ -106,7 +105,7 @@ const SETTING_DEFS = [
 // Longest allowed text per setting.
 const SETTING_MAX = {
   brand_name: 60, product_name: 60, currency_symbol: 4, delivery_area: 60, collection_note: 200, alert_email: 120,
-  collection_days: 40, collection_hours: 20,
+  collection_dates: 400, collection_hours: 20,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
 
@@ -995,20 +994,26 @@ function readSettings_() {
   SETTING_DEFS.forEach(function (d) { values[d.key] = d.value; });
   const sheet = settingsSheet_();
   const last = sheet.getLastRow();
+  let weekdays = '';
   if (last >= 2) {
     sheet.getRange(2, 1, last - 1, 2).getValues().forEach(function (r) {
       const key = str_(r[0]);
       if (Object.prototype.hasOwnProperty.call(values, key)) values[key] = str_(r[1]);
+      else if (key === 'collection_days') weekdays = str_(r[1]);
     });
   }
   // Collection is always offered, so these fall back to their defaults when left blank in the sheet.
   NEVER_BLANK.forEach(function (key) {
     if (values[key] === '') values[key] = SETTING_DEFS.filter(function (d) { return d.key === key; })[0].value;
   });
+  // Until Greg ticks dates, the next 30 days on his old collection weekdays (Monday to Saturday by default).
+  if (values.collection_dates === '') values.collection_dates = datesOnWeekdays_(weekdays || 'mon,tue,wed,thu,fri,sat');
   return values;
 }
 
-const NEVER_BLANK = ['collection_note', 'collection_days', 'collection_hours', 'collection_slot_minutes', 'collection_per_slot', 'collection_days_ahead'];
+const NEVER_BLANK = ['collection_note', 'collection_hours', 'collection_slot_minutes', 'collection_per_slot'];
+// Settings from earlier versions. setup marks their rows as no longer used.
+const OLD_SETTINGS = ['collection_days', 'collection_days_ahead'];
 
 function readTypedSettings_() {
   const raw = readSettings_();
@@ -1060,7 +1065,7 @@ function publicConfig_(s, slots) {
     maxQty: s.maxQty,
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
     collectSlots: slots, // [{ date, label, times }], the free collection times
-    collectAhead: s.slots.ahead,
+    collectAhead: COLLECT_WINDOW_DAYS,
     ready: s.ready
   };
 }
@@ -1077,6 +1082,10 @@ function adminConfig_(s) {
   c.bank = s.bank;
   c.paymentNote = s.paymentNote;
   c.collectStep = s.slots.step;
+  // The next 30 dates for the settings calendar, and how many of them Greg has ticked.
+  c.collectWindow = collectWindow_().map(function (d) { return { date: d.date, label: d.label, weekday: d.weekday }; });
+  c.collectDatesLeft = s.slots.dates.length;
+  c.collectLastDate = s.slots.dates.length ? s.slots.dates[s.slots.dates.length - 1] : '';
   return c;
 }
 
@@ -1170,13 +1179,13 @@ function validateSetting_(key, value) {
     case 'collection_note':
       if (text === '') throw fail_('invalid', 'Collection place cannot be blank.');
       return text;
-    case 'collection_days': {
-      const picked = text.toLowerCase().split(/[\s,]+/).filter(String);
-      if (!picked.length || picked.some(function (d) { return DAY_KEYS.indexOf(d) === -1; })) {
-        throw fail_('invalid', 'Pick at least one collection day.');
-      }
-      // Kept in week order, Monday first.
-      return ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].filter(function (d) { return picked.indexOf(d) !== -1; }).join(',');
+    case 'collection_dates': {
+      const picked = text.split(/[\s,]+/).filter(String);
+      if (picked.some(function (d) { return !DATE_PATTERN.test(d); })) throw fail_('invalid', 'Collection dates must look like 2026-11-03.');
+      // Only dates customers can still book are kept, in order.
+      const dates = collectWindow_().map(function (d) { return d.date; }).filter(function (d) { return picked.indexOf(d) !== -1; });
+      if (!dates.length) throw fail_('invalid', 'Pick at least one collection date.');
+      return dates.join(',');
     }
     case 'collection_hours': {
       const h = parseHours_(text);
@@ -1191,11 +1200,6 @@ function validateSetting_(key, value) {
     case 'collection_per_slot': {
       const n = parseNumber_(text, NaN);
       if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 20) throw fail_('invalid', 'Collections per time must be a whole number from 1 to 20.');
-      return String(n);
-    }
-    case 'collection_days_ahead': {
-      const n = parseNumber_(text, NaN);
-      if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 60) throw fail_('invalid', 'Days ahead must be a whole number from 1 to 60.');
       return String(n);
     }
     case 'invoice_prefix':
@@ -1227,6 +1231,9 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // Cape Town is UTC+2 all year: South Africa has no daylight saving.
 const COLLECT_UTC_OFFSET = 2;
 const DAY_MS = 86400000;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+// Customers can book from tomorrow up to this many days ahead, on the dates Greg ticks.
+const COLLECT_WINDOW_DAYS = 30;
 
 // "17:00-19:00" -> { start: 1020, end: 1140 } in minutes, or null.
 function parseHours_(text) {
@@ -1242,23 +1249,37 @@ function clock_(minutes) {
   return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
 }
 
-// The settings as numbers. Anything unreadable falls back to the default, so there are always times.
+// The next 30 days, from tomorrow: [{ date, label, weekday }].
+function collectWindow_() {
+  const today = SLOT_PATTERN.exec(nowString_());
+  const base = Date.UTC(Number(today[1]), Number(today[2]) - 1, Number(today[3]));
+  const out = [];
+  for (let i = 1; i <= COLLECT_WINDOW_DAYS; i++) out.push(dayOf_(base + i * DAY_MS));
+  return out;
+}
+
+// "mon,tue" -> the dates in the next 30 days that fall on those weekdays.
+function datesOnWeekdays_(text) {
+  const days = String(text).toLowerCase().split(/[\s,]+/).map(function (d) { return DAY_KEYS.indexOf(d); });
+  return collectWindow_().filter(function (d) { return days.indexOf(d.weekday) !== -1; })
+    .map(function (d) { return d.date; }).join(',');
+}
+
+// The settings as numbers. Unreadable hours or lengths fall back to the defaults.
+// dates: the ticked dates customers can still book, in order.
 function readSlots_(raw) {
-  let days = String(raw.collection_days).toLowerCase().split(/[\s,]+/)
-    .map(function (d) { return DAY_KEYS.indexOf(d); })
-    .filter(function (i) { return i !== -1; });
-  if (!days.length) days = [1, 2, 3, 4, 5, 6];
+  const ticked = String(raw.collection_dates).split(/[\s,]+/);
+  const dates = collectWindow_().map(function (d) { return d.date; }).filter(function (d) { return ticked.indexOf(d) !== -1; });
   let step = parseNumber_(raw.collection_slot_minutes, 30);
   if ([15, 30, 60].indexOf(step) === -1) step = 30;
   let hours = parseHours_(raw.collection_hours);
   if (!hours || hours.end - hours.start < step) hours = parseHours_('17:00-19:00');
   return {
-    days: days,
+    dates: dates,
     start: hours.start,
     end: hours.end,
     step: step,
-    perSlot: Math.min(20, Math.max(1, Math.floor(parseNumber_(raw.collection_per_slot, 1)))),
-    ahead: Math.min(60, Math.max(1, Math.floor(parseNumber_(raw.collection_days_ahead, 14))))
+    perSlot: Math.min(20, Math.max(1, Math.floor(parseNumber_(raw.collection_per_slot, 1))))
   };
 }
 
@@ -1304,24 +1325,21 @@ function bookedCounts_(sheet) {
   return counts;
 }
 
-// The times customers can still book, from tomorrow, grouped by day:
+// The times customers can still book on the ticked dates, grouped by day:
 // [{ date: '2026-11-03', label: 'Tue 3 Nov', times: ['17:00', '17:30'] }]
 function freeSlots_(s, sheet) {
   const slots = s.slots;
   const booked = bookedCounts_(sheet);
-  const today = SLOT_PATTERN.exec(nowString_());
-  const base = Date.UTC(Number(today[1]), Number(today[2]) - 1, Number(today[3]));
   const out = [];
-  for (let i = 1; i <= slots.ahead; i++) {
-    const day = dayOf_(base + i * DAY_MS);
-    if (slots.days.indexOf(day.weekday) === -1) continue;
+  collectWindow_().forEach(function (day) {
+    if (slots.dates.indexOf(day.date) === -1) return;
     const times = [];
     for (let m = slots.start; m + slots.step <= slots.end; m += slots.step) {
       const t = clock_(m);
       if ((booked[day.date + ' ' + t] || 0) < slots.perSlot) times.push(t);
     }
     if (times.length) out.push({ date: day.date, label: day.label, times: times });
-  }
+  });
   return out;
 }
 
@@ -1597,6 +1615,12 @@ function setup() {
       next++;
     }
   });
+  // Settings this version no longer reads stay in the sheet, marked so they can be deleted.
+  if (last >= 2) {
+    settings.getRange(2, 1, last - 1, 1).getValues().forEach(function (r, i) {
+      if (OLD_SETTINGS.indexOf(str_(r[0])) !== -1) settings.getRange(i + 2, 3).setValue('No longer used. You can delete this row.');
+    });
+  }
   settings.getRange(1, 2, settings.getMaxRows(), 1).setNumberFormat('@');
   settings.setColumnWidth(1, 150);
   settings.setColumnWidth(2, 260);

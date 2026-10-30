@@ -47,11 +47,10 @@
       title: 'Collection',
       fields: [
         { key: 'collection_note', label: 'Collection place', hint: 'Where customers collect, for example Sea Point. Shown on your order page, invoices and calendar invites. Collection is free.', wide: true, max: 200 },
-        { key: 'collection_days', label: 'Days you hand over orders', type: 'days' },
+        { key: 'collection_dates', label: 'Dates you hand over orders', hint: 'Tick the dates customers can collect, from tomorrow up to 30 days ahead. Tick new dates as the weeks go by.', type: 'dates' },
         { key: 'collection_hours', label: 'Collection hours', hint: 'Customers pick a time inside these hours.', type: 'hours' },
         { key: 'collection_slot_minutes', label: 'Length of each time', type: 'select', options: [['15', '15 minutes'], ['30', '30 minutes'], ['60', '1 hour']] },
-        { key: 'collection_per_slot', label: 'Customers per time', hint: '1 means no two customers share a time', mode: 'numeric', max: 2 },
-        { key: 'collection_days_ahead', label: 'Days customers can book ahead', hint: 'Bookings start tomorrow', mode: 'numeric', max: 2 }
+        { key: 'collection_per_slot', label: 'Customers per time', hint: '1 means no two customers share a time', mode: 'numeric', max: 2 }
       ]
     },
     {
@@ -79,7 +78,7 @@
   var SETTING_FIELDS = [];
   SETTINGS_LAYOUT.forEach(function (s) { s.fields.forEach(function (f) { SETTING_FIELDS.push(f); }); });
 
-  var DAY_CHOICES = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
+  var WEEK_HEAD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   var state = {
     key: null,
@@ -336,6 +335,8 @@
     if (!c) return;
 
     if (!c.ready) panel.appendChild(setupBanner('Your order page is closed until you add the price and your bank details.'));
+    else if (c.collectDatesLeft === 0) panel.appendChild(setupBanner('No collection dates are left, so customers cannot collect. Tick more dates in Settings.'));
+    else if (c.collectDatesLeft < 4) panel.appendChild(setupBanner('Collection dates run out after ' + SJ.formatDay(c.collectLastDate) + '. Tick more dates in Settings.'));
     panel.appendChild(chipsRow());
 
     var f = currentFilter();
@@ -1301,14 +1302,7 @@
         el('label', { class: 'check' }, box, el('span', null, f.label)),
         f.hint ? el('p', { class: 'hint', id: boxId + '-hint' }, f.hint) : null);
     }
-    if (f.type === 'days') {
-      return el('fieldset', { class: 'field choice span-all', id: 's-' + f.key },
-        el('legend', null, f.label),
-        el('div', { class: 'day-picks' }, DAY_CHOICES.map(function (d) {
-          return el('label', { class: 'check day-pick' },
-            el('input', { type: 'checkbox', id: 's-' + f.key + '-' + d[0], value: d[0] }), el('span', null, d[1]));
-        })));
-    }
+    if (f.type === 'dates') return datesField(f);
     if (f.type === 'hours') {
       var from = el('input', { type: 'time', id: 's-' + f.key + '-from', step: '900' });
       var until = el('input', { type: 'time', id: 's-' + f.key + '-until', step: '900' });
@@ -1536,12 +1530,39 @@
     }
   }
 
+  // The next 30 dates as a calendar, Monday first. The month is shown on the first date and on each 1st.
+  function datesField(f) {
+    var days = (state.config && state.config.collectWindow) || [];
+    var grid = el('div', { class: 'cal' });
+    WEEK_HEAD.forEach(function (n) { grid.appendChild(el('span', { class: 'cal-head', 'aria-hidden': 'true' }, n)); });
+    var lead = days.length ? (days[0].weekday + 6) % 7 : 0;
+    for (var i = 0; i < lead; i++) grid.appendChild(el('span', { class: 'cal-blank', 'aria-hidden': 'true' }));
+    days.forEach(function (d, i) {
+      var num = Number(d.date.slice(8));
+      grid.appendChild(el('label', { class: 'cal-day' },
+        el('input', { type: 'checkbox', class: 'sr-only', id: 's-' + f.key + '-' + d.date, value: d.date }),
+        el('span', { class: 'cal-box', 'aria-hidden': 'true' },
+          el('span', { class: 'cal-month' }, i === 0 || num === 1 ? d.label.slice(-3) : ''),
+          el('span', { class: 'cal-num' }, String(num))),
+        el('span', { class: 'sr-only' }, d.label)));
+    });
+    function tickAll(on) {
+      Array.prototype.forEach.call(grid.querySelectorAll('input'), function (box) { box.checked = on; });
+    }
+    return el('fieldset', { class: 'field choice span-all', id: 's-' + f.key, 'aria-describedby': 's-' + f.key + '-hint' },
+      el('legend', null, f.label),
+      el('p', { class: 'hint', id: 's-' + f.key + '-hint' }, f.hint),
+      grid,
+      el('div', { class: 'cal-tools' },
+        el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: function () { tickAll(true); } }, 'Tick all'),
+        el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: function () { tickAll(false); } }, 'Untick all')));
+  }
+
   function readSetting(f) {
     var node = $('s-' + f.key);
     if (f.type === 'checkbox') return node.checked ? 'yes' : 'no';
-    if (f.type === 'days') {
-      return DAY_CHOICES.filter(function (d) { return $('s-' + f.key + '-' + d[0]).checked; })
-        .map(function (d) { return d[0]; }).join(',');
+    if (f.type === 'dates') {
+      return Array.prototype.map.call(node.querySelectorAll('input:checked'), function (box) { return box.value; }).join(',');
     }
     if (f.type === 'hours') return $('s-' + f.key + '-from').value + '-' + $('s-' + f.key + '-until').value;
     return node.value;
@@ -1552,9 +1573,9 @@
     var node = $('s-' + f.key);
     if (f.type === 'checkbox') {
       node.checked = value.toLowerCase() !== 'no';
-    } else if (f.type === 'days') {
+    } else if (f.type === 'dates') {
       var picked = value.split(',');
-      DAY_CHOICES.forEach(function (d) { $('s-' + f.key + '-' + d[0]).checked = picked.indexOf(d[0]) !== -1; });
+      Array.prototype.forEach.call(node.querySelectorAll('input'), function (box) { box.checked = picked.indexOf(box.value) !== -1; });
     } else if (f.type === 'hours') {
       var parts = value.split('-');
       $('s-' + f.key + '-from').value = parts[0] || '';

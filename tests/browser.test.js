@@ -257,14 +257,14 @@ test('order page: a time someone else just booked is refused, and the fresh time
 
 test('order page: with every time booked, the customer is told to choose delivery or DM', async (t) => {
   const { dev, page } = await open(t, { mode: 'ready' });
-  dev.gas.call({ action: 'saveSettings', key: dev.key, values: { collection_days: 'thu', collection_hours: '17:00-17:30', collection_days_ahead: '1' } });
+  dev.gas.call({ action: 'saveSettings', key: dev.key, values: { collection_dates: '2026-10-29', collection_hours: '17:00-17:30' } });
   dev.gas.call({
     action: 'order', name: 'Quick', email: 'q@example.com', qty: 1, collect: true, address: '', notes: '', website: '',
     collectAt: '2026-10-29 17:00', requestId: 'quick_000001', expectedTotal: 40
   });
   await page.goto(kioskUrl(dev));
   await choose(page, 'collect');
-  assert.match(await text(page, '#collect-hint'), /No collection times are free in the next 1 days\. Choose delivery, or send us a DM\./);
+  assert.match(await text(page, '#collect-hint'), /No collection times are free in the next 30 days\. Choose delivery, or send us a DM\./);
   assert.equal(await page.locator('#collect-day').isDisabled(), true);
   await page.fill('#name', 'Sam');
   await page.fill('#email', 'sam@example.com');
@@ -1375,19 +1375,32 @@ test('admin: the edit form changes the collection time, and Greg can pick any ti
   noErrors(errors);
 });
 
-test('admin: collection days and hours are set in Settings, and the order page follows them', async (t) => {
+// Dates are tapped on the calendar: the tick box itself is hidden inside its square.
+const dateBox = (page, date) => page.locator('label.cal-day:has(#s-collection_dates-' + date + ')');
+
+test('admin: collection dates and hours are set in Settings, and the order page follows them', async (t) => {
   const { dev, page, errors } = await openAdmin(t);
   await page.waitForSelector('.order');
   await page.click('.tab[data-tab="settings"]');
   await page.waitForSelector('#settings-form');
 
-  // Every day unticked is refused: collection is always on.
-  for (const d of ['mon', 'tue', 'wed', 'thu', 'fri', 'sat']) await page.uncheck('#s-collection_days-' + d);
+  // A calendar of the next 30 days, Monday first: 29 Oct is a Thursday, so three blanks come first.
+  assert.equal(await page.locator('.cal-day').count(), 30);
+  assert.equal(await page.locator('.cal-blank').count(), 3);
+  assert.equal(await dateBox(page, '2026-10-29').locator('.cal-box').innerText(), 'Oct\n29');
+  assert.equal(await dateBox(page, '2026-11-01').locator('.cal-box').innerText(), 'Nov\n1');
+  assert.equal(await page.locator('.cal-day input:checked').count(), 26, 'Monday to Saturday until Greg picks');
+
+  // No dates at all is refused: collection is always on.
+  await page.getByRole('button', { name: 'Untick all' }).click();
+  assert.equal(await page.locator('.cal-day input:checked').count(), 0);
   await page.click('#settings-save');
   await page.waitForSelector('#settings-error:not([hidden])');
-  assert.equal(await text(page, '#settings-error'), 'Pick at least one collection day.');
+  assert.equal(await text(page, '#settings-error'), 'Pick at least one collection date.');
 
-  await page.check('#s-collection_days-sun');
+  await dateBox(page, '2026-11-01').click();
+  await dateBox(page, '2026-11-08').click();
+  assert.equal(await page.isChecked('#s-collection_dates-2026-11-01'), true);
   await page.fill('#s-collection_hours-from', '09:00');
   await page.fill('#s-collection_hours-until', '11:00');
   await page.selectOption('#s-collection_slot_minutes', '60');
@@ -1396,8 +1409,12 @@ test('admin: collection days and hours are set in Settings, and the order page f
   await toast(page, 'Settings saved.');
   const saved = dev.gas.call({ action: 'getSettings', key: dev.key }).values;
   assert.deepEqual(
-    [saved.collection_days, saved.collection_hours, saved.collection_slot_minutes, saved.collection_per_slot],
-    ['sun', '09:00-11:00', '60', '2']);
+    [saved.collection_dates, saved.collection_hours, saved.collection_slot_minutes, saved.collection_per_slot],
+    ['2026-11-01,2026-11-08', '09:00-11:00', '60', '2']);
+
+  // With only two dates left, the Orders tab says when they run out.
+  await page.click('.tab[data-tab="orders"]');
+  assert.match(await text(page, '#panel-orders .alert'), /Collection dates run out after 8 Nov 2026\. Tick more dates in Settings\./);
 
   const customer = await page.context().newPage();
   await customer.goto(kioskUrl(dev));
@@ -1584,15 +1601,16 @@ test('admin: settings show the current values and the order page link', async (t
   assert.deepEqual(values, {
     price: '40', delivery_fee: '30', delivery_area: 'Cape Town', delivery_quote: 'on',
     min_quantity: '1', max_quantity: '20',
-    collection_note: 'Sea Point', collection_slot_minutes: '30', collection_per_slot: '1', collection_days_ahead: '14',
+    collection_note: 'Sea Point', collection_slot_minutes: '30', collection_per_slot: '1',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',
     brand_name: 'Supa Juice', product_name: 'Running gel sachet', currency_symbol: 'R', invoice_prefix: 'SJ',
     alert_email: 'greg@example.com'
   });
-  // Collection days are tick boxes and the hours are two times.
-  const days = await page.locator('#s-collection_days input:checked').evaluateAll((ns) => ns.map((n) => n.value));
-  assert.deepEqual(days, ['mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+  // Collection dates are a calendar and the hours are two times.
+  const dates = await page.locator('#s-collection_dates input:checked').evaluateAll((ns) => ns.map((n) => n.value));
+  assert.equal(dates.length, 26);
+  assert.equal(dates[0], '2026-10-29');
   assert.equal(await page.inputValue('#s-collection_hours-from'), '17:00');
   assert.equal(await page.inputValue('#s-collection_hours-until'), '19:00');
   assert.equal(await text(page, '.pay-value'), dev.siteUrl + '/');

@@ -82,7 +82,7 @@ test('public config shows the price but no bank details', () => {
   const { collectSlots, ...rest } = cfg;
   assert.deepEqual(rest, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R', area: 'Cape Town',
-    collectNote: 'Sea Point', collectAhead: 14, quote: false, minQty: 1, maxQty: 20, photo: null, ready: true
+    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, ready: true
   });
   assert.ok(collectSlots.length > 0, 'collection times are always offered');
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
@@ -1137,8 +1137,9 @@ test('with fees confirmed per order switched off, delivery is charged straight a
 // ---------------------------------------------------------------------------
 // Collection times and calendar invites
 // ---------------------------------------------------------------------------
-// The mock clock is Wed 28 Oct 2026, 15:41 in Cape Town. The defaults are Monday to
-// Saturday, 17:00 to 19:00, 30 minutes each, one customer per time, 14 days ahead.
+// The mock clock is Wed 28 Oct 2026, 15:41 in Cape Town. Customers can book the next 30 days
+// (29 Oct to 27 Nov). Until Greg ticks dates, those are Monday to Saturday. The other defaults
+// are 17:00 to 19:00, 30 minutes each, one customer per time.
 
 const TOMORROW = '2026-10-29';
 const pickup = (over) => order(Object.assign({ collect: true, address: '', qty: 3, expectedTotal: 120, collectAt: TOMORROW + ' 17:00' }, over));
@@ -1146,31 +1147,68 @@ const slotsOf = (gas) => gas.call({ action: 'config' }).config.collectSlots;
 const timesOn = (gas, date) => (slotsOf(gas).find((d) => d.date === date) || { times: [] }).times;
 const invite = (m) => (m.attachments || []).find((a) => a.getName() === 'invite.ics');
 
-test('collection times start tomorrow, skip days Greg does not collect, and follow his hours', () => {
-  const { gas, key } = ready();
+test('collection times start tomorrow, cover 30 days, and follow Greg\'s hours', () => {
+  const { gas } = ready();
   const slots = slotsOf(gas);
   assert.equal(slots[0].date, TOMORROW, 'never today');
   assert.equal(slots[0].label, 'Thu 29 Oct');
   assert.deepEqual(slots[0].times, ['17:00', '17:30', '18:00', '18:30'], 'the last time ends at 19:00');
-  assert.equal(slots.length, 12, '14 days ahead without the two Sundays');
+  assert.equal(slots.length, 26, '30 days without the four Sundays, until Greg ticks his own dates');
   assert.ok(!slots.some((d) => d.label.startsWith('Sun')));
-  assert.equal(slots[slots.length - 1].date, '2026-11-11');
-  assert.equal(gas.call({ action: 'config' }).config.collectAhead, 14);
+  assert.equal(slots[slots.length - 1].date, '2026-11-27');
+  assert.equal(gas.call({ action: 'config' }).config.collectAhead, 30);
 
-  const r = gas.call({ action: 'saveSettings', key, values: { collection_days: 'Sun', collection_hours: '9:00-10:00', collection_slot_minutes: '60', collection_days_ahead: '7' } });
+  // The default moves on with the calendar while no dates are ticked.
+  gas.clock.now += 2 * 86400000;
+  assert.equal(slotsOf(gas)[0].date, '2026-10-31');
+  assert.equal(slotsOf(gas).slice(-1)[0].date, '2026-11-28');
+});
+
+test('customers see only the dates Greg ticks, and ticked dates run out as days pass', () => {
+  const { gas, key } = ready();
+  const r = gas.call({ action: 'saveSettings', key, values: { collection_dates: '2026-11-03, 2026-11-01,2026-10-30', collection_hours: '9:00-10:00', collection_slot_minutes: '60' } });
   assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.values.collection_dates, '2026-10-30,2026-11-01,2026-11-03', 'kept in date order');
   assert.equal(r.values.collection_hours, '09:00-10:00');
-  assert.deepEqual(slotsOf(gas), [{ date: '2026-11-01', label: 'Sun 1 Nov', times: ['09:00'] }]);
+  assert.deepEqual(slotsOf(gas), [
+    { date: '2026-10-30', label: 'Fri 30 Oct', times: ['09:00'] },
+    { date: '2026-11-01', label: 'Sun 1 Nov', times: ['09:00'] },
+    { date: '2026-11-03', label: 'Tue 3 Nov', times: ['09:00'] }
+  ]);
+  assert.equal(r.config.collectDatesLeft, 3);
+  assert.equal(r.config.collectLastDate, '2026-11-03');
+  assert.equal(r.config.collectWindow.length, 30);
+  assert.deepEqual(r.config.collectWindow[0], { date: TOMORROW, label: 'Thu 29 Oct', weekday: 4 });
+
+  // Four days on it is 1 Nov, so only 3 Nov can still be booked.
+  gas.clock.now += 4 * 86400000;
+  assert.deepEqual(slotsOf(gas).map((d) => d.date), ['2026-11-03']);
+  gas.clock.now += 3 * 86400000;
+  assert.deepEqual(slotsOf(gas), [], 'no dates left until Greg ticks more');
+  const list = gas.call({ action: 'list', key });
+  assert.equal(list.config.collectDatesLeft, 0);
+});
+
+test('Greg\'s old collection weekdays become the first ticked dates', () => {
+  const { gas } = ready();
+  const settings = gas.sheet('Settings');
+  const row = settings.getLastRow() + 1;
+  settings.getRange(row, 1, 1, 2).setValues([['collection_days', 'thu,fri']]);
+  const dates = gas.call({ action: 'getSettings', key: gas.key() }).values.collection_dates.split(',');
+  assert.deepEqual(dates.slice(0, 4), ['2026-10-29', '2026-10-30', '2026-11-05', '2026-11-06']);
+  assert.equal(dates.length, 10);
+  gas.run('setup()');
+  assert.equal(gas.rows('Settings').find((r) => r.Key === 'collection_days').Note, 'No longer used. You can delete this row.');
 });
 
 test('collection is always on: a blank place or hours in the sheet fall back to the defaults', () => {
   const { gas } = ready();
   const settings = gas.sheet('Settings');
   const keys = gas.rows('Settings').map((r) => r.Key);
-  for (const k of ['collection_note', 'collection_days', 'collection_hours']) settings.getRange(keys.indexOf(k) + 2, 2).setValue('');
+  for (const k of ['collection_note', 'collection_dates', 'collection_hours']) settings.getRange(keys.indexOf(k) + 2, 2).setValue('');
   const cfg = gas.call({ action: 'config' }).config;
   assert.equal(cfg.collectNote, 'Sea Point');
-  assert.equal(cfg.collectSlots.length, 12);
+  assert.equal(cfg.collectSlots.length, 26);
   assert.equal(gas.call({ action: 'getSettings', key: gas.key() }).values.collection_note, 'Sea Point', 'the admin page shows the place in use');
   assert.equal(gas.call(pickup()).ok, true);
 });
@@ -1215,7 +1253,7 @@ test('customers must pick a real, offered collection time', () => {
   assert.match(gas.call(pickup({ collectAt: undefined })).message, /pick a collection time/);
   assert.match(gas.call(pickup({ collectAt: 'tomorrow evening' })).message, /does not look right/);
   assert.match(gas.call(pickup({ collectAt: '2026-02-30 17:00' })).message, /does not look right/);
-  for (const at of ['2026-10-28 17:00', TOMORROW + ' 17:15', TOMORROW + ' 19:00', '2026-11-01 17:00', '2026-11-12 17:00']) {
+  for (const at of ['2026-10-28 17:00', TOMORROW + ' 17:15', TOMORROW + ' 19:00', '2026-11-01 17:00', '2026-11-28 17:00']) {
     assert.equal(gas.call(pickup({ collectAt: at })).error, 'slot_taken', at);
   }
   assert.equal(gas.rows('Orders').length, 0);
@@ -1377,9 +1415,10 @@ test('editing a collection keeps, changes or clears its time', () => {
 test('collection settings are checked and kept tidy', () => {
   const { gas, key } = ready();
   const bad = [
-    { collection_note: ' ' }, { collection_days: '' }, { collection_days: 'mon,funday' },
+    { collection_note: ' ' }, { collection_dates: '' }, { collection_dates: '2026-11-03,someday' },
+    { collection_dates: '2026-10-28' }, { collection_dates: '2026-11-28' }, // today, and 31 days ahead
     { collection_hours: '19:00-17:00' }, { collection_hours: '25:00-26:00' }, { collection_hours: '5pm' }, { collection_hours: '' },
-    { collection_slot_minutes: '45' }, { collection_per_slot: '0' }, { collection_per_slot: '1.5' }, { collection_days_ahead: '61' },
+    { collection_slot_minutes: '45' }, { collection_per_slot: '0' }, { collection_per_slot: '1.5' },
     { collection_hours: '17:00-17:15' }, // shorter than one 30-minute time
     { collection_slot_minutes: '60', collection_hours: '17:00-17:30' }
   ];
@@ -1387,8 +1426,8 @@ test('collection settings are checked and kept tidy', () => {
     const r = gas.call({ action: 'saveSettings', key, values });
     assert.equal(r.error, 'invalid', JSON.stringify(values));
   }
-  const r = gas.call({ action: 'saveSettings', key, values: { collection_days: 'Sat, mon sun', collection_per_slot: '3', collection_slot_minutes: '15' } });
+  const r = gas.call({ action: 'saveSettings', key, values: { collection_dates: '2026-10-28,2026-11-02,2026-11-30', collection_per_slot: '3', collection_slot_minutes: '15' } });
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.equal(r.values.collection_days, 'mon,sat,sun', 'week order, Monday first');
+  assert.equal(r.values.collection_dates, '2026-11-02', 'dates customers cannot book are left out');
   assert.equal(r.config.collectStep, 15);
 });
