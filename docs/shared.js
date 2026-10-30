@@ -327,20 +327,26 @@
     return (c.minQty || 1) > 1 ? text + '. Minimum order ' + c.minQty + '.' : text;
   }
 
-  // The "3 x sachet / Delivery / Total" block. Collection has no fee.
-  function renderSummary(dl, c, qty, collect) {
+  // The "3 x sachet / Delivery / Total" block.
+  //   opts.collect  collection: no fee
+  //   opts.quote    the fee is confirmed later, so the total covers the sachets only
+  //   opts.fee      a fee to use instead of the usual one (Greg's DM orders)
+  function renderSummary(dl, c, qty, opts) {
+    opts = opts || {};
     var sym = c.currency;
-    var fee = collect ? 0 : c.fee;
+    var quote = !!opts.quote && !opts.collect;
+    var fee = opts.collect || quote ? 0 : (typeof opts.fee === 'number' ? opts.fee : c.fee);
     var total = totalFor(qty, c.price, fee);
+    var feeText = quote ? (c.fee > 0 ? 'From ' + money(c.fee, sym) : 'Confirmed later') : (fee > 0 ? money(fee, sym) : 'Free');
     clear(dl);
     dl.appendChild(el('div', { class: 'summary-row' },
       el('dt', null, qty + ' x ' + c.product),
       el('dd', null, money(totalFor(qty, c.price, 0), sym))));
     dl.appendChild(el('div', { class: 'summary-row' },
-      el('dt', null, collect ? 'Collection' : 'Delivery'),
-      el('dd', null, fee > 0 ? money(fee, sym) : 'Free')));
+      el('dt', null, opts.collect ? 'Collection' : 'Delivery'),
+      el('dd', null, feeText)));
     dl.appendChild(el('div', { class: 'summary-row summary-total' },
-      el('dt', null, 'Total'),
+      el('dt', null, quote ? 'Total before delivery' : 'Total'),
       el('dd', null, money(total, sym))));
     return total;
   }

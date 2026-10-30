@@ -12,14 +12,15 @@ const BANK = {
   branch_code: '250655', account_type: 'Cheque'
 };
 
-// A configured system: price 40, delivery 30, bank details set, alerts on.
+// A configured system: price 40, delivery 30 charged straight away, bank details set, alerts on.
+// (Delivery requests, where Greg confirms each fee, have their own tests below.)
 function ready() {
   const gas = createGas();
   gas.run('setup()');
   const key = gas.key();
   const saved = gas.call(Object.assign(
     { action: 'saveSettings', key },
-    { values: Object.assign({ price: '40', delivery_fee: '30', alert_email: 'greg@example.com' }, BANK) }
+    { values: Object.assign({ price: '40', delivery_fee: '30', delivery_quote: 'no', alert_email: 'greg@example.com' }, BANK) }
   ));
   assert.equal(saved.ok, true, JSON.stringify(saved));
   return { gas, key };
@@ -79,7 +80,7 @@ test('public config shows the price but no bank details', () => {
   const cfg = gas.call({ action: 'config' }).config;
   assert.deepEqual(cfg, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30,
-    currency: 'R', area: 'Cape Town', collectNote: '', minQty: 1, maxQty: 20, photo: null, ready: true
+    currency: 'R', area: 'Cape Town', collectNote: '', quote: false, minQty: 1, maxQty: 20, photo: null, ready: true
   });
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
 });
@@ -904,7 +905,7 @@ test('only orders waiting for payment can be edited', () => {
   gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
   const r = gas.call(edit(key, { qty: 9 }));
   assert.equal(r.error, 'invalid');
-  assert.match(r.message, /SJ-0001 is Paid\. Only orders waiting for payment can be edited/);
+  assert.match(r.message, /SJ-0001 is Paid\. Only new requests and orders waiting for payment can be edited/);
   assert.equal(gas.rows('Orders')[0].Qty, 3, 'unchanged');
   gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Cancelled' });
   assert.equal(gas.call(edit(key)).error, 'invalid');
@@ -955,4 +956,177 @@ test('rows from before these columns existed can still be edited', () => {
   const r = gas.call(edit(key, { name: 'Old Row', qty: 2, email: '' }));
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.order.total, 110);
+});
+
+// ---------------------------------------------------------------------------
+// Delivery requests: Greg confirms the fee for each delivery
+// ---------------------------------------------------------------------------
+
+function readyQuote() {
+  const env = ready();
+  const r = env.gas.call({ action: 'saveSettings', key: env.key, values: { delivery_quote: 'yes', collection_note: 'Sea Point. We DM you.' } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  return env;
+}
+
+// What the order page sends for a delivery when the fee is confirmed later: the sachets only.
+const request = (over) => order(Object.assign({ expectedTotal: 120 }, over));
+
+test('a new setup confirms delivery fees per order, and the order page is told', () => {
+  const gas = createGas();
+  gas.run('setup()');
+  assert.equal(gas.rows('Settings').find((r) => r.Key === 'delivery_quote').Value, 'yes');
+  const { gas: g2 } = readyQuote();
+  assert.equal(g2.call({ action: 'config' }).config.quote, true);
+  assert.equal(g2.call({ action: 'saveSettings', key: g2.key(), values: { delivery_quote: 'maybe' } }).error, 'invalid');
+});
+
+test('a delivery order becomes a request: no fee, no bank details, no customer email', () => {
+  const { gas } = readyQuote();
+  const r = gas.call(request());
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'New request');
+  assert.equal(r.order.invoice, 'SJ-0001');
+  assert.equal(r.order.total, 120, 'sachets only, until the fee is set');
+  assert.equal(r.bank, null);
+  assert.equal(r.paymentNote, '');
+  assert.equal(r.emailed, undefined);
+  assert.ok(!JSON.stringify(r).includes('0012345678'), 'no bank details anywhere');
+
+  const row = gas.rows('Orders')[0];
+  assert.equal(row.Status, 'New request');
+  assert.equal(row['Delivery fee'], '', 'the fee is blank until Greg sets it');
+
+  // Only Greg is emailed, and asked to set the fee.
+  assert.equal(gas.mail.length, 1);
+  assert.equal(gas.mail[0].to, 'greg@example.com');
+  assert.equal(gas.mail[0].subject, 'New request SJ-0001: 3 x Running gel sachet, set the delivery fee');
+  assert.match(gas.mail[0].body, /Address: 12 Beach Rd, Sea Point/);
+});
+
+test('the order page must show the sachets-only total for a request', () => {
+  const { gas } = readyQuote();
+  assert.equal(gas.call(request({ expectedTotal: 150 })).error, 'price_changed', 'a page still adding the fee is told to reload');
+});
+
+test('collection orders skip the request and get the invoice straight away', () => {
+  const { gas } = readyQuote();
+  const r = gas.call(request({ collect: true, address: '', areaConfirmed: false }));
+  assert.equal(r.order.status, 'Awaiting payment');
+  assert.equal(r.order.total, 120);
+  assert.equal(r.bank.number, '0012345678');
+  assert.equal(r.emailed, true);
+});
+
+test('Greg sets the fee and accepts: the customer gets the invoice with the bank details', () => {
+  const { gas, key } = readyQuote();
+  gas.call(request());
+  gas.mail.length = 0;
+  const r = gas.call({ action: 'acceptOrder', key, invoice: 'sj-0001', fee: 'R45' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'Awaiting payment');
+  assert.equal(r.order.fee, 45);
+  assert.equal(r.order.total, 165);
+  assert.equal(r.emailed, true);
+  assert.equal(gas.mail.length, 1);
+  assert.equal(gas.mail[0].to, 'jane@example.com');
+  assert.match(gas.mail[0].body, /Delivery: R45\nTotal due: R165/);
+  assert.match(gas.mail[0].body, /Account number: 0012345678/);
+  assert.match(gas.mail[0].attachments[0].getDataAsString(), /R165/);
+  const row = gas.rows('Orders')[0];
+  assert.deepEqual([row.Status, row['Delivery fee'], row.Total], ['Awaiting payment', 45, 165]);
+
+  // From here it is an ordinary order.
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' }).order.status, 'Paid');
+});
+
+test('accepting checks the fee and only works on new requests', () => {
+  const { gas, key } = readyQuote();
+  gas.call(request());
+  for (const fee of ['', 'abc', '-5', undefined]) {
+    assert.equal(gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0001', fee }).error, 'invalid', String(fee));
+  }
+  assert.equal(gas.rows('Orders')[0].Status, 'New request');
+  assert.equal(gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0001', fee: '0' }).order.total, 120, 'free delivery is fine');
+  assert.match(gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0001', fee: '10' }).message, /Only new requests can be accepted/);
+  assert.equal(gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0404', fee: '10' }).error, 'not_found');
+  assert.equal(gas.call({ action: 'acceptOrder', invoice: 'SJ-0001', fee: '10' }).error, 'unauthorized');
+});
+
+test('a request cannot be marked paid, emailed an invoice, or slip past acceptance', () => {
+  const { gas, key } = readyQuote();
+  gas.call(request());
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' }).error, 'invalid');
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Awaiting payment' }).error, 'invalid');
+  assert.match(gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0001' }).message, /Accept it first/);
+});
+
+test('Greg can edit a request before accepting it; the fee stays open and nothing is emailed', () => {
+  const { gas, key } = readyQuote();
+  gas.call(request());
+  gas.mail.length = 0;
+  const r = gas.call({
+    action: 'editOrder', key, invoice: 'SJ-0001', name: 'Jane Doe', contact: '', email: 'jane@example.com',
+    address: '99 Far Away Rd', notes: '', qty: 4, collect: false, price: '40', fee: '999', sendInvoice: true
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'New request');
+  assert.equal(r.order.total, 160);
+  assert.equal(gas.rows('Orders')[0]['Delivery fee'], '');
+  assert.equal(r.emailed, undefined);
+  assert.equal(gas.mail.length, 0);
+});
+
+test('declining cancels the request and emails the customer the reason', () => {
+  const { gas, key } = readyQuote();
+  gas.call(request());
+  gas.mail.length = 0;
+  const r = gas.call({ action: 'declineOrder', key, invoice: 'SJ-0001', reason: 'We do not deliver that far yet. You are welcome to collect in Sea Point.' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'Cancelled');
+  assert.equal(r.emailed, true);
+  const m = gas.mail[0];
+  assert.equal(m.to, 'jane@example.com');
+  assert.equal(m.subject, 'Supa Juice order SJ-0001');
+  assert.equal(m.replyTo, 'greg@example.com');
+  assert.match(m.body, /Sorry, we cannot fill your order SJ-0001\.\n\nWe do not deliver that far yet/);
+  assert.match(m.body, /There is nothing to pay/);
+  assert.equal(m.attachments, undefined, 'no invoice');
+
+  // It can be reopened like any cancelled order, and only requests can be declined.
+  assert.equal(gas.call({ action: 'declineOrder', key, invoice: 'SJ-0001' }).error, 'invalid');
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Awaiting payment' }).ok, true);
+});
+
+test('declining without a reason, or for a customer without email, still works', () => {
+  const { gas, key } = readyQuote();
+  gas.call(request());
+  const r = gas.call({ action: 'declineOrder', key, invoice: 'SJ-0001' });
+  assert.equal(r.emailed, true);
+  assert.doesNotMatch(gas.mail[gas.mail.length - 1].body, /\n\n\n/);
+  gas.mailQuota.left = 0;
+  gas.call(request({ requestId: 'req_second_0001' }));
+  assert.equal(gas.call({ action: 'declineOrder', key, invoice: 'SJ-0002' }).emailed, false, 'a failed email does not stop the decline');
+  assert.equal(gas.rows('Orders')[1].Status, 'Cancelled');
+});
+
+test('Greg can set the delivery fee on a DM order himself', () => {
+  const { gas, key } = readyQuote();
+  const r = gas.call(dm(key, { qty: 2, fee: '55' }));
+  assert.equal(r.order.status, 'Awaiting payment', 'DM orders never need accepting');
+  assert.equal(r.order.fee, 55);
+  assert.equal(r.order.total, 135);
+  assert.equal(gas.call(dm(key, { qty: 2 })).order.fee, 30, 'no fee given: the usual fee');
+  assert.equal(gas.call(dm(key, { fee: 'lots' })).error, 'invalid');
+  // The order page cannot choose its own fee.
+  const kiosk = gas.call(request({ fee: '0' }));
+  assert.equal(kiosk.order.status, 'New request');
+});
+
+test('with fees confirmed per order switched off, delivery is charged straight away as before', () => {
+  const { gas, key } = readyQuote();
+  gas.call({ action: 'saveSettings', key, values: { delivery_quote: 'no' } });
+  const r = gas.call(order());
+  assert.equal(r.order.status, 'Awaiting payment');
+  assert.equal(r.order.total, 150);
 });

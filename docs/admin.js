@@ -10,12 +10,14 @@
   var STALE_AFTER = 30 * 1000;
   var LIST_LIMIT = 500; // the most orders the service sends back
 
+  var REQUESTED = 'New request';
   var AWAITING = 'Awaiting payment';
   var PAID = 'Paid';
   var DELIVERED = 'Delivered';
   var CANCELLED = 'Cancelled';
 
   var FILTERS = [
+    { id: 'requests', status: REQUESTED, label: 'New requests' },
     { id: 'awaiting', status: AWAITING, label: 'Awaiting payment' },
     { id: 'paid', status: PAID, label: 'Paid' },
     { id: 'delivered', status: DELIVERED, label: 'Delivered' },
@@ -23,6 +25,7 @@
   ];
 
   var STATUS_CLASS = {};
+  STATUS_CLASS[REQUESTED] = 'awaiting';
   STATUS_CLASS[AWAITING] = 'awaiting';
   STATUS_CLASS[PAID] = 'paid';
   STATUS_CLASS[DELIVERED] = 'delivered';
@@ -33,7 +36,8 @@
       title: 'Price and delivery',
       fields: [
         { key: 'price', label: 'Price per sachet', hint: 'A number, for example 40', mode: 'decimal', max: 12 },
-        { key: 'delivery_fee', label: 'Delivery fee', hint: '0 means free delivery', mode: 'decimal', max: 12 },
+        { key: 'delivery_fee', label: 'Delivery fee', hint: '0 means free delivery. With the box below ticked, customers see it as "from".', mode: 'decimal', max: 12 },
+        { key: 'delivery_quote', label: 'Confirm the delivery fee for each order', hint: 'Delivery orders from your order page wait under New requests until you set the fee and accept them. The invoice is emailed then. Untick to charge the fee above straight away.', type: 'checkbox', wide: true },
         { key: 'delivery_area', label: 'Delivery area', hint: 'Customers tick a box to say their address is inside it', wide: true, max: 60 },
         { key: 'collection_note', label: 'Collection', hint: 'Where and how customers collect, for example: Sea Point. We DM you to arrange a time. Collection is free. Leave blank to offer delivery only.', long: true, wide: true, max: 200 },
         { key: 'min_quantity', label: 'Fewest sachets per order', hint: 'The quantity starts here. 1 means no minimum', mode: 'numeric', max: 3 },
@@ -80,6 +84,8 @@
     moreOpen: null,
     working: null,      // invoice being saved
     preview: null,      // invoice whose text is shown because copying failed
+    acceptFees: {},     // delivery fee typed for each new request, by invoice
+    declineReason: '',
     editing: null,      // invoice being edited
     editDraft: null,    // what has been typed into the edit form so far
     editError: null,
@@ -94,6 +100,7 @@
   var newStepper = null;
   var newPending = null; // { sig, id }: a retry of the same order reuses one request id
   var newBusy = false;
+  var newFeeTouched = false; // Greg typed his own fee, so a settings change does not overwrite it
   var savingSettings = false;
 
   // ---------- Small helpers ----------
@@ -223,6 +230,8 @@
     state.editing = null;
     state.editDraft = null;
     state.editError = null;
+    state.acceptFees = {};
+    state.declineReason = '';
     state.flash = null;
     state.focus = null;
     state.settings = null;
@@ -275,7 +284,9 @@
     SJ.store.set(KEY_STORE, state.key);
     if (!state.shown) {
       state.shown = true;
-      state.filter = countOf(AWAITING) > 0 ? 'awaiting' : (countOf(PAID) > 0 ? 'paid' : 'awaiting');
+      // Open on whatever needs Greg first: requests to price, then payments to check, then deliveries.
+      state.filter = countOf(REQUESTED) > 0 ? 'requests'
+        : countOf(AWAITING) > 0 ? 'awaiting' : (countOf(PAID) > 0 ? 'paid' : 'awaiting');
     }
     renderAll();
     showScreen('app');
@@ -342,6 +353,8 @@
   function chipsRow() {
     var row = el('div', { class: 'chips', role: 'group', 'aria-label': 'Show orders that are' });
     FILTERS.forEach(function (f) {
+      // With a fixed delivery fee there are no requests, so the filter would only be clutter.
+      if (f.status === REQUESTED && !state.config.quote && countOf(REQUESTED) === 0 && state.filter !== 'requests') return;
       var btn = el('button', {
         type: 'button', class: 'chip', 'aria-pressed': state.filter === f.id ? 'true' : 'false', 'data-role': 'chip-' + f.id
       }, f.label, el('span', { class: 'chip-count' }, String(countOf(f.status))));
@@ -362,6 +375,7 @@
     var n = list.length;
     if (!n) return '';
     var total = SJ.money(sumOf(list), state.config.currency);
+    if (f.id === 'requests') return plural(n, 'new request') + ' to set a delivery fee for and accept.';
     if (f.id === 'awaiting') return plural(n, 'order') + ' waiting for payment, ' + total + ' in total.';
     if (f.id === 'paid') return plural(n, 'paid order') + ' to deliver, ' + total + ' in total.';
     if (f.id === 'delivered') return plural(n, 'delivered order') + ', ' + total + ' in total.';
@@ -381,6 +395,7 @@
   function emptyState(f) {
     var none = state.orders.length === 0;
     var texts = {
+      requests: 'No new requests.',
       awaiting: 'Nothing is waiting for payment.',
       paid: 'No paid orders are waiting for delivery.',
       delivered: 'No orders have been delivered yet.',
@@ -427,6 +442,7 @@
     var c = state.config;
     var sym = c.currency;
     var awaiting = o.status === AWAITING;
+    var request = o.status === REQUESTED;
     var card = el('article', {
       class: 'order' + (state.flash === o.invoice ? ' order--flash' : ''),
       'aria-label': 'Order ' + o.invoice
@@ -434,21 +450,22 @@
     cards[o.invoice] = card;
 
     card.appendChild(el('div', { class: 'order-head' },
-      el('span', { class: 'badge' + (awaiting ? ' badge--attention' : '') }, o.invoice),
+      el('span', { class: 'badge' + (awaiting || request ? ' badge--attention' : '') }, o.invoice),
       el('span', { class: 'order-amount' }, SJ.money(o.total, sym))));
 
     card.appendChild(el('div', { class: 'order-who' },
       el('span', { class: 'order-name' }, o.name),
       el('span', { class: 'status status-' + (STATUS_CLASS[o.status] || 'cancelled') }, o.status)));
 
-    if (state.editing === o.invoice && awaiting) {
+    if (state.editing === o.invoice && (awaiting || request)) {
       card.appendChild(editForm(o));
       return card;
     }
 
     card.appendChild(el('p', { class: 'order-text' },
       o.qty + ' x ' + c.product + ' at ' + SJ.money(o.price, sym) + ', ' +
-      (o.collect ? 'collection' : (o.fee > 0 ? 'delivery ' + SJ.money(o.fee, sym) : 'free delivery'))));
+      (o.collect ? 'collection' : request ? 'delivery fee to be set'
+        : (o.fee > 0 ? 'delivery ' + SJ.money(o.fee, sym) : 'free delivery'))));
 
     if (awaiting) {
       card.appendChild(el('p', { class: 'order-match' },
@@ -478,6 +495,7 @@
   }
 
   function primaryRole(o) {
+    if (o.status === REQUESTED) return 'accept';
     return o.status === AWAITING ? 'mark-paid' : (o.status === PAID ? 'mark-delivered' : 'copy');
   }
 
@@ -551,6 +569,19 @@
           actionButton('Yes, mark paid', 'btn-primary', 'confirm', function () { setStatus(o, PAID); }),
           actionButton('Not yet', 'btn-quiet', 'back', function () { dropConfirm(o); })));
     }
+    if (asking === 'decline') {
+      var reason = el('textarea', { id: 'decline-reason', rows: '2', maxlength: '300', 'data-role': 'decline-reason' });
+      reason.value = state.declineReason;
+      reason.addEventListener('input', function () { state.declineReason = reason.value; });
+      return el('div', { class: 'confirm-row' },
+        el('p', null, 'Decline ', el('span', { class: 'nowrap' }, o.invoice), ' for ' + o.name + '? The order is cancelled.'),
+        o.email
+          ? el('div', { class: 'field' }, el('label', { for: 'decline-reason' }, 'Reason (optional, emailed to ' + o.email + ')'), reason)
+          : el('p', { class: 'fine' }, 'This customer has no email address. Let them know by DM.'),
+        el('div', { class: 'order-actions' },
+          actionButton('Yes, decline', 'btn-danger', 'confirm', function () { declineOrder(o); }),
+          actionButton('Keep request', 'btn-quiet', 'back', function () { dropConfirm(o); })));
+    }
     if (asking === 'cancel') {
       return el('div', { class: 'confirm-row' },
         el('p', null, 'Cancel ', el('span', { class: 'nowrap' }, o.invoice), ' for ' + o.name + '?'),
@@ -558,6 +589,8 @@
           actionButton('Yes, cancel order', 'btn-danger', 'confirm', function () { setStatus(o, CANCELLED); }),
           actionButton('Keep order', 'btn-quiet', 'back', function () { dropConfirm(o); })));
     }
+
+    if (o.status === REQUESTED) return requestRow(o, working);
 
     var saving = 'Saving…';
     // Only orders with an email address can have the invoice emailed again.
@@ -647,6 +680,109 @@
     }
   }
 
+  // ---------- New requests: set the delivery fee, then accept or decline ----------
+
+  function feeNumber(text) {
+    var t = String(text || '').trim().replace(/^[^\d-]*/, '').replace(/\s/g, '').replace(',', '.');
+    return /^\d+(\.\d+)?$/.test(t) ? parseFloat(t) : null;
+  }
+
+  function requestRow(o, working) {
+    var c = state.config;
+    if (state.acceptFees[o.invoice] === undefined) state.acceptFees[o.invoice] = String(c.fee);
+    var total = el('p', { class: 'list-total', role: 'status' });
+    var input = el('input', {
+      type: 'text', inputmode: 'decimal', id: 'fee-' + o.invoice, 'data-role': 'accept-fee', maxlength: '12', autocomplete: 'off'
+    });
+    input.value = state.acceptFees[o.invoice];
+    function sync() {
+      var fee = feeNumber(input.value);
+      total.textContent = fee === null ? 'Enter the delivery fee for this address.'
+        : 'Total with delivery: ' + SJ.money(SJ.totalFor(o.qty, o.price, fee), c.currency);
+    }
+    input.addEventListener('input', function () {
+      state.acceptFees[o.invoice] = input.value;
+      sync();
+    });
+    sync();
+
+    var actions = el('div', { class: 'order-actions' },
+      actionButton(working ? 'Saving…' : (o.email ? 'Accept and email invoice' : 'Accept'), 'btn-primary', 'accept', function () { acceptOrder(o); }, working),
+      actionButton('Edit', 'btn-quiet', 'edit', function () { startEdit(o); }, working),
+      moreMenu(o, [{ label: 'Decline', role: 'decline', danger: true, run: function () { state.declineReason = ''; askConfirm(o, 'decline'); } }], working));
+    if (o.collect) return actions;
+    return el('div', { class: 'stack' },
+      el('div', { class: 'field' }, el('label', { for: 'fee-' + o.invoice }, 'Delivery fee for this address'), input),
+      total,
+      actions);
+  }
+
+  async function acceptOrder(o) {
+    if (state.working) return;
+    var fee = o.collect ? 0 : feeNumber(state.acceptFees[o.invoice]);
+    if (fee === null) {
+      SJ.toast('Enter the delivery fee first.', 'bad');
+      state.focus = { invoice: o.invoice, role: 'accept-fee' };
+      renderOrders();
+      return;
+    }
+    state.working = o.invoice;
+    renderOrders();
+    try {
+      var res = await SJ.api('acceptOrder', { key: state.key, invoice: o.invoice, fee: String(fee) });
+      state.version++;
+      replaceOrder(res.order);
+      state.working = null;
+      delete state.acceptFees[o.invoice];
+      var inv = res.order.invoice;
+      // The order now waits for payment: show it there, ready to copy into a DM if needed.
+      state.filter = 'awaiting';
+      state.focus = { invoice: inv, role: 'copy' };
+      flashOrder(inv);
+      if (res.emailed === true) SJ.toast(inv + ' accepted. The invoice was emailed to ' + res.order.email + '.');
+      else if (res.emailed === false) SJ.toast(inv + ' accepted, but the invoice email did not send. Copy the invoice to send it.', 'bad');
+      else SJ.toast(inv + ' accepted. Copy the invoice to send it.');
+    } catch (err) {
+      state.working = null;
+      if (err.code === 'unauthorized') {
+        lock(err.message);
+        return;
+      }
+      SJ.toast(err.message, 'bad');
+      if (err.code === 'not_found' || /Only new requests/.test(err.message)) refresh({ quiet: true });
+      else renderOrders();
+    }
+  }
+
+  async function declineOrder(o) {
+    if (state.working) return;
+    var reason = state.declineReason.trim();
+    state.working = o.invoice;
+    state.confirm = null;
+    renderOrders();
+    try {
+      var res = await SJ.api('declineOrder', { key: state.key, invoice: o.invoice, reason: reason });
+      state.version++;
+      replaceOrder(res.order);
+      state.working = null;
+      state.declineReason = '';
+      delete state.acceptFees[o.invoice];
+      renderOrders();
+      var inv = res.order.invoice;
+      if (res.emailed === true) SJ.toast(inv + ' declined. The customer was emailed.');
+      else if (res.emailed === false) SJ.toast(inv + ' declined, but the email did not send. Let the customer know by DM.', 'bad');
+      else SJ.toast(inv + ' declined.');
+    } catch (err) {
+      state.working = null;
+      if (err.code === 'unauthorized') {
+        lock(err.message);
+        return;
+      }
+      SJ.toast(err.message, 'bad');
+      refresh({ quiet: true });
+    }
+  }
+
   // ---------- Editing an unpaid order ----------
 
   function startEdit(o) {
@@ -672,16 +808,17 @@
   }
 
   // The total as it will be saved, or null while a number does not make sense yet.
-  function draftTotal(d) {
+  function draftTotal(d, request) {
     var qty = Number(d.qty);
     var price = Number(String(d.price).replace(',', '.'));
-    var fee = d.collect ? 0 : Number(String(d.fee).replace(',', '.'));
+    var fee = d.collect || request ? 0 : Number(String(d.fee).replace(',', '.'));
     if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1 || !isFinite(price) || price < 0 || !isFinite(fee) || fee < 0) return null;
     return SJ.totalFor(qty, price, fee);
   }
 
   function editForm(o) {
     var d = state.editDraft;
+    var request = o.status === REQUESTED;
     var sym = state.config.currency;
     var working = state.working === o.invoice;
     var totalLine = el('p', { class: 'list-total', role: 'status' });
@@ -690,12 +827,14 @@
     var feeField;
 
     function sync() {
-      var total = draftTotal(d);
-      totalLine.textContent = total === null ? 'Check the quantity and prices.' : 'New total: ' + SJ.money(total, sym);
+      var total = draftTotal(d, request);
+      totalLine.textContent = total === null ? 'Check the quantity and prices.'
+        : (request ? 'Total before delivery: ' : 'New total: ') + SJ.money(total, sym);
       addressField.hidden = d.collect;
-      feeField.hidden = d.collect;
+      // A request's fee is set when it is accepted, and its invoice is sent then.
+      feeField.hidden = d.collect || request;
       var email = d.email.trim();
-      sendRow.hidden = !email;
+      sendRow.hidden = !email || request;
       sendRow.querySelector('span').textContent = 'Email the updated invoice to ' + email;
     }
 
@@ -772,8 +911,8 @@
         key: state.key, invoice: o.invoice,
         name: d.name.trim(), email: email, contact: d.contact.trim(),
         address: d.collect ? '' : d.address.trim(), notes: d.notes.trim(),
-        qty: Number(d.qty), collect: d.collect, price: d.price, fee: d.collect ? '0' : d.fee,
-        sendInvoice: !!(email && d.sendInvoice)
+        qty: Number(d.qty), collect: d.collect, price: d.price, fee: d.collect || o.status === REQUESTED ? '0' : d.fee,
+        sendInvoice: !!(email && d.sendInvoice && o.status === AWAITING)
       });
       state.version++;
       replaceOrder(res.order);
@@ -792,7 +931,7 @@
         lock(err.message);
         return;
       }
-      if (err.code === 'not_found' || /Only orders waiting for payment/.test(err.message)) {
+      if (err.code === 'not_found' || /can be edited/.test(err.message)) {
         // Someone changed it on another phone: show the order as it is now.
         state.editing = null;
         state.editDraft = null;
@@ -838,6 +977,10 @@
     newStepper.onChange(renderNewTotals);
     $('new-form').addEventListener('submit', onCreate);
     $('n-collect').addEventListener('change', renderNewTotals);
+    $('n-fee').addEventListener('input', function () {
+      newFeeTouched = true;
+      renderNewTotals();
+    });
   }
 
   function applyConfigToNew() {
@@ -845,6 +988,7 @@
     if (!c || !newStepper) return;
     newStepper.setRange(c.minQty, c.maxQty);
     newStepper.setItem(SJ.itemLine(c));
+    if (!newFeeTouched) $('n-fee').value = String(c.fee);
     var warn = $('new-warning');
     SJ.clear(warn);
     if (!c.ready) warn.appendChild(setupBanner('Add the price and your bank details in Settings before you create orders.'));
@@ -855,7 +999,9 @@
     if (!state.config || !newStepper) return;
     var collect = $('n-collect').checked;
     $('n-address-field').hidden = collect;
-    SJ.renderSummary($('n-summary'), state.config, newStepper.get(), collect);
+    $('n-fee-field').hidden = collect;
+    var fee = feeNumber($('n-fee').value);
+    SJ.renderSummary($('n-summary'), state.config, newStepper.get(), { collect: collect, fee: fee === null ? undefined : fee });
   }
 
   function showNewError(message) {
@@ -883,7 +1029,8 @@
       address: collect ? '' : $('n-address').value.trim(),
       notes: $('n-notes').value.trim(),
       qty: newStepper.get(),
-      collect: collect
+      collect: collect,
+      fee: collect ? '' : $('n-fee').value.trim()
     };
     if (!data.name) {
       showNewError('Enter the name of the customer.');
@@ -896,7 +1043,7 @@
       return;
     }
 
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect, data.fee]);
     if (!newPending || newPending.sig !== sig) newPending = { sig: sig, id: SJ.newRequestId() };
 
     setNewBusy(true);
@@ -974,6 +1121,8 @@
     newPending = null;
     ['n-name', 'n-email', 'n-contact', 'n-address', 'n-notes'].forEach(function (id) { $(id).value = ''; });
     $('n-collect').checked = false;
+    newFeeTouched = false;
+    if (state.config) $('n-fee').value = String(state.config.fee);
     renderNewTotals();
     if (newStepper) newStepper.reset();
     $('n-error').hidden = true;
@@ -1015,6 +1164,14 @@
   }
 
   function settingField(f) {
+    if (f.type === 'checkbox') {
+      var boxId = 's-' + f.key;
+      var box = el('input', { type: 'checkbox', id: boxId, name: f.key, 'aria-describedby': f.hint ? boxId + '-hint' : null });
+      box.checked = String(state.settings[f.key] || '').toLowerCase() !== 'no';
+      return el('div', { class: 'field span-all' },
+        el('label', { class: 'check' }, box, el('span', null, f.label)),
+        f.hint ? el('p', { class: 'hint', id: boxId + '-hint' }, f.hint) : null);
+    }
     var id = 's-' + f.key;
     var common = { id: id, name: f.key, maxlength: String(f.max), autocomplete: 'off' };
     if (f.hint) common['aria-describedby'] = id + '-hint';
@@ -1235,7 +1392,10 @@
     box.hidden = true;
 
     var values = {};
-    SETTING_KEYS.forEach(function (k) { values[k] = $('s-' + k).value; });
+    SETTING_KEYS.forEach(function (k) {
+      var node = $('s-' + k);
+      values[k] = node.type === 'checkbox' ? (node.checked ? 'yes' : 'no') : node.value;
+    });
 
     savingSettings = true;
     btn.disabled = true;
@@ -1246,7 +1406,11 @@
       state.version++;
       state.settings = res.values || {};
       state.config = res.config;
-      SETTING_KEYS.forEach(function (k) { $('s-' + k).value = state.settings[k] || ''; });
+      SETTING_KEYS.forEach(function (k) {
+        var node = $('s-' + k);
+        if (node.type === 'checkbox') node.checked = String(state.settings[k] || '').toLowerCase() !== 'no';
+        else node.value = state.settings[k] || '';
+      });
       renderAll();
       SJ.toast(!wasReady && res.config.ready ? 'Settings saved. Your order page is open.' : 'Settings saved.');
     } catch (err) {

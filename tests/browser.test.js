@@ -13,7 +13,7 @@ test.after(async () => { if (browser) await browser.close(); });
 // A fresh fake service, browser context and page for one test. Everything is closed afterwards.
 async function open(t, opts) {
   opts = opts || {};
-  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee });
+  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote });
   const ctx = await browser.newContext({
     viewport: { width: opts.width || 390, height: opts.height || 844 },
     deviceScaleFactor: 1,
@@ -171,6 +171,43 @@ test('order page: without a collection note there is no choice, only delivery', 
   assert.equal(await page.locator('#fulfil').isHidden(), true);
   assert.equal(await page.locator('#address-field').isHidden(), false);
   assert.doesNotMatch(await text(page, '#lede'), /collect/);
+});
+
+test('order page: with fees confirmed per order, a delivery is sent as a request with nothing to pay yet', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true });
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await text(page, '#fulfil-delivery-label'), 'Delivery, from R30');
+  assert.match(await text(page, '#summary'), /Delivery\s+From R30/);
+  assert.match(await text(page, '#summary'), /Total before delivery\s+R40/);
+  assert.equal(await text(page, '#submit'), 'Send order for R40 + delivery');
+  assert.match(await text(page, '#next-note'), /There is nothing to pay yet/);
+
+  await fillKiosk(page, { more: 2 });
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await text(page, '#done-title'), 'Order request sent');
+  assert.match(await text(page, '#done-sub'), /email your invoice to jane@example\.com with the bank details\. There is nothing to pay yet\./);
+  assert.equal(await text(page, '#bib .bib-number'), 'SJ-0001');
+  assert.equal(await text(page, '#bib .bib-caption'), 'Your order number');
+  assert.equal(await page.locator('#pay-section').isHidden(), true, 'no bank details');
+  assert.equal(await page.locator('#copy-invoice').isHidden(), true);
+  assert.ok(!(await page.content()).includes('0012345678'));
+
+  const row = orderRows(dev)[0];
+  assert.deepEqual([row.Status, row.Total, row['Delivery fee']], ['New request', 120, '']);
+  assert.equal(dev.gas.mail.length, 1, 'only Greg is emailed');
+
+  // After a reload it still reads as a request.
+  await page.reload();
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await text(page, '#done-title'), 'Your last request');
+
+  // Collection is not a request: it is priced and paid straight away.
+  await page.click('#new-order');
+  await page.waitForSelector('#order-form:not([hidden])');
+  await page.check('#fulfil-collect');
+  assert.equal(await text(page, '#submit'), 'Place order for R40', 'a new order starts at 1, with no fee');
+  noErrors(errors);
 });
 
 test('order page: free delivery is shown as Free', async (t) => {
@@ -1138,7 +1175,7 @@ test('admin: an order paid on another phone while being edited is not overwritte
   await page.fill('#e-qty', '9');
   dev.gas.call({ action: 'setStatus', key: dev.key, invoice: 'SJ-0005', status: 'Paid' });
   await c5.locator('[data-role="edit-save"]').click();
-  await toast(page, /SJ-0005 is Paid\. Only orders waiting for payment can be edited/);
+  await toast(page, /SJ-0005 is Paid\. Only new requests and orders waiting for payment can be edited/);
   assert.equal(serverStatus(dev, 'SJ-0005').Qty, 5);
 });
 
@@ -1161,6 +1198,124 @@ test('admin: a DM order can be a collection, with no delivery fee', async (t) =>
   await page.getByRole('button', { name: 'New order' }).last().click();
   assert.equal(await page.isChecked('#n-collect'), false, 'the next order starts as delivery');
   assert.equal(await page.locator('#n-address-field').isHidden(), false);
+  noErrors(errors);
+});
+
+// --- New requests ---
+
+test('admin: Greg sets the delivery fee on a request and accepts it, and the customer gets the invoice', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { quote: true });
+  await page.waitForSelector('.order');
+  // The page opens on what needs Greg first.
+  assert.equal(await page.getAttribute('[data-role="chip-requests"]', 'aria-pressed'), 'true');
+  assert.match(await text(page, '.list-head .list-total'), /1 new request to set a delivery fee for and accept/);
+  const c6 = card(page, 'SJ-0006');
+  assert.match(await c6.innerText(), /4 x Running gel sachet at R40, delivery fee to be set/);
+  assert.match(await c6.innerText(), /5 Ou Kaapse Weg, Noordhoek/);
+  assert.equal(await c6.locator('[data-role="mark-paid"]').count(), 0);
+  assert.equal(await c6.locator('[data-role="copy"]').count(), 0, 'no invoice to copy yet');
+  assert.equal(await page.inputValue('#fee-SJ-0006'), '30', 'the usual fee is the starting point');
+  assert.match(await c6.innerText(), /Total with delivery: R190/);
+
+  await page.fill('#fee-SJ-0006', '65');
+  assert.match(await c6.innerText(), /Total with delivery: R225/);
+  const mailBefore = dev.gas.mail.length;
+  await c6.locator('[data-role="accept"]').click();
+  await toast(page, 'SJ-0006 accepted. The invoice was emailed to megan@example.com.');
+
+  // It now waits for payment, with its invoice ready to copy.
+  assert.equal(await page.getAttribute('[data-role="chip-awaiting"]', 'aria-pressed'), 'true');
+  const accepted = card(page, 'SJ-0006');
+  assert.match(await accepted.innerText(), /delivery R65/);
+  assert.match(await accepted.innerText(), /R225/);
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('data-role')), 'copy');
+  const row = serverStatus(dev, 'SJ-0006');
+  assert.deepEqual([row.Status, row['Delivery fee'], row.Total], ['Awaiting payment', 65, 225]);
+  const mail = dev.gas.mail[mailBefore];
+  assert.equal(mail.to, 'megan@example.com');
+  assert.match(mail.body, /Delivery: R65\nTotal due: R225/);
+  assert.equal(await page.locator('[data-role="chip-requests"] .chip-count').innerText(), '0');
+  noErrors(errors);
+});
+
+test('admin: accepting needs a fee, and a request can be edited first', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { quote: true });
+  await page.waitForSelector('.order');
+  const c6 = card(page, 'SJ-0006');
+  await page.fill('#fee-SJ-0006', '');
+  assert.match(await c6.innerText(), /Enter the delivery fee for this address/);
+  await c6.locator('[data-role="accept"]').click();
+  await toast(page, 'Enter the delivery fee first.');
+  assert.equal(serverStatus(dev, 'SJ-0006').Status, 'New request');
+
+  await c6.locator('[data-role="edit"]').click();
+  assert.equal(await page.locator('#e-fee').isHidden(), true, 'the fee is set when accepting');
+  assert.equal(await page.locator('#e-send').isHidden(), true, 'no invoice is sent for a request');
+  await page.fill('#e-qty', '6');
+  assert.match(await c6.innerText(), /Total before delivery: R240/);
+  await c6.locator('[data-role="edit-save"]').click();
+  await toast(page, 'SJ-0006 updated.');
+  assert.equal(serverStatus(dev, 'SJ-0006').Status, 'New request');
+  assert.equal(serverStatus(dev, 'SJ-0006').Qty, 6);
+  assert.match(await card(page, 'SJ-0006').innerText(), /Total with delivery|Enter the delivery fee/);
+  noErrors(errors);
+});
+
+test('admin: declining a request cancels it and emails the customer the reason', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { quote: true });
+  await page.waitForSelector('.order');
+  await more(page, 'SJ-0006', 'Decline');
+  const c6 = card(page, 'SJ-0006');
+  assert.match(await c6.innerText(), /Decline SJ-0006 for Megan Fourie\? The order is cancelled\./);
+  assert.match(await c6.innerText(), /Reason \(optional, emailed to megan@example\.com\)/);
+  await page.fill('#decline-reason', 'Noordhoek is outside our delivery area for now. You are welcome to collect in Sea Point.');
+  const mailBefore = dev.gas.mail.length;
+  await c6.getByRole('button', { name: 'Yes, decline' }).click();
+  await toast(page, 'SJ-0006 declined. The customer was emailed.');
+  assert.equal(serverStatus(dev, 'SJ-0006').Status, 'Cancelled');
+  assert.match(dev.gas.mail[mailBefore].body, /Noordhoek is outside our delivery area/);
+  assert.equal(await page.locator('[data-role="chip-cancelled"] .chip-count').innerText(), '2');
+  noErrors(errors);
+});
+
+test('admin: a DM order can have its own delivery fee', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { quote: true });
+  await page.waitForSelector('.order');
+  await page.click('.tab[data-tab="new"]');
+  assert.equal(await page.inputValue('#n-fee'), '30');
+  await page.fill('#n-name', 'Far Away Friend');
+  await page.fill('#n-fee', '80');
+  assert.match(await text(page, '#n-summary'), /Delivery\s+R80/);
+  assert.match(await text(page, '#n-summary'), /Total\s+R120/);
+  await page.check('#n-collect');
+  assert.equal(await page.locator('#n-fee-field').isHidden(), true);
+  await page.uncheck('#n-collect');
+  await page.click('#n-submit');
+  await page.waitForSelector('#new-result:not([hidden])');
+  const row = serverStatus(dev, 'SJ-0007');
+  assert.deepEqual([row.Status, row['Delivery fee'], row.Total], ['Awaiting payment', 80, 120]);
+  await page.getByRole('button', { name: 'New order' }).last().click();
+  assert.equal(await page.inputValue('#n-fee'), '30', 'the next order starts at the usual fee');
+  noErrors(errors);
+});
+
+test('admin: unticking "Confirm the delivery fee" charges the fee straight away again', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { quote: true });
+  await page.waitForSelector('.order');
+  await page.click('.tab[data-tab="settings"]');
+  await page.waitForSelector('#settings-form');
+  assert.equal(await page.isChecked('#s-delivery_quote'), true);
+  await page.uncheck('#s-delivery_quote');
+  await page.click('#settings-save');
+  await toast(page, 'Settings saved.');
+  assert.equal(dev.gas.call({ action: 'config' }).config.quote, false);
+  assert.equal(await page.isChecked('#s-delivery_quote'), false);
+
+  const customer = await page.context().newPage();
+  await customer.goto(kioskUrl(dev));
+  await customer.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await customer.locator('#fulfil-delivery-label').innerText(), 'Delivery, R30');
+  assert.equal(await customer.locator('#submit').innerText(), 'Place order for R70');
   noErrors(errors);
 });
 
@@ -1219,7 +1374,7 @@ test('admin: settings show the current values and the order page link', async (t
     return out;
   });
   assert.deepEqual(values, {
-    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', collection_note: 'Sea Point. We DM you to arrange a time.',
+    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', collection_note: 'Sea Point. We DM you to arrange a time.', delivery_quote: 'on',
     min_quantity: '1', max_quantity: '20',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',

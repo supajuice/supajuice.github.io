@@ -87,7 +87,11 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 ## Greg's cheat sheet
 
-**An order comes in from the order page.** It shows under **Awaiting payment** and an alert email is sent. The customer has the bank details and an invoice number to use as the payment reference, and the invoice PDF in their email.
+**A delivery request comes in from the order page.** Delivery fees depend on the address, so a delivery order arrives under **New requests** and you get an alert email. The customer has an order number but no bank details yet, and nothing to pay. Check the address, type the **Delivery fee for this address** (it starts at your usual fee), and tap **Accept and email invoice**. The order moves to **Awaiting payment** and the customer is emailed the invoice PDF with the bank details. If you cannot do it, tap **More > Decline**, add a reason if you like, and the customer is emailed. **Edit** lets you fix the request first.
+
+**An order to collect comes in.** Collection has no fee to work out, so it goes straight to **Awaiting payment** and the customer gets the invoice with the bank details immediately.
+
+**Fixed delivery fee instead.** Untick **Settings > Confirm the delivery fee for each order**. Delivery orders then go straight to **Awaiting payment** with the usual fee, as before.
 
 **An order comes in by DM.** Open **New order**, enter the quantity and the customer's name (the rest is optional), and tap **Create order**. Tap **Copy invoice** and paste it into the DM. It has the bank details and the reference. If you filled in their email, the PDF is emailed as well.
 
@@ -109,6 +113,7 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 | Status | Meaning | Next step |
 | --- | --- | --- |
+| New request | A delivery order waiting for you to set the fee | Accept with a fee, Edit, or Decline |
 | Awaiting payment | Ordered, no money yet | Mark paid, or Cancel |
 | Paid | Money received | Mark delivered |
 | Delivered | Done | None |

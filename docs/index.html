@@ -78,7 +78,7 @@
 
       <div class="alert alert-bad" id="form-error" role="alert" hidden></div>
       <button type="submit" class="btn btn-primary btn-block" id="submit">Place order</button>
-      <p class="fine">Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.</p>
+      <p class="fine" id="next-note">Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.</p>
     </form>
 
     <section id="view-done" class="stack-lg" hidden>
@@ -89,7 +89,7 @@
         <p class="fine" id="done-collect" hidden></p>
       </div>
       <div class="bib" id="bib"></div>
-      <div class="stack">
+      <div class="stack" id="pay-section">
         <h3 class="section-title">Pay by bank transfer</h3>
         <div class="pay" id="pay"></div>
         <p class="fine" id="pay-note"></p>
@@ -98,7 +98,7 @@
         <button type="button" class="btn btn-quiet" id="copy-invoice">Copy invoice</button>
         <button type="button" class="btn btn-quiet" id="new-order">Place another order</button>
       </div>
-      <p class="fine">Take a screenshot of this page to keep your invoice number.</p>
+      <p class="fine" id="done-keep">Take a screenshot of this page to keep your invoice number.</p>
     </section>
 
     <section id="view-closed" class="closed stack" hidden>

@@ -84,6 +84,11 @@
     return !!(config && config.collectNote) && $('fulfil-collect').checked;
   }
 
+  // A delivery whose fee Greg confirms after the order: it is sent as a request.
+  function quoting() {
+    return !!(config && config.quote) && !collecting();
+  }
+
   function syncFulfil() {
     var offered = !!(config && config.collectNote);
     if (!offered) $('fulfil-delivery').checked = true;
@@ -94,7 +99,9 @@
     note.textContent = offered ? config.collectNote : '';
     note.hidden = !collect;
     if (config) {
-      $('fulfil-delivery-label').textContent = 'Delivery, ' + (config.fee > 0 ? SJ.money(config.fee, config.currency) : 'free');
+      $('fulfil-delivery-label').textContent = config.quote
+        ? (config.fee > 0 ? 'Delivery, from ' + SJ.money(config.fee, config.currency) : 'Delivery, fee confirmed after you order')
+        : 'Delivery, ' + (config.fee > 0 ? SJ.money(config.fee, config.currency) : 'free');
     }
     renderTotals();
   }
@@ -114,8 +121,12 @@
 
   function renderTotals() {
     if (!config) return;
-    var total = SJ.renderSummary($('summary'), config, stepper.get(), collecting());
-    if (!busy) $('submit').textContent = 'Place order for ' + SJ.money(total, config.currency);
+    var quote = quoting();
+    var total = SJ.renderSummary($('summary'), config, stepper.get(), { collect: collecting(), quote: quote });
+    if (!busy) $('submit').textContent = (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
+    $('next-note').textContent = quote
+      ? 'Next we work out the delivery fee for your address and email your invoice with the bank details. There is nothing to pay yet.'
+      : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
   }
 
   function readForm() {
@@ -197,7 +208,8 @@
     try {
       var res = await SJ.api('order', Object.assign({}, data, {
         requestId: pending.id,
-        expectedTotal: SJ.totalFor(data.qty, config.price, data.collect ? 0 : config.fee),
+        // The total the customer was shown: without a fee for collection, or for a request.
+        expectedTotal: SJ.totalFor(data.qty, config.price, data.collect || config.quote ? 0 : config.fee),
         website: $('website').value
       }));
       pending = null;
@@ -243,9 +255,22 @@
     var sym = res.currency;
     var bank = res.bank || {};
 
-    $('done-title').textContent = restored ? 'Your last order' : 'Order received';
+    // A delivery request has no fee yet, so no bank details: the invoice comes by email later.
+    var request = o.status === 'New request';
+    $('pay-section').hidden = request;
+    $('copy-invoice').hidden = request;
+    $('done-keep').textContent = 'Take a screenshot of this page to keep your ' + (request ? 'order' : 'invoice') + ' number.';
+
+    $('done-title').textContent = request
+      ? (restored ? 'Your last request' : 'Order request sent')
+      : (restored ? 'Your last order' : 'Order received');
     var sub = SJ.clear($('done-sub'));
-    if (restored) {
+    if (request) {
+      sub.textContent = restored
+        ? 'Sent ' + SJ.formatWhen(o.created) + '. We will email your invoice once the delivery fee is confirmed.'
+        : 'We will work out the delivery fee for your address and email your invoice to ' + o.email +
+          ' with the bank details. There is nothing to pay yet.';
+    } else if (restored) {
       sub.textContent = 'Placed ' + SJ.formatWhen(o.created) + '. If you have already paid, there is nothing more to do.';
     } else {
       sub.appendChild(document.createTextNode('Pay ' + SJ.money(o.total, sym) + ' by bank transfer and use '));
@@ -254,7 +279,7 @@
     }
 
     var emailNote = $('done-email');
-    emailNote.hidden = restored || !o.email;
+    emailNote.hidden = restored || request || !o.email;
     if (o.emailedOn) emailNote.textContent = 'We have emailed your invoice to ' + o.email + '. Check your spam folder if it is not there.';
     else emailNote.textContent = 'We could not email your invoice just now. Take a screenshot of this page instead.';
 
@@ -268,8 +293,8 @@
     bib.appendChild(el('div', { class: 'bib-main' },
       el('p', { class: 'bib-brand' }, res.brand),
       el('p', { class: 'bib-number' }, o.invoice),
-      el('p', { class: 'bib-caption' }, 'Your invoice number')));
-    bib.appendChild(el('div', { class: 'bib-tear' }, el('span', null, 'Use it as your payment reference')));
+      el('p', { class: 'bib-caption' }, request ? 'Your order number' : 'Your invoice number')));
+    bib.appendChild(el('div', { class: 'bib-tear' }, el('span', null, request ? 'Mention it if you contact us' : 'Use it as your payment reference')));
 
     var pay = $('pay');
     SJ.clear(pay);

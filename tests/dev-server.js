@@ -2,7 +2,7 @@
 /*
   A local stand-in for the real setup, for trying the pages in a browser.
 
-    node tests/dev-server.js [--mode=seeded|ready|empty] [--latency=300] [--fee=30]
+    node tests/dev-server.js [--mode=seeded|ready|empty] [--latency=300] [--fee=30] [--quote=false]
                             [--site-port=5173] [--api-port=5174]
 
   docs/ is served on one port, with config.js pointing at a fake order service on another
@@ -98,11 +98,25 @@ function build(mode, opts) {
         price: '40',
         delivery_fee: String(opts.fee === undefined ? 30 : opts.fee),
         alert_email: 'greg@example.com',
-        collection_note: 'Sea Point. We DM you to arrange a time.'
+        collection_note: 'Sea Point. We DM you to arrange a time.',
+        delivery_quote: 'no' // the sample orders below were placed with a fixed fee
       }, BANK)
     }));
   }
   if (mode === 'seeded') seed(gas, key);
+  // Delivery fees confirmed per order, with one request waiting for a fee when there are sample orders.
+  if (opts.quote && mode !== 'empty') {
+    expectOk(gas.call({ action: 'saveSettings', key, values: { delivery_quote: 'yes' } }));
+    if (mode === 'seeded') {
+      at(gas, '2026-10-28T12:10:00Z');
+      expectOk(gas.call({
+        action: 'order', name: 'Megan Fourie', email: 'megan@example.com', contact: '@megan.trails',
+        address: '5 Ou Kaapse Weg, Noordhoek', notes: 'Weekday evenings', qty: 4, areaConfirmed: true, website: '',
+        requestId: crypto.randomUUID().replace(/-/g, ''), expectedTotal: 160
+      }));
+      at(gas, '2026-10-28T13:41:00Z');
+    }
+  }
   return { gas, key };
 }
 
@@ -249,6 +263,7 @@ if (require.main === module) {
     mode: args.mode || 'seeded',
     latency: Number(args.latency || 0),
     fee: args.fee === undefined ? undefined : Number(args.fee),
+    quote: args.quote !== 'false', // --quote=false for a fixed delivery fee
     sitePort: Number(args['site-port'] || 5173),
     apiPort: Number(args['api-port'] || 5174)
   }).then((dev) => {

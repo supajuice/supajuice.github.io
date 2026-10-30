@@ -11,12 +11,17 @@
  * which avoids a CORS preflight request (Apps Script cannot answer one).
  *
  * Public actions   config, order, photo
- * Admin actions    list, create, editOrder, setStatus, sendInvoice, getSettings, saveSettings,
+ * Admin actions    list, create, editOrder, acceptOrder, declineOrder, setStatus, sendInvoice,
+ *                  getSettings, saveSettings,
  *                  setPhoto, removePhoto
  *                  (all need the admin key kept in Script properties)
  *
  * Customers with an email address get their invoice as a PDF: the unpaid one
  * when the order is placed, the paid one when it is marked paid.
+ *
+ * When delivery fees are confirmed per order (the default), a delivery order from
+ * the order page starts as a "New request". Greg sets the fee and accepts it, and
+ * only then is the invoice with the bank details sent. Collection orders skip this.
  *
  * Run setup() once after pasting this in. See README.md.
  */
@@ -52,13 +57,16 @@ const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00',
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const STATUS = {
+  REQUESTED: 'New request',
   AWAITING: 'Awaiting payment',
   PAID: 'Paid',
   DELIVERED: 'Delivered',
   CANCELLED: 'Cancelled'
 };
 // Which status can follow which. Includes the "undo" moves.
+// A new request becomes "Awaiting payment" only through acceptOrder, which sets the delivery fee.
 const TRANSITIONS = {
+  'New request': ['Cancelled'],
   'Awaiting payment': ['Paid', 'Cancelled'],
   'Paid': ['Delivered', 'Awaiting payment', 'Cancelled'],
   'Delivered': ['Paid'],
@@ -69,7 +77,8 @@ const SETTING_DEFS = [
   { key: 'brand_name', value: 'Supa Juice', note: 'Shown at the top of the order page and on invoices.' },
   { key: 'product_name', value: 'Running gel sachet', note: 'Shown on the order page and on invoices.' },
   { key: 'price', value: '', note: 'REQUIRED. Price of one sachet, as a number (for example 40).' },
-  { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery.' },
+  { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery. When fees are confirmed per order, customers see it as "from" and it is suggested when you accept a request.' },
+  { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
   { key: 'delivery_area', value: 'Cape Town', note: 'Customers tick a box to confirm their address is inside this area.' },
   { key: 'collection_note', value: '', note: 'Where and how customers collect, for example "Sea Point. We DM you to arrange a time." Collection is free. Leave blank to offer delivery only.' },
@@ -131,6 +140,8 @@ function handle_(body) {
       case 'list': return listOrders_();
       case 'create': return createOrder_(body, 'dm');
       case 'editOrder': return editOrder_(body);
+      case 'acceptOrder': return acceptOrder_(body);
+      case 'declineOrder': return declineOrder_(body);
       case 'setStatus': return setStatus_(body);
       case 'sendInvoice': return sendInvoice_(body);
       case 'getSettings': return { ok: true, values: readSettings_() };
@@ -188,6 +199,11 @@ function createOrder_(body, source) {
   if (kiosk && !collect && !address) throw fail_('invalid', 'Please enter your delivery address.');
   if (kiosk && !collect && body.areaConfirmed !== true) throw fail_('invalid', 'Please confirm your address is inside the delivery area.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
+  // Greg can set the delivery fee for a DM order himself. Customers never can.
+  const customFee = !kiosk && body.fee !== undefined && body.fee !== null && body.fee !== '' ? parseNumber_(body.fee, NaN) : null;
+  if (customFee !== null && (!isFinite(customFee) || customFee < 0 || customFee > 100000)) {
+    throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
+  }
 
   const lock = LockService.getScriptLock();
   try {
@@ -215,7 +231,10 @@ function createOrder_(body, source) {
       if (existing) return orderResponse_(existing, settings);
     }
 
-    const fee = collect ? 0 : settings.fee;
+    // With fees confirmed per order, a delivery from the order page is a request: the fee is
+    // left blank and the total covers the sachets only, until Greg accepts it.
+    const request = kiosk && !collect && settings.quote;
+    const fee = collect || request ? 0 : (customFee !== null ? round2_(customFee) : settings.fee);
     const totalCents = Math.round(settings.price * 100) * qty + Math.round(fee * 100);
     const total = totalCents / 100;
 
@@ -231,8 +250,8 @@ function createOrder_(body, source) {
     const row = [
       invoice, nowString_(), source,
       safe_(name), safe_(contact), safe_(address), safe_(notes),
-      qty, settings.price, fee, total,
-      STATUS.AWAITING, '', '', requestId,
+      qty, settings.price, request ? '' : fee, total,
+      request ? STATUS.REQUESTED : STATUS.AWAITING, '', '', requestId,
       safe_(email), '', collect ? 'yes' : '', ''
     ];
     writeRow_(sheet, sheet.getLastRow() + 1, row);
@@ -243,12 +262,15 @@ function createOrder_(body, source) {
   }
 
   if (kiosk) sendAlert_(order, settings);
-  const emailed = order.email ? emailInvoice_(order, settings) : undefined;
+  // A request gets no email yet: the invoice goes out when Greg accepts it.
+  const emailed = order.email && order.status === STATUS.AWAITING ? emailInvoice_(order, settings) : undefined;
   return orderResponse_(order, settings, emailed);
 }
 
 // emailed: true or false when an invoice email was attempted, left out otherwise.
+// A new request gets no bank details: there is nothing to pay until the fee is set.
 function orderResponse_(order, s, emailed) {
+  const request = order.status === STATUS.REQUESTED;
   return {
     ok: true,
     emailed: emailed,
@@ -258,8 +280,8 @@ function orderResponse_(order, s, emailed) {
     currency: s.currency,
     area: s.area,
     collectNote: s.collectNote,
-    bank: s.bank,
-    paymentNote: s.paymentNote
+    bank: request ? null : s.bank,
+    paymentNote: request ? '' : s.paymentNote
   };
 }
 
@@ -334,6 +356,7 @@ function sendInvoice_(body) {
   const order = rowToOrder_(sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0]);
   if (!order.email) throw fail_('invalid', 'Order ' + order.invoice + ' has no email address.');
   if (order.status === STATUS.CANCELLED) throw fail_('invalid', 'Order ' + order.invoice + ' is cancelled.');
+  if (order.status === STATUS.REQUESTED) throw fail_('invalid', 'Order ' + order.invoice + ' is a new request. Accept it first to send the invoice.');
   if (!emailInvoice_(order, readTypedSettings_())) {
     throw fail_('email_failed', 'The invoice email could not be sent. Please try again later.');
   }
@@ -359,7 +382,6 @@ function editOrder_(body) {
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
   if (!isFinite(price) || price < 0 || price > 100000) throw fail_('invalid', 'Price per sachet must be a number, for example 40.');
-  if (!isFinite(fee) || fee < 0 || fee > 100000) throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
 
   const settings = readTypedSettings_();
   if (qty < settings.minQty) throw fail_('invalid', 'The smallest order is ' + settings.minQty + '.');
@@ -378,12 +400,17 @@ function editOrder_(body) {
     if (!rowNum) throw fail_('not_found', 'Order ' + invoice + ' was not found.');
     const row = sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0];
     const status = str_(row[COL.STATUS]);
-    if (status !== STATUS.AWAITING) {
-      throw fail_('invalid', 'Order ' + str_(row[COL.INVOICE]) + ' is ' + status + '. Only orders waiting for payment can be edited.');
+    if (status !== STATUS.AWAITING && status !== STATUS.REQUESTED) {
+      throw fail_('invalid', 'Order ' + str_(row[COL.INVOICE]) + ' is ' + status + '. Only new requests and orders waiting for payment can be edited.');
+    }
+    // A request keeps its fee blank: the fee is set when Greg accepts it.
+    const request = status === STATUS.REQUESTED;
+    if (!request && (!isFinite(fee) || fee < 0 || fee > 100000)) {
+      throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
     }
 
     const unit = round2_(price);
-    const delivery = round2_(fee);
+    const delivery = request ? 0 : round2_(fee);
     const total = (Math.round(unit * 100) * qty + Math.round(delivery * 100)) / 100;
     row[COL.NAME] = safe_(name);
     row[COL.CONTACT] = safe_(contact);
@@ -391,7 +418,7 @@ function editOrder_(body) {
     row[COL.NOTES] = safe_(notes);
     row[COL.QTY] = qty;
     row[COL.PRICE] = unit;
-    row[COL.FEE] = delivery;
+    row[COL.FEE] = request ? '' : delivery;
     row[COL.TOTAL] = total;
     row[COL.EMAIL] = safe_(email);
     row[COL.COLLECT] = collect ? 'yes' : '';
@@ -404,8 +431,100 @@ function editOrder_(body) {
     lock.releaseLock();
   }
   const out = { ok: true, order: order };
-  if (body.sendInvoice === true && order.email) out.emailed = emailInvoice_(order, settings);
+  if (body.sendInvoice === true && order.email && order.status === STATUS.AWAITING) out.emailed = emailInvoice_(order, settings);
   return out;
+}
+
+// Greg sets the delivery fee on a new request and accepts it. The customer is then
+// emailed the invoice with the bank details.
+function acceptOrder_(body) {
+  const invoice = clean_(body.invoice, 32);
+  const fee = parseNumber_(body.fee, NaN);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    throw fail_('busy', 'Busy right now. Please try again.');
+  }
+  let order;
+  try {
+    const sheet = ordersSheet_();
+    const rowNum = findRow_(sheet, invoice);
+    if (!rowNum) throw fail_('not_found', 'Order ' + invoice + ' was not found.');
+    const row = sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0];
+    const status = str_(row[COL.STATUS]);
+    if (status !== STATUS.REQUESTED) {
+      throw fail_('invalid', 'Order ' + str_(row[COL.INVOICE]) + ' is ' + status + '. Only new requests can be accepted.');
+    }
+    const collect = str_(row[COL.COLLECT]).toLowerCase() === 'yes';
+    if (!collect && (!isFinite(fee) || fee < 0 || fee > 100000)) {
+      throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
+    }
+    const delivery = collect ? 0 : round2_(fee);
+    const items = Math.round((Number(row[COL.PRICE]) || 0) * 100) * (Number(row[COL.QTY]) || 0);
+    row[COL.FEE] = delivery;
+    row[COL.TOTAL] = (items + Math.round(delivery * 100)) / 100;
+    row[COL.STATUS] = STATUS.AWAITING;
+    sheet.getRange(rowNum, 1, 1, HEADERS.length).setNumberFormats([FORMATS]).setValues([row]);
+    SpreadsheetApp.flush();
+    order = rowToOrder_(row);
+  } finally {
+    lock.releaseLock();
+  }
+  const out = { ok: true, order: order };
+  if (order.email) out.emailed = emailInvoice_(order, readTypedSettings_());
+  return out;
+}
+
+// Greg turns down a new request, for example when the address is too far. The order is
+// cancelled (it can be reopened) and the customer is emailed, with his reason if he gave one.
+function declineOrder_(body) {
+  const invoice = clean_(body.invoice, 32);
+  const reason = clean_(body.reason, 300);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    throw fail_('busy', 'Busy right now. Please try again.');
+  }
+  let order;
+  try {
+    const sheet = ordersSheet_();
+    const rowNum = findRow_(sheet, invoice);
+    if (!rowNum) throw fail_('not_found', 'Order ' + invoice + ' was not found.');
+    const row = sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0];
+    const status = str_(row[COL.STATUS]);
+    if (status !== STATUS.REQUESTED) {
+      throw fail_('invalid', 'Order ' + str_(row[COL.INVOICE]) + ' is ' + status + '. Only new requests can be declined.');
+    }
+    row[COL.STATUS] = STATUS.CANCELLED;
+    sheet.getRange(rowNum, COL.STATUS + 1).setValue(STATUS.CANCELLED);
+    SpreadsheetApp.flush();
+    order = rowToOrder_(row);
+  } finally {
+    lock.releaseLock();
+  }
+  const out = { ok: true, order: order };
+  if (order.email) out.emailed = emailDecline_(order, reason, readTypedSettings_());
+  return out;
+}
+
+// Returns true when sent. Never throws.
+function emailDecline_(order, reason, s) {
+  if (!EMAIL_PATTERN.test(order.email)) return false;
+  try {
+    if (MailApp.getRemainingDailyQuota() < 1) throw new Error('the daily email quota is used up');
+    const lines = ['Hi ' + order.name + ',', '', 'Sorry, we cannot fill your order ' + order.invoice + '.'];
+    if (reason) lines.push('', reason);
+    lines.push('', 'There is nothing to pay. Reply to this email if you have any questions.', '', s.brand);
+    const message = { to: order.email, subject: s.brand + ' order ' + order.invoice, body: lines.join('\n'), name: s.brand };
+    if (EMAIL_PATTERN.test(s.alertEmail)) message.replyTo = s.alertEmail;
+    MailApp.sendEmail(message);
+    return true;
+  } catch (err) {
+    console.error('Decline email failed for ' + order.invoice + ': ' + err);
+    return false;
+  }
 }
 
 function rowToOrder_(r) {
@@ -493,6 +612,22 @@ function takeKioskSlot_() {
 function sendAlert_(order, s) {
   if (!EMAIL_PATTERN.test(s.alertEmail)) return;
   try {
+    const request = order.status === STATUS.REQUESTED;
+    if (request) {
+      MailApp.sendEmail(s.alertEmail, 'New request ' + order.invoice + ': ' + order.qty + ' x ' + s.product + ', set the delivery fee', [
+        order.invoice + ' needs a delivery fee before the customer can pay.',
+        '',
+        'Name: ' + order.name,
+        'Contact: ' + order.contact,
+        'Email: ' + order.email,
+        'Address: ' + order.address,
+        'Notes: ' + (order.notes || '-'),
+        'Order: ' + order.qty + ' x ' + s.product + ' at ' + money_(order.price, s.currency) + ' = ' + money_(order.total, s.currency),
+        '',
+        'Open the admin page, set the delivery fee for this address and accept the request. The customer is then emailed the invoice.'
+      ].join('\n'));
+      return;
+    }
     const subject = 'New order ' + order.invoice + ': ' + order.qty + ' x ' + s.product + ' (' + money_(order.total, s.currency) + ')';
     const lines = [
       order.invoice + ' is waiting for payment.',
@@ -690,6 +825,7 @@ function readTypedSettings_() {
     currency: raw.currency_symbol || 'R',
     area: raw.delivery_area || 'Cape Town',
     collectNote: raw.collection_note,
+    quote: String(raw.delivery_quote).toLowerCase() !== 'no',
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
     minQty: Math.min(maxQty, Math.max(1, Math.floor(parseNumber_(raw.min_quantity, 1)))),
     maxQty: maxQty,
@@ -712,6 +848,7 @@ function publicConfig_(s) {
     currency: s.currency,
     area: s.area,
     collectNote: s.collectNote, // blank means collection is not offered
+    quote: s.quote, // true: the delivery fee is confirmed by Greg after the customer orders
     minQty: s.minQty,
     maxQty: s.maxQty,
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
@@ -789,6 +926,12 @@ function validateSetting_(key, value) {
       const n = parseNumber_(text, NaN);
       if (!isFinite(n) || n < 0 || n > 100000) throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
       return String(round2_(n));
+    }
+    case 'delivery_quote': {
+      const t = text.toLowerCase();
+      if (t === 'yes' || t === 'true') return 'yes';
+      if (t === 'no' || t === 'false') return 'no';
+      throw fail_('invalid', 'Confirm the delivery fee for each order must be yes or no.');
     }
     case 'min_quantity': {
       if (text === '') return '1';
