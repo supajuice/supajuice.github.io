@@ -12,7 +12,7 @@
  *
  * Public actions   config, order, photo
  * Admin actions    list, create, editOrder, acceptOrder, declineOrder, setStatus, sendInvoice,
- *                  getSettings, saveSettings,
+ *                  setCollectTime, getSettings, saveSettings,
  *                  setPhoto, removePhoto
  *                  (all need the admin key kept in Script properties)
  *
@@ -22,6 +22,10 @@
  * When delivery fees are confirmed per order (the default), a delivery order from
  * the order page starts as a "New request". Greg sets the fee and accepts it, and
  * only then is the invoice with the bank details sent. Collection orders skip this.
+ *
+ * Customers who collect pick a time slot from the collection hours in Settings. When
+ * the order is marked paid, the paid invoice email carries a calendar invite (.ics).
+ * Moving the time or cancelling a paid order emails an update to that invite.
  *
  * Run setup() once after pasting this in. See README.md.
  */
@@ -43,16 +47,16 @@ const MAX_ORDERS_LISTED = 500;
 const HEADERS = [
   'Invoice', 'Created', 'Source', 'Name', 'Contact', 'Address', 'Notes',
   'Qty', 'Unit price', 'Delivery fee', 'Total', 'Status', 'Paid on', 'Delivered on', 'Request ID',
-  'Email', 'Invoice emailed', 'Collect', 'Edited on'
+  'Email', 'Invoice emailed', 'Collect', 'Edited on', 'Collect at'
 ];
 // New columns go at the end, so rows written by an older version still line up.
 const COL = {
   INVOICE: 0, CREATED: 1, SOURCE: 2, NAME: 3, CONTACT: 4, ADDRESS: 5, NOTES: 6,
   QTY: 7, PRICE: 8, FEE: 9, TOTAL: 10, STATUS: 11, PAID: 12, DELIVERED: 13, REQUEST: 14,
-  EMAIL: 15, EMAILED: 16, COLLECT: 17, EDITED: 18
+  EMAIL: 15, EMAILED: 16, COLLECT: 17, EDITED: 18, COLLECT_AT: 19
 };
 // Text columns are stored as plain text so Sheets never turns input into a formula or a date.
-const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@', '@', '@'];
+const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@', '@', '@', '@'];
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -81,7 +85,12 @@ const SETTING_DEFS = [
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
   { key: 'delivery_area', value: 'Cape Town', note: 'Added to addresses when you open them in Maps from the admin page, so the right street is found. Customers do not see it.' },
-  { key: 'collection_note', value: '', note: 'Where and how customers collect, for example "Sea Point. We DM you to arrange a time." Collection is free. Leave blank to offer delivery only.' },
+  { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page, invoices and calendar invites. Collection is free.' },
+  { key: 'collection_days', value: 'mon,tue,wed,thu,fri,sat', note: 'Days customers can collect, separated by commas: mon,tue,wed,thu,fri,sat,sun.' },
+  { key: 'collection_hours', value: '17:00-19:00', note: 'Collection hours, for example 17:00-19:00.' },
+  { key: 'collection_slot_minutes', value: '30', note: 'Length of one collection time in minutes: 15, 30 or 60.' },
+  { key: 'collection_per_slot', value: '1', note: 'How many customers can book the same collection time.' },
+  { key: 'collection_days_ahead', value: '14', note: 'How many days ahead customers can book a collection. Bookings start tomorrow.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
   { key: 'invoice_prefix', value: 'SJ', note: 'Letters before the invoice number, for example SJ-0001. Up to 6 letters or digits.' },
@@ -97,6 +106,7 @@ const SETTING_DEFS = [
 // Longest allowed text per setting.
 const SETTING_MAX = {
   brand_name: 60, product_name: 60, currency_symbol: 4, delivery_area: 60, collection_note: 200, alert_email: 120,
+  collection_days: 40, collection_hours: 20,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
 
@@ -130,7 +140,7 @@ function handle_(body) {
     if (!body || typeof body !== 'object') throw fail_('bad_request', 'Could not read the request.');
 
     // Public actions.
-    if (body.action === 'config') return { ok: true, config: publicConfig_(readTypedSettings_()) };
+    if (body.action === 'config') return { ok: true, config: customerConfig_() };
     if (body.action === 'order') return placeKioskOrder_(body);
     if (body.action === 'photo') return { ok: true, photo: readPhoto_() };
 
@@ -144,6 +154,7 @@ function handle_(body) {
       case 'declineOrder': return declineOrder_(body);
       case 'setStatus': return setStatus_(body);
       case 'sendInvoice': return sendInvoice_(body);
+      case 'setCollectTime': return setCollectTime_(body);
       case 'getSettings': return { ok: true, values: readSettings_() };
       case 'saveSettings': return saveSettings_(body);
       case 'setPhoto': return setPhoto_(body);
@@ -191,12 +202,14 @@ function createOrder_(body, source) {
   const notes = clean_(body.notes, 300);
   const qty = Number(body.qty);
   const collect = body.collect === true;
+  const collectAt = collect ? slotText_(body.collectAt) : '';
   const requestId = /^[A-Za-z0-9_-]{8,64}$/.test(String(body.requestId || '')) ? String(body.requestId) : '';
 
   if (!name) throw fail_('invalid', 'Please enter a name.');
   if (kiosk && !email) throw fail_('invalid', 'Please enter your email address so we can send your invoice.');
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
   if (kiosk && !collect && !address) throw fail_('invalid', 'Please enter your delivery address.');
+  if (kiosk && collect && !collectAt) throw fail_('invalid', 'Please pick a collection time.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
   // Greg can set the delivery fee for a DM order himself. Customers never can.
   const customFee = !kiosk && body.fee !== undefined && body.fee !== null && body.fee !== '' ? parseNumber_(body.fee, NaN) : null;
@@ -218,8 +231,6 @@ function createOrder_(body, source) {
     if (!settings.ready) throw fail_('not_ready', 'Ordering is not open yet.');
     if (qty < settings.minQty) throw fail_('invalid', 'The smallest order is ' + settings.minQty + '.');
     if (qty > settings.maxQty) throw fail_('invalid', 'The most you can order at once is ' + settings.maxQty + '.');
-    // Customers can only choose collection when Greg offers it. Greg can always enter a collection order.
-    if (kiosk && collect && !settings.collectNote) throw fail_('invalid', 'Collection is not available. Please choose delivery.');
 
     const sheet = ordersSheet_();
 
@@ -228,6 +239,14 @@ function createOrder_(body, source) {
     if (requestId) {
       const existing = findByRequestId_(sheet, requestId);
       if (existing) return orderResponse_(existing, settings);
+    }
+
+    // Customers can only book a free time. Greg can put a DM order at any time, even a full one.
+    if (kiosk && collect) {
+      const free = freeSlots_(settings, sheet);
+      if (!slotIsFree_(free, collectAt)) {
+        throw fail_('slot_taken', 'That collection time has just been taken. Please pick another.', { config: publicConfig_(settings, free) });
+      }
     }
 
     // With fees confirmed per order, a delivery from the order page is a request: the fee is
@@ -239,7 +258,7 @@ function createOrder_(body, source) {
 
     // The total the customer saw must still be the real total.
     if (kiosk && body.expectedTotal !== undefined && Math.round(Number(body.expectedTotal) * 100) !== totalCents) {
-      throw fail_('price_changed', 'The price has just changed. Please check the new total.', { config: publicConfig_(settings) });
+      throw fail_('price_changed', 'The price has just changed. Please check the new total.', { config: publicConfig_(settings, freeSlots_(settings, sheet)) });
     }
 
     if (kiosk) takeKioskSlot_();
@@ -251,7 +270,7 @@ function createOrder_(body, source) {
       safe_(name), safe_(contact), safe_(address), safe_(notes),
       qty, settings.price, request ? '' : fee, total,
       request ? STATUS.REQUESTED : STATUS.AWAITING, '', '', requestId,
-      safe_(email), '', collect ? 'yes' : '', ''
+      safe_(email), '', collect ? 'yes' : '', '', collectAt
     ];
     writeRow_(sheet, sheet.getLastRow() + 1, row);
     SpreadsheetApp.flush();
@@ -310,6 +329,7 @@ function setStatus_(body) {
   }
   let order;
   let sendPaidInvoice = false;
+  let sendCancel = false;
   try {
     const sheet = ordersSheet_();
     const rowNum = findRow_(sheet, invoice);
@@ -338,11 +358,17 @@ function setStatus_(body) {
     order = rowToOrder_(row);
     // Only a fresh payment sends the paid invoice. Undoing "delivered" does not send it again.
     sendPaidInvoice = current === STATUS.AWAITING && target === STATUS.PAID && !!order.email;
+    // A paid collection already has an invite in the customer's calendar. Cancelling removes it.
+    sendCancel = current === STATUS.PAID && target === STATUS.CANCELLED && !!order.email && hasInvite_(order);
   } finally {
     lock.releaseLock();
   }
   const out = { ok: true, order: order };
-  if (sendPaidInvoice) out.emailed = emailInvoice_(order, readTypedSettings_());
+  if (sendPaidInvoice) {
+    const s = readTypedSettings_();
+    out.emailed = emailInvoice_(order, s, hasInvite_(order) ? [inviteBlob_(order, s, 'REQUEST')] : []);
+  }
+  if (sendCancel) out.emailed = emailInvite_(order, readTypedSettings_(), 'cancel');
   return out;
 }
 
@@ -376,6 +402,9 @@ function editOrder_(body) {
   const collect = body.collect === true;
   const price = parseNumber_(body.price, NaN);
   const fee = collect ? 0 : parseNumber_(body.fee, NaN);
+  // Left out by an older admin page: the collection time stays as it is.
+  const keepTime = body.collectAt === undefined;
+  const collectAt = collect && !keepTime ? slotText_(body.collectAt) : '';
 
   if (!name) throw fail_('invalid', 'Please enter a name.');
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
@@ -421,6 +450,7 @@ function editOrder_(body) {
     row[COL.TOTAL] = total;
     row[COL.EMAIL] = safe_(email);
     row[COL.COLLECT] = collect ? 'yes' : '';
+    row[COL.COLLECT_AT] = collect ? (keepTime ? str_(row[COL.COLLECT_AT]) : collectAt) : '';
     row[COL.EDITED] = nowString_();
     // The whole row is written back with its formats, which also fills in columns older rows lack.
     sheet.getRange(rowNum, 1, 1, HEADERS.length).setNumberFormats([FORMATS]).setValues([row]);
@@ -431,6 +461,43 @@ function editOrder_(body) {
   }
   const out = { ok: true, order: order };
   if (body.sendInvoice === true && order.email && order.status === STATUS.AWAITING) out.emailed = emailInvoice_(order, settings);
+  return out;
+}
+
+// Greg moves the collection to another time. Once paid, the customer is emailed an
+// updated invite that replaces the event in their calendar.
+function setCollectTime_(body) {
+  const invoice = clean_(body.invoice, 32);
+  const collectAt = slotText_(body.collectAt);
+  if (!collectAt) throw fail_('invalid', 'Please pick a collection date and time.');
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    throw fail_('busy', 'Busy right now. Please try again.');
+  }
+  let order;
+  let changed = false;
+  try {
+    const sheet = ordersSheet_();
+    const rowNum = findRow_(sheet, invoice);
+    if (!rowNum) throw fail_('not_found', 'Order ' + invoice + ' was not found.');
+    const row = sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0];
+    const status = str_(row[COL.STATUS]);
+    if (str_(row[COL.COLLECT]).toLowerCase() !== 'yes') throw fail_('invalid', 'Order ' + str_(row[COL.INVOICE]) + ' is a delivery, not a collection.');
+    if (status === STATUS.CANCELLED) throw fail_('invalid', 'Order ' + str_(row[COL.INVOICE]) + ' is cancelled.');
+    changed = str_(row[COL.COLLECT_AT]) !== collectAt;
+    if (changed) {
+      row[COL.COLLECT_AT] = collectAt;
+      sheet.getRange(rowNum, COL.COLLECT_AT + 1).setNumberFormat('@').setValue(collectAt);
+      SpreadsheetApp.flush();
+    }
+    order = rowToOrder_(row);
+  } finally {
+    lock.releaseLock();
+  }
+  const out = { ok: true, order: order };
+  if (changed && order.status === STATUS.PAID && order.email) out.emailed = emailInvite_(order, readTypedSettings_(), 'update');
   return out;
 }
 
@@ -545,7 +612,8 @@ function rowToOrder_(r) {
     email: str_(r[COL.EMAIL]),
     emailedOn: str_(r[COL.EMAILED]),
     collect: str_(r[COL.COLLECT]).toLowerCase() === 'yes',
-    editedOn: str_(r[COL.EDITED])
+    editedOn: str_(r[COL.EDITED]),
+    collectAt: str_(r[COL.COLLECT_AT])
   };
 }
 
@@ -633,7 +701,7 @@ function sendAlert_(order, s) {
       '',
       'Name: ' + order.name,
       'Contact: ' + order.contact,
-      order.collect ? 'Collects the order (no delivery)' : 'Address: ' + order.address,
+      order.collect ? 'Collects: ' + collectLine_(order, s) : 'Address: ' + order.address,
       'Notes: ' + (order.notes || '-'),
       'Order: ' + order.qty + ' x ' + s.product + ' at ' + money_(order.price, s.currency),
       order.collect ? 'Collection: free' : 'Delivery: ' + money_(order.fee, s.currency),
@@ -652,8 +720,10 @@ function sendAlert_(order, s) {
 // ---------------------------------------------------------------------------
 
 // Emails the invoice to the customer as a PDF and notes the time on the order.
+// extra: more attachments, such as the calendar invite for a paid collection.
 // Returns true when sent. Never throws: a failed email must not fail the order.
-function emailInvoice_(order, s) {
+function emailInvoice_(order, s, extra) {
+  const invite = !!(extra && extra.length);
   if (!EMAIL_PATTERN.test(order.email)) return false;
   try {
     if (MailApp.getRemainingDailyQuota() < 1) throw new Error('the daily email quota is used up');
@@ -663,9 +733,12 @@ function emailInvoice_(order, s) {
     const message = {
       to: order.email,
       subject: s.brand + ' invoice ' + order.invoice + (isPaid_(order) ? ' (paid)' : ''),
-      body: 'Hi ' + order.name + ',\n\nYour invoice is attached.\n\n' + invoiceText_(order, s),
+      body: 'Hi ' + order.name + ',\n\nYour invoice is attached.' +
+        (invite ? ' So is a calendar invite for your collection on ' + formatSlot_(order.collectAt) + '.\n' +
+          'Using Google Calendar? Add it here: ' + googleCalendarLink_(order, s) : '') +
+        '\n\n' + invoiceText_(order, s),
       name: s.brand,
-      attachments: [pdf]
+      attachments: [pdf].concat(extra || [])
     };
     // Mail comes from the account that deployed the script. Replies go to Greg.
     if (EMAIL_PATTERN.test(s.alertEmail)) message.replyTo = s.alertEmail;
@@ -703,7 +776,7 @@ function invoiceText_(o, s) {
   lines.push(o.qty + ' x ' + s.product + ' @ ' + money_(o.price, s.currency) + ' = ' + money_(lineTotal_(o), s.currency));
   lines.push(o.collect ? 'Collection: free' : 'Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free'));
   lines.push((paid ? 'Total paid: ' : 'Total due: ') + money_(o.total, s.currency));
-  if (o.collect && s.collectNote) lines.push('', 'Collecting: ' + s.collectNote);
+  if (o.collect) lines.push('', 'Collecting: ' + collectLine_(o, s));
   if (paid) {
     lines.push('', 'Thank you for your order.');
   } else {
@@ -756,7 +829,7 @@ function invoiceHtml_(o, s) {
     '</div>'
   );
   parts.push('<p><strong>For:</strong> ' + esc_(o.name) + '</p>');
-  if (o.collect) parts.push('<p><strong>Collecting:</strong> ' + esc_(s.collectNote || 'We will arrange a time with you.') + '</p>');
+  if (o.collect) parts.push('<p><strong>Collecting:</strong> ' + esc_(collectLine_(o, s)) + '</p>');
   else if (o.address) parts.push('<p><strong>Deliver to:</strong> ' + esc_(o.address) + '</p>');
   parts.push(
     '<table><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>',
@@ -781,6 +854,133 @@ function invoiceHtml_(o, s) {
   return parts.join('');
 }
 
+// "Tue 3 Nov, 17:30, Sea Point", or just the place when no time is set.
+function collectLine_(o, s) {
+  return (o.collectAt ? formatSlot_(o.collectAt) + ', ' : '') + s.collectNote;
+}
+
+// ---------------------------------------------------------------------------
+// Calendar invites
+// ---------------------------------------------------------------------------
+
+// Every order keeps one event (the same UID), so an update or a cancellation replaces
+// the event in the customer's calendar instead of adding another.
+function hasInvite_(order) {
+  return order.collect && SLOT_PATTERN.test(order.collectAt);
+}
+
+// Start and end of the collection, in milliseconds since 1970 (UTC).
+function collectRange_(o, s) {
+  const m = SLOT_PATTERN.exec(o.collectAt);
+  const start = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])) - COLLECT_UTC_OFFSET * 3600000;
+  return { start: start, end: start + s.slots.step * 60000 };
+}
+
+// method: REQUEST for a new or moved time, CANCEL to remove it.
+// Without an email for Greg there is no organiser, so the invite is published instead.
+function inviteIcs_(o, s, method) {
+  const cancel = method === 'CANCEL';
+  const organiser = EMAIL_PATTERN.test(s.alertEmail);
+  const r = collectRange_(o, s);
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//' + icsText_(s.brand) + '//Orders//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:' + (organiser ? method : 'PUBLISH'),
+    'BEGIN:VEVENT',
+    'UID:' + o.invoice + '@supajuice.github.io',
+    // Always higher than the last one sent, so calendars take the newest version.
+    'SEQUENCE:' + Math.floor(Date.now() / 1000),
+    'DTSTAMP:' + icsTime_(Date.now()),
+    'DTSTART:' + icsTime_(r.start),
+    'DTEND:' + icsTime_(r.end),
+    'SUMMARY:' + icsText_('Collect ' + s.brand + ' order ' + o.invoice),
+    'LOCATION:' + icsText_(s.collectNote),
+    'DESCRIPTION:' + icsText_(o.qty + ' x ' + s.product + '. Reply to the invoice email if you need another time.'),
+    'STATUS:' + (cancel ? 'CANCELLED' : 'CONFIRMED')
+  ];
+  if (organiser) {
+    lines.push('ORGANIZER;CN=' + icsName_(s.brand) + ':mailto:' + s.alertEmail);
+    lines.push('ATTENDEE;CN=' + icsName_(o.name) + ';ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=FALSE:mailto:' + o.email);
+  }
+  if (!cancel) lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsText_('Collect your ' + s.brand + ' order'), 'TRIGGER:-PT1H', 'END:VALARM');
+  lines.push('END:VEVENT', 'END:VCALENDAR');
+  return lines.map(icsFold_).join('\r\n') + '\r\n';
+}
+
+function inviteBlob_(o, s, method) {
+  return Utilities.newBlob(inviteIcs_(o, s, method), 'text/calendar; charset=utf-8; method=' + method, 'invite.ics');
+}
+
+// 20261103T153000Z
+function icsTime_(ms) {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
+}
+
+// Text values escape backslashes, semicolons, commas and line breaks.
+function icsText_(v) {
+  return String(v).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+}
+
+// A name inside a property, in quotes, which cannot hold quotes or line breaks.
+function icsName_(v) {
+  return '"' + String(v).replace(/["\r\n]/g, '') + '"';
+}
+
+// Lines longer than 75 characters continue on the next line after a space.
+function icsFold_(line) {
+  const out = [];
+  let rest = line;
+  while (rest.length > 74) {
+    out.push(rest.slice(0, 74));
+    rest = ' ' + rest.slice(74);
+  }
+  out.push(rest);
+  return out.join('\r\n');
+}
+
+function googleCalendarLink_(o, s) {
+  const r = collectRange_(o, s);
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+    '&text=' + encodeURIComponent('Collect ' + s.brand + ' order ' + o.invoice) +
+    '&dates=' + icsTime_(r.start) + '/' + icsTime_(r.end) +
+    '&location=' + encodeURIComponent(s.collectNote) +
+    '&details=' + encodeURIComponent(o.qty + ' x ' + s.product);
+}
+
+// kind: 'update' for a new time, 'cancel' when the order is cancelled. Returns true when sent. Never throws.
+function emailInvite_(order, s, kind) {
+  if (!EMAIL_PATTERN.test(order.email) || !hasInvite_(order)) return false;
+  try {
+    if (MailApp.getRemainingDailyQuota() < 1) throw new Error('the daily email quota is used up');
+    const cancel = kind === 'cancel';
+    const when = formatSlot_(order.collectAt);
+    const lines = ['Hi ' + order.name + ',', ''];
+    if (cancel) {
+      lines.push('Your collection of order ' + order.invoice + ' on ' + when + ' is cancelled. The attached update removes it from your calendar.');
+    } else {
+      lines.push('Your collection of order ' + order.invoice + ' is now on ' + when + ' at ' + s.collectNote + '.',
+        '', 'The attached invite updates your calendar.',
+        'Using Google Calendar? Add the new time here: ' + googleCalendarLink_(order, s));
+    }
+    lines.push('', 'Reply to this email if you have any questions.', '', s.brand);
+    const message = {
+      to: order.email,
+      subject: s.brand + (cancel ? ' collection cancelled: ' : ' new collection time: ') + order.invoice,
+      body: lines.join('\n'),
+      name: s.brand,
+      attachments: [inviteBlob_(order, s, cancel ? 'CANCEL' : 'REQUEST')]
+    };
+    if (EMAIL_PATTERN.test(s.alertEmail)) message.replyTo = s.alertEmail;
+    MailApp.sendEmail(message);
+    return true;
+  } catch (err) {
+    console.error('Invite email failed for ' + order.invoice + ': ' + err);
+    return false;
+  }
+}
+
 function lineTotal_(o) {
   return Math.round(o.price * 100) * o.qty / 100;
 }
@@ -801,8 +1001,14 @@ function readSettings_() {
       if (Object.prototype.hasOwnProperty.call(values, key)) values[key] = str_(r[1]);
     });
   }
+  // Collection is always offered, so these fall back to their defaults when left blank in the sheet.
+  NEVER_BLANK.forEach(function (key) {
+    if (values[key] === '') values[key] = SETTING_DEFS.filter(function (d) { return d.key === key; })[0].value;
+  });
   return values;
 }
+
+const NEVER_BLANK = ['collection_note', 'collection_days', 'collection_hours', 'collection_slot_minutes', 'collection_per_slot', 'collection_days_ahead'];
 
 function readTypedSettings_() {
   const raw = readSettings_();
@@ -832,13 +1038,15 @@ function readTypedSettings_() {
     alertEmail: raw.alert_email,
     bank: bank,
     paymentNote: raw.payment_note,
+    slots: readSlots_(raw),
     photo: publicPhoto_(photoMeta_()),
     ready: price > 0 && !!bank.name && !!bank.holder && !!bank.number
   };
 }
 
 // What anyone may see. No bank details: customers get those after they order.
-function publicConfig_(s) {
+// slots: the free collection times, sent only to the order page.
+function publicConfig_(s, slots) {
   return {
     brand: s.brand,
     product: s.product,
@@ -851,8 +1059,15 @@ function publicConfig_(s) {
     minQty: s.minQty,
     maxQty: s.maxQty,
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
+    collectSlots: slots, // [{ date, label, times }], the free collection times
+    collectAhead: s.slots.ahead,
     ready: s.ready
   };
+}
+
+function customerConfig_() {
+  const s = readTypedSettings_();
+  return publicConfig_(s, freeSlots_(s, ordersSheet_()));
 }
 
 function adminConfig_(s) {
@@ -861,6 +1076,7 @@ function adminConfig_(s) {
   c.alertEmail = s.alertEmail;
   c.bank = s.bank;
   c.paymentNote = s.paymentNote;
+  c.collectStep = s.slots.step;
   return c;
 }
 
@@ -879,6 +1095,14 @@ function saveSettings_(body) {
     const min = Number(checked.min_quantity !== undefined ? checked.min_quantity : saved.min_quantity);
     const max = Number(checked.max_quantity !== undefined ? checked.max_quantity : saved.max_quantity);
     if (min > max) throw fail_('invalid', 'Fewest per order cannot be more than most per order.');
+  }
+
+  // At least one collection time has to fit inside the collection hours.
+  if (checked.collection_hours !== undefined || checked.collection_slot_minutes !== undefined) {
+    const saved = readSettings_();
+    const hours = parseHours_(checked.collection_hours !== undefined ? checked.collection_hours : saved.collection_hours);
+    const step = Number(checked.collection_slot_minutes !== undefined ? checked.collection_slot_minutes : saved.collection_slot_minutes);
+    if (hours && hours.end - hours.start < step) throw fail_('invalid', 'The collection hours are shorter than one collection time.');
   }
 
   const lock = LockService.getScriptLock();
@@ -943,6 +1167,37 @@ function validateSetting_(key, value) {
       if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 200) throw fail_('invalid', 'Most per order must be a whole number from 1 to 200.');
       return String(n);
     }
+    case 'collection_note':
+      if (text === '') throw fail_('invalid', 'Collection place cannot be blank.');
+      return text;
+    case 'collection_days': {
+      const picked = text.toLowerCase().split(/[\s,]+/).filter(String);
+      if (!picked.length || picked.some(function (d) { return DAY_KEYS.indexOf(d) === -1; })) {
+        throw fail_('invalid', 'Pick at least one collection day.');
+      }
+      // Kept in week order, Monday first.
+      return ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].filter(function (d) { return picked.indexOf(d) !== -1; }).join(',');
+    }
+    case 'collection_hours': {
+      const h = parseHours_(text);
+      if (!h) throw fail_('invalid', 'Collection hours must look like 17:00-19:00, with the start before the end.');
+      return clock_(h.start) + '-' + clock_(h.end);
+    }
+    case 'collection_slot_minutes': {
+      const n = parseNumber_(text, NaN);
+      if ([15, 30, 60].indexOf(n) === -1) throw fail_('invalid', 'A collection time must be 15, 30 or 60 minutes.');
+      return String(n);
+    }
+    case 'collection_per_slot': {
+      const n = parseNumber_(text, NaN);
+      if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 20) throw fail_('invalid', 'Collections per time must be a whole number from 1 to 20.');
+      return String(n);
+    }
+    case 'collection_days_ahead': {
+      const n = parseNumber_(text, NaN);
+      if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 60) throw fail_('invalid', 'Days ahead must be a whole number from 1 to 60.');
+      return String(n);
+    }
     case 'invoice_prefix':
       if (!/^[A-Za-z0-9]{1,6}$/.test(text)) throw fail_('invalid', 'Invoice prefix must be 1 to 6 letters or digits.');
       return text.toUpperCase();
@@ -958,6 +1213,122 @@ function validateSetting_(key, value) {
     default:
       return text;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Collection times
+// ---------------------------------------------------------------------------
+
+// Times are Cape Town wall-clock text, "2026-11-03 17:30". Dates are worked out with
+// UTC arithmetic so the server's time zone never shifts a day.
+const SLOT_PATTERN = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/;
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// Cape Town is UTC+2 all year: South Africa has no daylight saving.
+const COLLECT_UTC_OFFSET = 2;
+const DAY_MS = 86400000;
+
+// "17:00-19:00" -> { start: 1020, end: 1140 } in minutes, or null.
+function parseHours_(text) {
+  const m = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(str_(text));
+  if (!m) return null;
+  const start = Number(m[1]) * 60 + Number(m[2]);
+  const end = Number(m[3]) * 60 + Number(m[4]);
+  if (Number(m[1]) > 23 || Number(m[3]) > 23 || Number(m[2]) > 59 || Number(m[4]) > 59 || start >= end) return null;
+  return { start: start, end: end };
+}
+
+function clock_(minutes) {
+  return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+}
+
+// The settings as numbers. Anything unreadable falls back to the default, so there are always times.
+function readSlots_(raw) {
+  let days = String(raw.collection_days).toLowerCase().split(/[\s,]+/)
+    .map(function (d) { return DAY_KEYS.indexOf(d); })
+    .filter(function (i) { return i !== -1; });
+  if (!days.length) days = [1, 2, 3, 4, 5, 6];
+  let step = parseNumber_(raw.collection_slot_minutes, 30);
+  if ([15, 30, 60].indexOf(step) === -1) step = 30;
+  let hours = parseHours_(raw.collection_hours);
+  if (!hours || hours.end - hours.start < step) hours = parseHours_('17:00-19:00');
+  return {
+    days: days,
+    start: hours.start,
+    end: hours.end,
+    step: step,
+    perSlot: Math.min(20, Math.max(1, Math.floor(parseNumber_(raw.collection_per_slot, 1)))),
+    ahead: Math.min(60, Math.max(1, Math.floor(parseNumber_(raw.collection_days_ahead, 14))))
+  };
+}
+
+// "2026-11-03 17:30" as text, '' for blank. Throws for anything else.
+function slotText_(v) {
+  const text = str_(v);
+  if (!text) return '';
+  const m = SLOT_PATTERN.exec(text);
+  const d = m && new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (!m || d.getUTCDate() !== Number(m[3]) || Number(m[4]) > 23 || Number(m[5]) > 59) {
+    throw fail_('invalid', 'That collection time does not look right.');
+  }
+  return text;
+}
+
+function dayOf_(ms) {
+  const d = new Date(ms);
+  return {
+    date: d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'),
+    label: DAY_NAMES[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()],
+    weekday: d.getUTCDay()
+  };
+}
+
+// "2026-11-03 17:30" -> "Tue 3 Nov, 17:30"
+function formatSlot_(text) {
+  const m = SLOT_PATTERN.exec(text || '');
+  if (!m) return str_(text);
+  return dayOf_(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).label + ', ' + m[4] + ':' + m[5];
+}
+
+// How many open collection orders hold each time.
+function bookedCounts_(sheet) {
+  const counts = {};
+  const last = sheet.getLastRow();
+  if (last < 2) return counts;
+  const first = Math.max(2, last - 999);
+  sheet.getRange(first, 1, last - first + 1, HEADERS.length).getValues().forEach(function (r) {
+    const at = str_(r[COL.COLLECT_AT]);
+    if (!at || str_(r[COL.COLLECT]).toLowerCase() !== 'yes' || str_(r[COL.STATUS]) === STATUS.CANCELLED) return;
+    counts[at] = (counts[at] || 0) + 1;
+  });
+  return counts;
+}
+
+// The times customers can still book, from tomorrow, grouped by day:
+// [{ date: '2026-11-03', label: 'Tue 3 Nov', times: ['17:00', '17:30'] }]
+function freeSlots_(s, sheet) {
+  const slots = s.slots;
+  const booked = bookedCounts_(sheet);
+  const today = SLOT_PATTERN.exec(nowString_());
+  const base = Date.UTC(Number(today[1]), Number(today[2]) - 1, Number(today[3]));
+  const out = [];
+  for (let i = 1; i <= slots.ahead; i++) {
+    const day = dayOf_(base + i * DAY_MS);
+    if (slots.days.indexOf(day.weekday) === -1) continue;
+    const times = [];
+    for (let m = slots.start; m + slots.step <= slots.end; m += slots.step) {
+      const t = clock_(m);
+      if ((booked[day.date + ' ' + t] || 0) < slots.perSlot) times.push(t);
+    }
+    if (times.length) out.push({ date: day.date, label: day.label, times: times });
+  }
+  return out;
+}
+
+function slotIsFree_(free, text) {
+  const date = text.slice(0, 10);
+  const time = text.slice(11);
+  return free.some(function (d) { return d.date === date && d.times.indexOf(time) !== -1; });
 }
 
 // ---------------------------------------------------------------------------
@@ -1206,7 +1577,7 @@ function setup() {
   FORMATS.forEach(function (format, i) {
     orders.getRange(2, i + 1, orders.getMaxRows() - 1, 1).setNumberFormat(format);
   });
-  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130, 70, 130].forEach(function (w, i) {
+  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130, 70, 130, 130].forEach(function (w, i) {
     orders.setColumnWidth(i + 1, w);
   });
 

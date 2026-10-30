@@ -24,57 +24,80 @@
     <p id="view-loading" class="fine" role="status">Loading prices&hellip;</p>
 
     <form id="order-form" class="stack-lg" novalidate hidden>
-      <div id="qty-slot"></div>
-
-      <div class="field">
-        <label for="name">Your name</label>
-        <input id="name" type="text" autocomplete="name" maxlength="80">
-      </div>
-
-      <div class="field">
-        <label for="email">Email</label>
-        <input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="email-hint">
-        <p class="hint" id="email-hint">We email your invoice here as a PDF.</p>
-      </div>
-
-      <div class="field">
-        <label for="contact">Instagram handle or phone (optional)</label>
-        <input id="contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
-      </div>
-
-      <fieldset class="field choice" id="fulfil" hidden>
-        <legend>Delivery or collection</legend>
-        <label class="check">
-          <input type="radio" name="fulfil" id="fulfil-delivery" value="delivery" checked>
-          <span id="fulfil-delivery-label">Delivery</span>
-        </label>
-        <label class="check">
-          <input type="radio" name="fulfil" id="fulfil-collect" value="collect">
-          <span>Collect, free</span>
-        </label>
-        <p class="hint" id="collect-note" hidden></p>
+      <fieldset class="choose" id="choose">
+        <legend class="choose-legend">How would you like your order?</legend>
+        <div class="choose-row">
+          <button type="button" class="choose-btn" id="choose-collect" aria-pressed="false">
+            <span class="choose-title">Collect</span>
+            <span class="choose-sub" id="choose-collect-sub">Free</span>
+          </button>
+          <button type="button" class="choose-btn" id="choose-deliver" aria-pressed="false">
+            <span class="choose-title">Get delivered</span>
+            <span class="choose-sub" id="choose-deliver-sub"></span>
+          </button>
+        </div>
       </fieldset>
 
-      <div class="field" id="address-field">
-        <label for="address">Delivery address</label>
-        <textarea id="address" autocomplete="street-address" rows="3" maxlength="300"></textarea>
+      <div class="chosen" id="chosen" hidden>
+        <p class="chosen-text" id="chosen-text" tabindex="-1"></p>
+        <button type="button" class="btn btn-quiet btn-small" id="choose-change">Change</button>
       </div>
 
-      <div class="field">
-        <label for="notes">Notes (optional)</label>
-        <input id="notes" type="text" maxlength="300">
+      <div class="stack-lg" id="order-rest" hidden>
+        <fieldset class="field choice" id="collect-time" hidden>
+          <legend>Collection time</legend>
+          <div class="slot-pickers">
+            <div class="field">
+              <label for="collect-day">Day</label>
+              <select id="collect-day" class="select"></select>
+            </div>
+            <div class="field">
+              <label for="collect-hour">Time</label>
+              <select id="collect-hour" class="select"></select>
+            </div>
+          </div>
+          <p class="hint" id="collect-hint"></p>
+        </fieldset>
+
+        <div id="qty-slot"></div>
+
+        <div class="field">
+          <label for="name">Your name</label>
+          <input id="name" type="text" autocomplete="name" maxlength="80">
+        </div>
+
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="email-hint">
+          <p class="hint" id="email-hint">We email your invoice here as a PDF.</p>
+        </div>
+
+        <div class="field">
+          <label for="contact">Instagram handle or phone (optional)</label>
+          <input id="contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
+        </div>
+
+        <div class="field" id="address-field">
+          <label for="address">Delivery address</label>
+          <textarea id="address" autocomplete="street-address" rows="3" maxlength="300"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="notes">Notes (optional)</label>
+          <input id="notes" type="text" maxlength="300">
+        </div>
+
+        <div class="hp" aria-hidden="true">
+          <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
+        </div>
+
+        <hr class="tear">
+        <dl class="summary" id="summary"></dl>
+
+        <div class="alert alert-bad" id="form-error" role="alert" hidden></div>
+        <button type="submit" class="btn btn-primary btn-block" id="submit">Place order</button>
+        <p class="fine" id="next-note">Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.</p>
       </div>
-
-      <div class="hp" aria-hidden="true">
-        <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
-      </div>
-
-      <hr class="tear">
-      <dl class="summary" id="summary"></dl>
-
-      <div class="alert alert-bad" id="form-error" role="alert" hidden></div>
-      <button type="submit" class="btn btn-primary btn-block" id="submit">Place order</button>
-      <p class="fine" id="next-note">Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.</p>
     </form>
 
     <section id="view-done" class="stack-lg" hidden>

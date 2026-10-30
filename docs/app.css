@@ -191,6 +191,9 @@ a {
 .field input[type='email'],
 .field input[type='password'],
 .field input[type='number'],
+.field input[type='date'],
+.field input[type='time'],
+.field select,
 .field textarea {
   width: 100%;
   min-height: 48px;
@@ -208,7 +211,11 @@ a {
 .field textarea::placeholder {
   color: var(--muted);
 }
+.field select:disabled {
+  color: var(--muted);
+}
 .field input:focus-visible,
+.field select:focus-visible,
 .field textarea:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 0;
@@ -230,6 +237,89 @@ a {
 }
 .choice .check {
   padding: var(--s1) 0;
+}
+
+/* ---------- Collect or delivery ---------- */
+
+.choose {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.choose-legend {
+  margin-bottom: var(--s3);
+  padding: 0;
+  font-weight: 600;
+  font-size: 1.0625rem;
+}
+.choose-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s3);
+}
+.choose-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-height: 88px;
+  padding: var(--s4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.choose-btn:active {
+  opacity: 0.85;
+}
+.choose-btn[aria-pressed='true'] {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+.choose-title {
+  font-weight: 700;
+  font-size: 1.125rem;
+}
+.choose-sub {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.chosen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.chosen-text {
+  margin: 0;
+  font-weight: 600;
+}
+.chosen-text:focus {
+  outline: none;
+}
+.slot-pickers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s3);
+}
+.day-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--s4);
+}
+@media (max-width: 340px) {
+  .choose-row,
+  .slot-pickers {
+    grid-template-columns: 1fr;
+  }
 }
 
 .check {

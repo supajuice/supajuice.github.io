@@ -89,7 +89,7 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **A delivery request comes in from the order page.** Delivery fees depend on the address, so a delivery order arrives under **New requests** and you get an alert email. The customer has an order number but no bank details yet, and nothing to pay. Check the address, type the **Delivery fee for this address** (it starts at your usual fee), and tap **Accept and email invoice**. The order moves to **Awaiting payment** and the customer is emailed the invoice PDF with the bank details. If you cannot do it, tap **More > Decline**, add a reason if you like, and the customer is emailed. **Edit** lets you fix the request first.
 
-**An order to collect comes in.** Collection has no fee to work out, so it goes straight to **Awaiting payment** and the customer gets the invoice with the bank details immediately.
+**An order to collect comes in.** The customer picked a day and time from your collection hours, and the card shows it (for example **Collect Thu 29 Oct, 17:00**). Collection has no fee to work out, so it goes straight to **Awaiting payment** and the customer gets the invoice with the bank details immediately. When you mark it paid, the paid invoice email also carries a **calendar invite** for the collection time, which works with Apple, Google and Outlook calendars.
 
 **Fixed delivery fee instead.** Untick **Settings > Confirm the delivery fee for each order**. Delivery orders then go straight to **Awaiting payment** with the usual fee, as before.
 
@@ -103,7 +103,9 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Delivered.** Tap **Mark delivered** on the order under **Paid**. Tap an address to open it in Maps and a phone number to call.
 
-**Collection.** Write a collection note in **Settings > Collection**, for example "Sea Point. We DM you to arrange a time." The order page then offers **Delivery** or **Collect, free**. Collection orders have no delivery fee and no address, the invoice tells the customer where to collect, and the button reads **Mark collected**. Leave the note blank to offer delivery only. For a DM order, tick **Customer collects**.
+**Collection.** The order page always opens with two buttons, **Collect** and **Get delivered**, and shows the rest of the form once the customer picks one. Customers who collect choose a day and a time. Set these in **Settings > Collection**: the **Collection place** (for example Sea Point), the **days**, the **hours** (for example 17:00 to 19:00), the **length of each time** (15, 30 or 60 minutes), how many **customers per time**, and how many **days ahead** they can book (from tomorrow). A time that is full disappears from the order page, and a cancelled order frees its time again. Collection orders have no delivery fee and no address, and the button reads **Mark collected**. For a DM order, tick **Customer collects** and, if you like, enter a date and time. Any time works there, even one that is full.
+
+**Moving a collection.** Before payment, tap **Edit** and change the date or time. After payment, tap **More > Change collection time**: the customer is emailed an updated invite that moves the event in their calendar. Cancelling a paid collection emails a cancellation that removes it.
 
 **Changing an order.** Tap **Edit** on an order under **Awaiting payment**. Everything can be changed: name, email, contact, quantity, collection, address, notes, and the price and delivery fee for that order (for example a discount). The invoice number stays the same and the total is worked out again. Leave **Email the updated invoice** ticked to send the customer the new PDF. Paid orders cannot be edited: tap **More > Undo paid** first.
 

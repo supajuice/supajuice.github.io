@@ -3,7 +3,7 @@
   A local stand-in for the real setup, for trying the pages in a browser.
 
     node tests/dev-server.js [--mode=seeded|ready|empty] [--latency=300] [--fee=30] [--quote=false]
-                            [--site-port=5173] [--api-port=5174]
+                            [--collections=false] [--site-port=5173] [--api-port=5174]
 
   docs/ is served on one port, with config.js pointing at a fake order service on another
   port. The fake service runs the real Code.gs against in-memory copies of Google's services,
@@ -87,6 +87,24 @@ function seed(gas, key) {
   at(gas, '2026-10-28T13:41:00Z'); // 15:41, the mock's usual "now"
 }
 
+// Two collections tomorrow: 17:00 is full on the order page, and one is paid with its invite sent.
+function seedCollections(gas, key) {
+  const collect = (over) => {
+    const r = expectOk(gas.call(Object.assign({
+      action: 'order', notes: '', website: '', address: '', collect: true,
+      requestId: crypto.randomUUID().replace(/-/g, '')
+    }, over, { expectedTotal: over.qty * 40 })));
+    return r.order.invoice;
+  };
+  at(gas, '2026-10-28T07:20:00Z');
+  collect({ name: 'Sipho Ndlovu', email: 'sipho@example.com', contact: '@sipho.runs', qty: 4, collectAt: '2026-10-29 17:00' });
+  at(gas, '2026-10-28T09:45:00Z');
+  const paid = collect({ name: 'Jess Adams', email: 'jess@example.com', contact: '@jessruns', qty: 2, collectAt: '2026-10-29 18:00' });
+  at(gas, '2026-10-28T11:02:00Z');
+  expectOk(gas.call({ action: 'setStatus', key, invoice: paid, status: 'Paid' }));
+  at(gas, '2026-10-28T13:41:00Z');
+}
+
 function build(mode, opts) {
   const gas = createGas();
   gas.run('setup()');
@@ -98,12 +116,13 @@ function build(mode, opts) {
         price: '40',
         delivery_fee: String(opts.fee === undefined ? 30 : opts.fee),
         alert_email: 'greg@example.com',
-        collection_note: 'Sea Point. We DM you to arrange a time.',
+        collection_note: 'Sea Point',
         delivery_quote: 'no' // the sample orders below were placed with a fixed fee
       }, BANK)
     }));
   }
   if (mode === 'seeded') seed(gas, key);
+  if (mode === 'seeded' && opts.collections) seedCollections(gas, key);
   // Delivery fees confirmed per order, with one request waiting for a fee when there are sample orders.
   if (opts.quote && mode !== 'empty') {
     expectOk(gas.call({ action: 'saveSettings', key, values: { delivery_quote: 'yes' } }));
@@ -264,6 +283,7 @@ if (require.main === module) {
     latency: Number(args.latency || 0),
     fee: args.fee === undefined ? undefined : Number(args.fee),
     quote: args.quote !== 'false', // --quote=false for a fixed delivery fee
+    collections: args.collections !== 'false', // sample collection orders, --collections=false for none
     sitePort: Number(args['site-port'] || 5173),
     apiPort: Number(args['api-port'] || 5174)
   }).then((dev) => {

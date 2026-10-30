@@ -39,9 +39,19 @@
         { key: 'delivery_fee', label: 'Delivery fee', hint: '0 means free delivery. With the box below ticked, customers see it as "from".', mode: 'decimal', max: 12 },
         { key: 'delivery_quote', label: 'Confirm the delivery fee for each order', hint: 'Delivery orders from your order page wait under New requests until you set the fee and accept them. The invoice is emailed then. Untick to charge the fee above straight away.', type: 'checkbox', wide: true },
         { key: 'delivery_area', label: 'Area for Maps', hint: 'Added when you tap an address, so Maps finds the right street. Customers do not see it.', wide: true, max: 60 },
-        { key: 'collection_note', label: 'Collection', hint: 'Where and how customers collect, for example: Sea Point. We DM you to arrange a time. Collection is free. Leave blank to offer delivery only.', long: true, wide: true, max: 200 },
         { key: 'min_quantity', label: 'Fewest sachets per order', hint: 'The quantity starts here. 1 means no minimum', mode: 'numeric', max: 3 },
         { key: 'max_quantity', label: 'Most sachets per order', mode: 'numeric', max: 3 }
+      ]
+    },
+    {
+      title: 'Collection',
+      fields: [
+        { key: 'collection_note', label: 'Collection place', hint: 'Where customers collect, for example Sea Point. Shown on your order page, invoices and calendar invites. Collection is free.', wide: true, max: 200 },
+        { key: 'collection_days', label: 'Days you hand over orders', type: 'days' },
+        { key: 'collection_hours', label: 'Collection hours', hint: 'Customers pick a time inside these hours.', type: 'hours' },
+        { key: 'collection_slot_minutes', label: 'Length of each time', type: 'select', options: [['15', '15 minutes'], ['30', '30 minutes'], ['60', '1 hour']] },
+        { key: 'collection_per_slot', label: 'Customers per time', hint: '1 means no two customers share a time', mode: 'numeric', max: 2 },
+        { key: 'collection_days_ahead', label: 'Days customers can book ahead', hint: 'Bookings start tomorrow', mode: 'numeric', max: 2 }
       ]
     },
     {
@@ -66,8 +76,10 @@
       ]
     }
   ];
-  var SETTING_KEYS = [];
-  SETTINGS_LAYOUT.forEach(function (s) { s.fields.forEach(function (f) { SETTING_KEYS.push(f.key); }); });
+  var SETTING_FIELDS = [];
+  SETTINGS_LAYOUT.forEach(function (s) { s.fields.forEach(function (f) { SETTING_FIELDS.push(f); }); });
+
+  var DAY_CHOICES = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
 
   var state = {
     key: null,
@@ -86,6 +98,8 @@
     preview: null,      // invoice whose text is shown because copying failed
     acceptFees: {},     // delivery fee typed for each new request, by invoice
     declineReason: '',
+    moveDraft: null,    // { date, time } typed for a new collection time
+    moveError: null,
     editing: null,      // invoice being edited
     editDraft: null,    // what has been typed into the edit form so far
     editError: null,
@@ -475,7 +489,7 @@
     var contact = contactNode(o.contact);
     if (contact) card.appendChild(labelled('Contact', contact));
     if (o.email) card.appendChild(labelled('Email', el('a', { href: 'mailto:' + o.email }, o.email)));
-    if (o.collect) card.appendChild(labelled('Collect', 'The customer collects this order'));
+    if (o.collect) card.appendChild(labelled('Collect', o.collectAt ? SJ.formatWhen(o.collectAt) : 'The customer collects this order. No time set yet.'));
     else if (o.address) card.appendChild(labelled('Address', addressNode(o.address)));
     if (o.notes) card.appendChild(labelled('Note', o.notes));
 
@@ -582,6 +596,7 @@
           actionButton('Yes, decline', 'btn-danger', 'confirm', function () { declineOrder(o); }),
           actionButton('Keep request', 'btn-quiet', 'back', function () { dropConfirm(o); })));
     }
+    if (asking === 'move') return moveForm(o, working);
     if (asking === 'cancel') {
       return el('div', { class: 'confirm-row' },
         el('p', null, 'Cancel ', el('span', { class: 'nowrap' }, o.invoice), ' for ' + o.name + '?'),
@@ -606,7 +621,8 @@
     } else if (o.status === PAID) {
       row.appendChild(actionButton(working ? saving : (o.collect ? 'Mark collected' : 'Mark delivered'), 'btn-primary', 'mark-delivered', function () { setStatus(o, DELIVERED); }, working));
       row.appendChild(invoiceButton(o, working));
-      row.appendChild(moreMenu(o, resend.concat([
+      var move = o.collect ? [{ label: 'Change collection time', role: 'move-time', run: function () { askMove(o); } }] : [];
+      row.appendChild(moreMenu(o, resend.concat(move, [
         { label: 'Undo paid', role: 'undo-paid', run: function () { setStatus(o, AWAITING); } },
         { label: 'Cancel order', role: 'cancel', danger: true, run: function () { askConfirm(o, 'cancel'); } }
       ]), working));
@@ -783,13 +799,104 @@
     }
   }
 
+  // ---------- Collection times ----------
+
+  // A date and a time for a collection. Greg can pick any time, also one customers cannot book.
+  function collectTimeInputs(prefix, date, time, onInput) {
+    var step = String(((state.config && state.config.collectStep) || 30) * 60);
+    var d = el('input', { type: 'date', id: prefix + '-date', 'data-role': prefix + '-date' });
+    var t = el('input', { type: 'time', id: prefix + '-time', 'data-role': prefix + '-time', step: step });
+    d.value = date || '';
+    t.value = time || '';
+    function changed() { onInput(d.value, t.value); }
+    d.addEventListener('input', changed);
+    t.addEventListener('input', changed);
+    return el('div', { class: 'slot-pickers' },
+      el('div', { class: 'field' }, el('label', { for: d.id }, 'Date'), d),
+      el('div', { class: 'field' }, el('label', { for: t.id }, 'Time'), t));
+  }
+
+  // "2026-11-03 17:30", '' when both are empty, or null when only one is filled in.
+  function joinSlot(date, time) {
+    date = String(date || '').trim();
+    time = String(time || '').trim().slice(0, 5);
+    if (!date && !time) return '';
+    return date && time ? date + ' ' + time : null;
+  }
+
+  function askMove(o) {
+    state.moveDraft = { date: SJ.dayOf(o.collectAt), time: String(o.collectAt || '').slice(11) };
+    state.moveError = null;
+    state.confirm = { invoice: o.invoice, kind: 'move' };
+    state.preview = null;
+    state.focus = { invoice: o.invoice, role: 'move-date' };
+    renderOrders();
+  }
+
+  function moveForm(o, working) {
+    var m = state.moveDraft;
+    return el('div', { class: 'confirm-row' },
+      el('p', null, 'New collection time for ', el('span', { class: 'nowrap' }, o.invoice),
+        o.email ? '. ' + o.name + ' is emailed an updated calendar invite.' : '.'),
+      collectTimeInputs('move', m.date, m.time, function (date, time) { m.date = date; m.time = time; }),
+      state.moveError ? el('div', { class: 'alert alert-bad', role: 'alert' }, state.moveError) : null,
+      el('div', { class: 'order-actions' },
+        actionButton(working ? 'Saving…' : 'Save new time', 'btn-primary', 'move-save', function () { moveTime(o); }, working),
+        actionButton('Keep time', 'btn-quiet', 'back', function () { dropConfirm(o); }, working)));
+  }
+
+  async function moveTime(o) {
+    if (state.working) return;
+    var m = state.moveDraft;
+    var at = joinSlot(m.date, m.time);
+    if (!at) {
+      state.moveError = 'Pick a date and a time.';
+      state.focus = { invoice: o.invoice, role: m.date ? 'move-time' : 'move-date' };
+      renderOrders();
+      return;
+    }
+    state.working = o.invoice;
+    state.moveError = null;
+    renderOrders();
+    try {
+      var res = await SJ.api('setCollectTime', { key: state.key, invoice: o.invoice, collectAt: at });
+      state.version++;
+      replaceOrder(res.order);
+      state.working = null;
+      state.confirm = null;
+      state.moveDraft = null;
+      state.focus = { invoice: o.invoice, role: primaryRole(res.order) };
+      renderOrders();
+      var moved = o.invoice + ' moved to ' + SJ.formatWhen(res.order.collectAt);
+      if (res.emailed === true) SJ.toast(moved + '. ' + res.order.name + ' was emailed the new invite.');
+      else if (res.emailed === false) SJ.toast(moved + ', but the invite email did not send. Let ' + res.order.name + ' know by DM.', 'bad');
+      else SJ.toast(moved + '.');
+    } catch (err) {
+      state.working = null;
+      if (err.code === 'unauthorized') {
+        lock(err.message);
+        return;
+      }
+      if (err.code === 'not_found' || /cancelled|not a collection/.test(err.message)) {
+        state.confirm = null;
+        state.moveDraft = null;
+        SJ.toast(err.message, 'bad');
+        refresh({ quiet: true });
+        return;
+      }
+      state.moveError = err.message;
+      renderOrders();
+    }
+  }
+
   // ---------- Editing an unpaid order ----------
 
   function startEdit(o) {
     state.editing = o.invoice;
     state.editDraft = {
       name: o.name, email: o.email, contact: o.contact, address: o.address, notes: o.notes,
-      qty: String(o.qty), collect: o.collect, price: String(o.price), fee: String(o.fee), sendInvoice: true
+      qty: String(o.qty), collect: o.collect, price: String(o.price), fee: String(o.fee), sendInvoice: true,
+      collectDate: SJ.dayOf(o.collectAt), collectTime: String(o.collectAt || '').slice(11)
     };
     state.editError = null;
     state.confirm = null;
@@ -825,12 +932,14 @@
     var sendRow;
     var addressField;
     var feeField;
+    var timeField;
 
     function sync() {
       var total = draftTotal(d, request);
       totalLine.textContent = total === null ? 'Check the quantity and prices.'
         : (request ? 'Total before delivery: ' : 'New total: ') + SJ.money(total, sym);
       addressField.hidden = d.collect;
+      timeField.hidden = !d.collect;
       // A request's fee is set when it is accepted, and its invoice is sent then.
       feeField.hidden = d.collect || request;
       var email = d.email.trim();
@@ -861,6 +970,10 @@
 
     addressField = input('address', 'Delivery address', { long: true, max: 300 });
     feeField = input('fee', 'Delivery fee', { mode: 'decimal', max: 12 });
+    timeField = el('fieldset', { class: 'field choice' },
+      el('legend', null, 'Collection time'),
+      collectTimeInputs('edit-collect', d.collectDate, d.collectTime, function (date, time) { d.collectDate = date; d.collectTime = time; }),
+      el('p', { class: 'hint' }, 'Leave both empty to arrange a time by DM.'));
 
     var form = el('form', { class: 'stack confirm-row', novalidate: true, 'aria-label': 'Edit order ' + o.invoice },
       el('p', { class: 'fine' }, 'Change anything below. The invoice number stays ' + o.invoice + '.'),
@@ -870,6 +983,7 @@
       input('qty', 'Quantity', { mode: 'numeric', max: 3 }),
       input('price', 'Price per sachet', { mode: 'decimal', max: 12 }),
       el('label', { class: 'check' }, collect, el('span', null, 'Customer collects (no delivery fee)')),
+      timeField,
       feeField,
       addressField,
       input('notes', 'Notes', { max: 300 }),
@@ -902,6 +1016,13 @@
       renderOrders();
       return;
     }
+    var collectAt = d.collect ? joinSlot(d.collectDate, d.collectTime) : '';
+    if (collectAt === null) {
+      state.editError = 'Pick both a date and a time to collect, or leave both empty.';
+      state.focus = { invoice: o.invoice, role: d.collectDate ? 'edit-collect-time' : 'edit-collect-date' };
+      renderOrders();
+      return;
+    }
     state.working = o.invoice;
     state.editError = null;
     renderOrders();
@@ -911,7 +1032,7 @@
         key: state.key, invoice: o.invoice,
         name: d.name.trim(), email: email, contact: d.contact.trim(),
         address: d.collect ? '' : d.address.trim(), notes: d.notes.trim(),
-        qty: Number(d.qty), collect: d.collect, price: d.price, fee: d.collect || o.status === REQUESTED ? '0' : d.fee,
+        qty: Number(d.qty), collect: d.collect, collectAt: collectAt, price: d.price, fee: d.collect || o.status === REQUESTED ? '0' : d.fee,
         sendInvoice: !!(email && d.sendInvoice && o.status === AWAITING)
       });
       state.version++;
@@ -989,6 +1110,7 @@
     newStepper.setRange(c.minQty, c.maxQty);
     newStepper.setItem(SJ.itemLine(c));
     if (!newFeeTouched) $('n-fee').value = String(c.fee);
+    $('n-collect-time').step = String((c.collectStep || 30) * 60);
     var warn = $('new-warning');
     SJ.clear(warn);
     if (!c.ready) warn.appendChild(setupBanner('Add the price and your bank details in Settings before you create orders.'));
@@ -1000,6 +1122,7 @@
     var collect = $('n-collect').checked;
     $('n-address-field').hidden = collect;
     $('n-fee-field').hidden = collect;
+    $('n-time-field').hidden = !collect;
     var fee = feeNumber($('n-fee').value);
     SJ.renderSummary($('n-summary'), state.config, newStepper.get(), { collect: collect, fee: fee === null ? undefined : fee });
   }
@@ -1030,6 +1153,7 @@
       notes: $('n-notes').value.trim(),
       qty: newStepper.get(),
       collect: collect,
+      collectAt: collect ? joinSlot($('n-collect-date').value, $('n-collect-time').value) : '',
       fee: collect ? '' : $('n-fee').value.trim()
     };
     if (!data.name) {
@@ -1042,8 +1166,13 @@
       $('n-email').focus();
       return;
     }
+    if (data.collectAt === null) {
+      showNewError('Pick both a date and a time to collect, or leave both empty.');
+      $($('n-collect-date').value ? 'n-collect-time' : 'n-collect-date').focus();
+      return;
+    }
 
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect, data.fee]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect, data.collectAt, data.fee]);
     if (!newPending || newPending.sig !== sig) newPending = { sig: sig, id: SJ.newRequestId() };
 
     setNewBusy(true);
@@ -1119,7 +1248,7 @@
 
   function resetNewForm() {
     newPending = null;
-    ['n-name', 'n-email', 'n-contact', 'n-address', 'n-notes'].forEach(function (id) { $(id).value = ''; });
+    ['n-name', 'n-email', 'n-contact', 'n-address', 'n-notes', 'n-collect-date', 'n-collect-time'].forEach(function (id) { $(id).value = ''; });
     $('n-collect').checked = false;
     newFeeTouched = false;
     if (state.config) $('n-fee').value = String(state.config.fee);
@@ -1163,14 +1292,37 @@
       SJ.copyButton(url, 'Copy'));
   }
 
+  // Each field gets its saved value from writeSetting once the form is on the page.
   function settingField(f) {
     if (f.type === 'checkbox') {
       var boxId = 's-' + f.key;
       var box = el('input', { type: 'checkbox', id: boxId, name: f.key, 'aria-describedby': f.hint ? boxId + '-hint' : null });
-      box.checked = String(state.settings[f.key] || '').toLowerCase() !== 'no';
       return el('div', { class: 'field span-all' },
         el('label', { class: 'check' }, box, el('span', null, f.label)),
         f.hint ? el('p', { class: 'hint', id: boxId + '-hint' }, f.hint) : null);
+    }
+    if (f.type === 'days') {
+      return el('fieldset', { class: 'field choice span-all', id: 's-' + f.key },
+        el('legend', null, f.label),
+        el('div', { class: 'day-picks' }, DAY_CHOICES.map(function (d) {
+          return el('label', { class: 'check day-pick' },
+            el('input', { type: 'checkbox', id: 's-' + f.key + '-' + d[0], value: d[0] }), el('span', null, d[1]));
+        })));
+    }
+    if (f.type === 'hours') {
+      var from = el('input', { type: 'time', id: 's-' + f.key + '-from', step: '900' });
+      var until = el('input', { type: 'time', id: 's-' + f.key + '-until', step: '900' });
+      return el('fieldset', { class: 'field choice span-all', id: 's-' + f.key, 'aria-describedby': 's-' + f.key + '-hint' },
+        el('legend', null, f.label),
+        el('div', { class: 'slot-pickers' },
+          el('div', { class: 'field' }, el('label', { for: from.id }, 'From'), from),
+          el('div', { class: 'field' }, el('label', { for: until.id }, 'Until'), until)),
+        el('p', { class: 'hint', id: 's-' + f.key + '-hint' }, f.hint));
+    }
+    if (f.type === 'select') {
+      return el('div', { class: 'field' },
+        el('label', { for: 's-' + f.key }, f.label),
+        el('select', { id: 's-' + f.key, name: f.key }, f.options.map(function (o) { return el('option', { value: o[0] }, o[1]); })));
     }
     var id = 's-' + f.key;
     var common = { id: id, name: f.key, maxlength: String(f.max), autocomplete: 'off' };
@@ -1185,7 +1337,6 @@
         input.setAttribute('spellcheck', 'false');
       }
     }
-    input.value = state.settings[f.key] || '';
     return el('div', { class: 'field' + (f.wide ? ' span-all' : '') },
       el('label', { for: id }, f.label),
       input,
@@ -1215,6 +1366,7 @@
     form.addEventListener('submit', onSaveSettings);
     wrap.appendChild(form);
     body.appendChild(wrap);
+    SETTING_FIELDS.forEach(writeSetting);
     renderPhotoSection();
     loadPhotoPreview();
   }
@@ -1384,6 +1536,34 @@
     }
   }
 
+  function readSetting(f) {
+    var node = $('s-' + f.key);
+    if (f.type === 'checkbox') return node.checked ? 'yes' : 'no';
+    if (f.type === 'days') {
+      return DAY_CHOICES.filter(function (d) { return $('s-' + f.key + '-' + d[0]).checked; })
+        .map(function (d) { return d[0]; }).join(',');
+    }
+    if (f.type === 'hours') return $('s-' + f.key + '-from').value + '-' + $('s-' + f.key + '-until').value;
+    return node.value;
+  }
+
+  function writeSetting(f) {
+    var value = String(state.settings[f.key] || '');
+    var node = $('s-' + f.key);
+    if (f.type === 'checkbox') {
+      node.checked = value.toLowerCase() !== 'no';
+    } else if (f.type === 'days') {
+      var picked = value.split(',');
+      DAY_CHOICES.forEach(function (d) { $('s-' + f.key + '-' + d[0]).checked = picked.indexOf(d[0]) !== -1; });
+    } else if (f.type === 'hours') {
+      var parts = value.split('-');
+      $('s-' + f.key + '-from').value = parts[0] || '';
+      $('s-' + f.key + '-until').value = parts[1] || '';
+    } else {
+      node.value = value;
+    }
+  }
+
   async function onSaveSettings(ev) {
     ev.preventDefault();
     if (savingSettings) return;
@@ -1392,10 +1572,7 @@
     box.hidden = true;
 
     var values = {};
-    SETTING_KEYS.forEach(function (k) {
-      var node = $('s-' + k);
-      values[k] = node.type === 'checkbox' ? (node.checked ? 'yes' : 'no') : node.value;
-    });
+    SETTING_FIELDS.forEach(function (f) { values[f.key] = readSetting(f); });
 
     savingSettings = true;
     btn.disabled = true;
@@ -1406,11 +1583,7 @@
       state.version++;
       state.settings = res.values || {};
       state.config = res.config;
-      SETTING_KEYS.forEach(function (k) {
-        var node = $('s-' + k);
-        if (node.type === 'checkbox') node.checked = String(state.settings[k] || '').toLowerCase() !== 'no';
-        else node.value = state.settings[k] || '';
-      });
+      SETTING_FIELDS.forEach(writeSetting);
       renderAll();
       SJ.toast(!wasReady && res.config.ready ? 'Settings saved. Your order page is open.' : 'Settings saved.');
     } catch (err) {

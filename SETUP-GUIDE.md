@@ -211,11 +211,12 @@ Put your **order page address** in your Instagram bio. That's it, you're open.
 | When this happens | Do this |
 | --- | --- |
 | **A delivery request comes in** | You get an email alert. It shows under **New requests**. Type the delivery fee for that address and tap **Accept and email invoice**. The customer then gets the invoice with the bank details. Or **More** → **Decline**. |
-| **A collection order comes in** | It shows under **Awaiting payment**. The customer already has the bank details and their invoice PDF. |
+| **A collection order comes in** | It shows under **Awaiting payment** with the day and time the customer picked. The customer already has the bank details and their invoice PDF. When you mark it paid, they also get a calendar invite. |
+| **Move a paid collection** | On the order, tap **More** → **Change collection time**. The customer is emailed an updated calendar invite. |
 | **Someone orders by DM** | Admin page → **New order**. Enter the quantity and their name (email optional), then tap **Create order**. Tap **Copy invoice** and paste it into the DM. |
 | **Money arrives** | Find the invoice number (e.g. SJ-0004) in your bank statement reference. Tap **Mark paid** on that order. The customer is emailed the paid invoice. |
 | **You delivered** | Tap **Mark delivered**. Tap an address to open it in Maps. |
-| **Offer collection** | Admin page → **Settings** → **Collection**: write where and how to collect. Customers can then choose **Collect, free**. Leave it blank for delivery only. |
+| **Collection times** | Admin page → **Settings** → **Collection**: the place, the days, the hours, the length of each time, how many customers per time, and how far ahead customers can book. Collection is always offered. |
 | **Change an order before it is paid** | Tap **Edit** on the order. Change anything, including the price or fee, then **Save changes**. The customer is emailed the new invoice unless you untick it. |
 | **Customer lost the email** | On the order tap **More** → **Email invoice**. |
 | **You made a mistake** | **More** → **Undo paid**, **Undo delivered** or **Cancel order**. A cancelled order can be reopened. |

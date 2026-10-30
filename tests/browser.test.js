@@ -13,7 +13,7 @@ test.after(async () => { if (browser) await browser.close(); });
 // A fresh fake service, browser context and page for one test. Everything is closed afterwards.
 async function open(t, opts) {
   opts = opts || {};
-  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote });
+  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote, collections: opts.collections });
   const ctx = await browser.newContext({
     viewport: { width: opts.width || 390, height: opts.height || 844 },
     deviceScaleFactor: 1,
@@ -51,16 +51,33 @@ async function openAdmin(t, opts) {
   return env;
 }
 
+// The order page opens on two buttons. Tapping one shows the rest of the form.
+async function choose(page, what) {
+  await page.waitForSelector('#order-form:not([hidden])');
+  if (await page.locator('#choose').isVisible()) await page.click(what === 'collect' ? '#choose-collect' : '#choose-deliver');
+  await page.waitForSelector('#order-rest:not([hidden])');
+}
+
+// A collection time: the first free day and the given (or first) time on it.
+async function pickTime(page, time) {
+  const day = await page.locator('#collect-day option').nth(1).getAttribute('value');
+  await page.selectOption('#collect-day', day);
+  if (time) await page.selectOption('#collect-hour', time);
+  else await page.selectOption('#collect-hour', { index: 1 });
+  return day + ' ' + await page.inputValue('#collect-hour');
+}
+
 async function fillKiosk(page, over) {
   const d = Object.assign({
     name: 'Jane Doe', email: 'jane@example.com', contact: '@jane.runs', address: '12 Beach Rd, Sea Point', notes: '', more: 0
   }, over);
-  await page.waitForSelector('#order-form:not([hidden])');
+  await choose(page, d.collect ? 'collect' : 'deliver');
+  if (d.collect) await pickTime(page, d.time);
   for (let i = 0; i < d.more; i++) await page.click('[aria-label="One more"]');
   await page.fill('#name', d.name);
   await page.fill('#email', d.email);
   await page.fill('#contact', d.contact);
-  await page.fill('#address', d.address);
+  if (!d.collect) await page.fill('#address', d.address);
   await page.fill('#notes', d.notes);
 }
 
@@ -82,6 +99,7 @@ test('order page: shows the shop, the price and a total that follows the quantit
   assert.equal(await text(page, '#brand'), 'Supa Juice');
   assert.equal(await text(page, '#lede'), 'Order below. Pay by bank transfer. We deliver, or you can collect.');
   assert.doesNotMatch(await page.locator('#order-form').innerText(), /Cape Town/, 'no delivery area is shown to customers');
+  await choose(page, 'deliver');
   assert.match(await text(page, '.qty-item'), /Running gel sachet, R40 each/);
   assert.equal(await text(page, '#submit'), 'Place order for R70');
   await page.click('[aria-label="One more"]');
@@ -97,7 +115,7 @@ test('order page: with a minimum order the quantity starts there and cannot go b
   const { dev, page, errors } = await open(t, { mode: 'ready' });
   dev.gas.call({ action: 'saveSettings', key: dev.key, values: { min_quantity: '3' } });
   await page.goto(kioskUrl(dev));
-  await page.waitForSelector('#order-form:not([hidden])');
+  await choose(page, 'deliver');
   assert.equal(await page.inputValue('#qty'), '3');
   assert.equal(await page.locator('[aria-label="One fewer"]').isDisabled(), true);
   assert.match(await text(page, '.qty-item'), /Running gel sachet, R40 each\. Minimum order 3\./);
@@ -117,24 +135,55 @@ test('order page: with a minimum order the quantity starts there and cannot go b
 
   // Another order starts at the minimum again.
   await page.click('#new-order');
-  await page.waitForSelector('#order-form:not([hidden])');
+  await choose(page, 'deliver');
   assert.equal(await page.inputValue('#qty'), '3');
   noErrors(errors);
 });
 
-test('order page: a customer can choose to collect, and the delivery fee comes off', async (t) => {
-  const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
+test('order page: the customer first picks Collect or Get delivered, and only then sees the form', async (t) => {
+  const { page, errors } = await openKiosk(t, { mode: 'ready' });
   await page.waitForSelector('#order-form:not([hidden])');
-  assert.match(await text(page, '#lede'), /We deliver, or you can collect/);
-  assert.equal(await text(page, '#fulfil-delivery-label'), 'Delivery, R30');
-  assert.equal(await page.locator('#collect-note').isHidden(), true);
-  assert.equal(await text(page, '#submit'), 'Place order for R70');
+  assert.equal(await text(page, '#choose-collect'), 'Collect\nFree · Sea Point');
+  assert.equal(await text(page, '#choose-deliver'), 'Get delivered\nR30');
+  for (const id of ['#order-rest', '#chosen', '#address-field', '#name', '#submit']) {
+    assert.equal(await page.locator(id).isVisible(), false, id + ' waits for the choice');
+  }
 
-  await page.check('#fulfil-collect');
+  await page.click('#choose-deliver');
+  assert.equal(await page.locator('#choose').isHidden(), true);
+  assert.equal(await text(page, '#chosen-text'), 'Get delivered');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'chosen-text', 'focus moves to the choice');
+  assert.equal(await page.locator('#address-field').isVisible(), true);
+  assert.equal(await page.locator('#collect-time').isHidden(), true);
+  await page.fill('#name', 'Typed Before');
+
+  // Change brings the two buttons back, and what was typed stays.
+  await page.click('#choose-change');
+  assert.equal(await page.locator('#choose').isVisible(), true);
+  assert.equal(await page.locator('#order-rest').isHidden(), true);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'choose-deliver');
+  await page.click('#choose-collect');
+  assert.equal(await text(page, '#chosen-text'), 'Collect from Sea Point');
+  assert.equal(await page.inputValue('#name'), 'Typed Before');
   assert.equal(await page.locator('#address-field').isHidden(), true, 'no address needed');
-  assert.equal(await text(page, '#collect-note'), 'Sea Point. We DM you to arrange a time.');
+  assert.equal(await page.locator('#collect-time').isVisible(), true);
+  noErrors(errors);
+});
+
+test('order page: a customer can collect at a time they pick, and the delivery fee comes off', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
+  await choose(page, 'collect');
   assert.match(await text(page, '#summary'), /Collection\s+Free/);
   assert.equal(await text(page, '#submit'), 'Place order for R40');
+
+  // Days come from Greg's settings, from tomorrow. Times appear once a day is picked.
+  assert.equal(await page.locator('#collect-hour').isDisabled(), true);
+  const days = await page.locator('#collect-day option').allInnerTexts();
+  assert.deepEqual(days.slice(0, 3), ['Choose a day', 'Thu 29 Oct', 'Fri 30 Oct']);
+  assert.ok(!days.some((d) => d.startsWith('Sun')), 'no Sundays by default');
+  await page.selectOption('#collect-day', '2026-10-29');
+  assert.deepEqual(await page.locator('#collect-hour option').allInnerTexts(), ['Choose a time', '17:00', '17:30', '18:00', '18:30']);
+  await page.selectOption('#collect-hour', '17:30');
 
   await page.click('[aria-label="One more"]');
   await page.fill('#name', 'Sam Collect');
@@ -142,41 +191,92 @@ test('order page: a customer can choose to collect, and the delivery fee comes o
   await page.click('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
   assert.match(await text(page, '#done-sub'), /Pay R80 by bank transfer/);
-  assert.match(await text(page, '#done-collect'), /You are collecting this order\. Sea Point/);
+  assert.equal(await text(page, '#done-collect'), 'Collect on Thu 29 Oct, 17:30 from Sea Point. A calendar invite is emailed once your payment is confirmed.');
 
   const row = orderRows(dev)[0];
   assert.equal(row.Collect, 'yes');
+  assert.equal(row['Collect at'], '2026-10-29 17:30');
   assert.equal(row['Delivery fee'], 0);
   assert.equal(row.Total, 80);
   assert.equal(row.Address, '');
 
   await page.click('#copy-invoice');
   const invoice = await clipboard(page);
-  assert.match(invoice, /Collection: free\nTotal due: R80\n\nCollecting: Sea Point/);
+  assert.match(invoice, /Collection: free\nTotal due: R80\n\nCollecting: Thu 29 Oct, 17:30, Sea Point/);
 
-  // Switching back to delivery brings the address and the fee back.
+  // The next order starts with the choice again, and the booked time is gone.
   await page.click('#new-order');
   await page.waitForSelector('#order-form:not([hidden])');
-  await page.check('#fulfil-delivery');
+  assert.equal(await page.locator('#choose').isVisible(), true);
+  await page.click('#choose-collect');
+  await page.selectOption('#collect-day', '2026-10-29');
+  await page.waitForFunction(() => !Array.from(document.querySelectorAll('#collect-hour option')).some((o) => o.value === '17:30'));
+  await page.click('#choose-change');
+  await page.click('#choose-deliver');
   assert.equal(await page.locator('#address-field').isHidden(), false);
   assert.equal(await text(page, '#submit'), 'Place order for R70');
   noErrors(errors);
 });
 
-test('order page: without a collection note there is no choice, only delivery', async (t) => {
+test('order page: a collection needs a day and a time before anything is sent', async (t) => {
+  const { dev, page } = await openKiosk(t, { mode: 'ready' });
+  await choose(page, 'collect');
+  await page.fill('#name', 'Sam');
+  await page.fill('#email', 'sam@example.com');
+  const before = dev.calls.length;
+  await page.click('#submit');
+  assert.equal(await text(page, '#form-error'), 'Pick a day to collect.');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'collect-day');
+  await page.selectOption('#collect-day', { index: 1 });
+  await page.click('#submit');
+  assert.equal(await text(page, '#form-error'), 'Pick a time to collect.');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'collect-hour');
+  assert.equal(dev.calls.length, before, 'nothing was sent');
+});
+
+test('order page: a time someone else just booked is refused, and the fresh times are shown', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
+  await fillKiosk(page, { collect: true, time: '17:00' });
+  // Someone books the same time first.
+  dev.gas.call({
+    action: 'order', name: 'Quick', email: 'q@example.com', qty: 1, collect: true, address: '', notes: '', website: '',
+    collectAt: '2026-10-29 17:00', requestId: 'quick_000001', expectedTotal: 40
+  });
+  await page.click('#submit');
+  await page.waitForSelector('#form-error:not([hidden])');
+  assert.match(await text(page, '#form-error'), /just been taken/);
+  assert.equal(await page.inputValue('#collect-day'), '2026-10-29', 'the day stays picked');
+  assert.equal(await page.inputValue('#collect-hour'), '');
+  assert.ok(!(await page.locator('#collect-hour option').allInnerTexts()).includes('17:00'));
+  await page.selectOption('#collect-hour', '17:30');
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(orderRows(dev)[1]['Collect at'], '2026-10-29 17:30');
+  noErrors(errors);
+});
+
+test('order page: with every time booked, the customer is told to choose delivery or DM', async (t) => {
   const { dev, page } = await open(t, { mode: 'ready' });
-  dev.gas.call({ action: 'saveSettings', key: dev.key, values: { collection_note: '' } });
+  dev.gas.call({ action: 'saveSettings', key: dev.key, values: { collection_days: 'thu', collection_hours: '17:00-17:30', collection_days_ahead: '1' } });
+  dev.gas.call({
+    action: 'order', name: 'Quick', email: 'q@example.com', qty: 1, collect: true, address: '', notes: '', website: '',
+    collectAt: '2026-10-29 17:00', requestId: 'quick_000001', expectedTotal: 40
+  });
   await page.goto(kioskUrl(dev));
-  await page.waitForSelector('#order-form:not([hidden])');
-  assert.equal(await page.locator('#fulfil').isHidden(), true);
-  assert.equal(await page.locator('#address-field').isHidden(), false);
-  assert.doesNotMatch(await text(page, '#lede'), /collect/);
+  await choose(page, 'collect');
+  assert.match(await text(page, '#collect-hint'), /No collection times are free in the next 1 days\. Choose delivery, or send us a DM\./);
+  assert.equal(await page.locator('#collect-day').isDisabled(), true);
+  await page.fill('#name', 'Sam');
+  await page.fill('#email', 'sam@example.com');
+  await page.click('#submit');
+  assert.match(await text(page, '#form-error'), /No collection times are free right now/);
 });
 
 test('order page: with fees confirmed per order, a delivery is sent as a request with nothing to pay yet', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true });
   await page.waitForSelector('#order-form:not([hidden])');
-  assert.equal(await text(page, '#fulfil-delivery-label'), 'Delivery, from R30');
+  assert.equal(await text(page, '#choose-deliver-sub'), 'From R30');
+  await choose(page, 'deliver');
   assert.match(await text(page, '#summary'), /Delivery\s+From R30/);
   assert.match(await text(page, '#summary'), /Total before delivery\s+R40/);
   assert.equal(await text(page, '#submit'), 'Send order for R40 + delivery');
@@ -204,8 +304,7 @@ test('order page: with fees confirmed per order, a delivery is sent as a request
 
   // Collection is not a request: it is priced and paid straight away.
   await page.click('#new-order');
-  await page.waitForSelector('#order-form:not([hidden])');
-  await page.check('#fulfil-collect');
+  await choose(page, 'collect');
   assert.equal(await text(page, '#submit'), 'Place order for R40', 'a new order starts at 1, with no fee');
   noErrors(errors);
 });
@@ -213,6 +312,8 @@ test('order page: with fees confirmed per order, a delivery is sent as a request
 test('order page: free delivery is shown as Free', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready', fee: 0 });
   await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await text(page, '#choose-deliver-sub'), 'Free');
+  await choose(page, 'deliver');
   assert.match(await text(page, '#summary'), /Delivery\s+Free/);
   assert.equal(await text(page, '#submit'), 'Place order for R40');
 });
@@ -302,7 +403,7 @@ test('order page: the confirmation survives a reload, and Place another order st
 
 test('order page: missing details are caught before anything is sent', async (t) => {
   const { dev, page } = await openKiosk(t, { mode: 'ready' });
-  await page.waitForSelector('#order-form:not([hidden])');
+  await choose(page, 'deliver');
   const before = dev.calls.length;
 
   await page.click('#submit');
@@ -1181,20 +1282,129 @@ test('admin: a DM order can be a collection, with no delivery fee', async (t) =>
   await page.waitForSelector('.order');
   await page.click('.tab[data-tab="new"]');
   await page.fill('#n-name', 'Lerato Collect');
+  assert.equal(await page.locator('#n-time-field').isHidden(), true);
   await page.check('#n-collect');
   assert.equal(await page.locator('#n-address-field').isHidden(), true);
+  await page.fill('#n-collect-date', '2026-10-31');
+  await page.click('#n-submit');
+  assert.equal(await text(page, '#n-error'), 'Pick both a date and a time to collect, or leave both empty.');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'n-collect-time');
+  await page.fill('#n-collect-time', '10:00');
   assert.match(await text(page, '#n-summary'), /Collection\s+Free/);
   assert.match(await text(page, '#n-summary'), /Total\s+R40/);
   await page.click('#n-submit');
   await page.waitForSelector('#new-result:not([hidden])');
   assert.match(await text(page, '#new-result .preview'), /Collection: free\nTotal due: R40/);
+  assert.match(await text(page, '#new-result .preview'), /Collecting: Sat 31 Oct, 10:00, Sea Point/);
   const row = serverStatus(dev, 'SJ-0006');
   assert.equal(row.Collect, 'yes');
+  assert.equal(row['Collect at'], '2026-10-31 10:00');
   assert.equal(row.Total, 40);
 
   await page.getByRole('button', { name: 'New order' }).last().click();
   assert.equal(await page.isChecked('#n-collect'), false, 'the next order starts as delivery');
   assert.equal(await page.locator('#n-address-field').isHidden(), false);
+  assert.equal(await page.inputValue('#n-collect-date'), '');
+  noErrors(errors);
+});
+
+// --- Collection times ---
+
+test('admin: collection orders show their time, and a paid one can be moved with a new invite emailed', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { collections: true });
+  await page.waitForSelector('.order');
+  assert.match(await card(page, 'SJ-0006').innerText(), /Collect\s*Thu 29 Oct, 17:00/);
+  await chip(page, 'paid');
+  const c7 = card(page, 'SJ-0007');
+  assert.match(await c7.innerText(), /Collect\s*Thu 29 Oct, 18:00/);
+  dev.gas.mail.length = 0;
+
+  await more(page, 'SJ-0007', 'Change collection time');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'move-date');
+  assert.equal(await page.inputValue('#move-date'), '2026-10-29');
+  assert.equal(await page.inputValue('#move-time'), '18:00');
+  assert.match(await c7.innerText(), /Jess Adams is emailed an updated calendar invite/);
+
+  await page.fill('#move-date', '');
+  await c7.locator('[data-role="move-save"]').click();
+  assert.match(await c7.innerText(), /Pick a date and a time\./);
+  assert.equal(dev.gas.mail.length, 0, 'nothing sent');
+
+  await page.fill('#move-date', '2026-10-30');
+  await page.fill('#move-time', '17:30');
+  await c7.locator('[data-role="move-save"]').click();
+  await toast(page, 'SJ-0007 moved to Fri 30 Oct, 17:30. Jess Adams was emailed the new invite.');
+  assert.equal(serverStatus(dev, 'SJ-0007')['Collect at'], '2026-10-30 17:30');
+  assert.equal(dev.gas.mail.length, 1);
+  assert.equal(dev.gas.mail[0].subject, 'Supa Juice new collection time: SJ-0007');
+  assert.match(await c7.innerText(), /Collect\s*Fri 30 Oct, 17:30/);
+
+  // Keep time closes the form without a change.
+  await more(page, 'SJ-0007', 'Change collection time');
+  await c7.locator('[data-role="back"]').click();
+  assert.equal(await page.locator('#move-date').count(), 0);
+  noErrors(errors);
+});
+
+test('admin: the edit form changes the collection time, and Greg can pick any time', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { collections: true });
+  await page.waitForSelector('.order');
+  const c6 = card(page, 'SJ-0006');
+  await c6.locator('[data-role="edit"]').click();
+  assert.equal(await page.inputValue('#edit-collect-date'), '2026-10-29');
+  assert.equal(await page.inputValue('#edit-collect-time'), '17:00');
+
+  await page.fill('#edit-collect-time', '');
+  await c6.locator('[data-role="edit-save"]').click();
+  assert.match(await c6.innerText(), /Pick both a date and a time to collect, or leave both empty/);
+
+  await page.fill('#edit-collect-time', '19:15');
+  await c6.locator('[data-role="edit-save"]').click();
+  await toast(page, /^SJ-0006 updated/);
+  assert.equal(serverStatus(dev, 'SJ-0006')['Collect at'], '2026-10-29 19:15', 'outside the hours customers see');
+  assert.match(await c6.innerText(), /Collect\s*Thu 29 Oct, 19:15/);
+
+  // Unticking collection hides the time, and the saved order has none.
+  await c6.locator('[data-role="edit"]').click();
+  await page.uncheck('#e-collect');
+  assert.equal(await page.locator('#edit-collect-date').isVisible(), false);
+  await page.fill('#e-address', '1 Long St');
+  await c6.locator('[data-role="edit-save"]').click();
+  await toast(page, /^SJ-0006 updated/);
+  assert.equal(serverStatus(dev, 'SJ-0006')['Collect at'], '');
+  noErrors(errors);
+});
+
+test('admin: collection days and hours are set in Settings, and the order page follows them', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await page.click('.tab[data-tab="settings"]');
+  await page.waitForSelector('#settings-form');
+
+  // Every day unticked is refused: collection is always on.
+  for (const d of ['mon', 'tue', 'wed', 'thu', 'fri', 'sat']) await page.uncheck('#s-collection_days-' + d);
+  await page.click('#settings-save');
+  await page.waitForSelector('#settings-error:not([hidden])');
+  assert.equal(await text(page, '#settings-error'), 'Pick at least one collection day.');
+
+  await page.check('#s-collection_days-sun');
+  await page.fill('#s-collection_hours-from', '09:00');
+  await page.fill('#s-collection_hours-until', '11:00');
+  await page.selectOption('#s-collection_slot_minutes', '60');
+  await page.fill('#s-collection_per_slot', '2');
+  await page.click('#settings-save');
+  await toast(page, 'Settings saved.');
+  const saved = dev.gas.call({ action: 'getSettings', key: dev.key }).values;
+  assert.deepEqual(
+    [saved.collection_days, saved.collection_hours, saved.collection_slot_minutes, saved.collection_per_slot],
+    ['sun', '09:00-11:00', '60', '2']);
+
+  const customer = await page.context().newPage();
+  await customer.goto(kioskUrl(dev));
+  await choose(customer, 'collect');
+  assert.deepEqual(await customer.locator('#collect-day option').allInnerTexts(), ['Choose a day', 'Sun 1 Nov', 'Sun 8 Nov']);
+  await customer.selectOption('#collect-day', '2026-11-01');
+  assert.deepEqual(await customer.locator('#collect-hour option').allInnerTexts(), ['Choose a time', '09:00', '10:00']);
   noErrors(errors);
 });
 
@@ -1311,7 +1521,8 @@ test('admin: unticking "Confirm the delivery fee" charges the fee straight away 
   const customer = await page.context().newPage();
   await customer.goto(kioskUrl(dev));
   await customer.waitForSelector('#order-form:not([hidden])');
-  assert.equal(await customer.locator('#fulfil-delivery-label').innerText(), 'Delivery, R30');
+  assert.equal(await customer.locator('#choose-deliver-sub').innerText(), 'R30');
+  await choose(customer, 'deliver');
   assert.equal(await customer.locator('#submit').innerText(), 'Place order for R70');
   noErrors(errors);
 });
@@ -1367,17 +1578,23 @@ test('admin: settings show the current values and the order page link', async (t
   await page.waitForSelector('#settings-form');
   const values = await page.evaluate(() => {
     const out = {};
-    document.querySelectorAll('#settings-form input, #settings-form textarea').forEach((n) => { out[n.name] = n.value; });
+    document.querySelectorAll('#settings-form [name]').forEach((n) => { out[n.name] = n.value; });
     return out;
   });
   assert.deepEqual(values, {
-    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', collection_note: 'Sea Point. We DM you to arrange a time.', delivery_quote: 'on',
+    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', delivery_quote: 'on',
     min_quantity: '1', max_quantity: '20',
+    collection_note: 'Sea Point', collection_slot_minutes: '30', collection_per_slot: '1', collection_days_ahead: '14',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',
     brand_name: 'Supa Juice', product_name: 'Running gel sachet', currency_symbol: 'R', invoice_prefix: 'SJ',
     alert_email: 'greg@example.com'
   });
+  // Collection days are tick boxes and the hours are two times.
+  const days = await page.locator('#s-collection_days input:checked').evaluateAll((ns) => ns.map((n) => n.value));
+  assert.deepEqual(days, ['mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+  assert.equal(await page.inputValue('#s-collection_hours-from'), '17:00');
+  assert.equal(await page.inputValue('#s-collection_hours-until'), '19:00');
   assert.equal(await text(page, '.pay-value'), dev.siteUrl + '/');
   await page.locator('.pay-row').getByRole('button', { name: 'Copy' }).click();
   assert.equal(await clipboard(page), dev.siteUrl + '/');

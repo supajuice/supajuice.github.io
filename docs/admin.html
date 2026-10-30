@@ -75,6 +75,20 @@
           <input id="n-collect" type="checkbox">
           <span>Customer collects (no delivery fee)</span>
         </label>
+        <fieldset class="field choice" id="n-time-field" hidden>
+          <legend>Collection time (optional)</legend>
+          <div class="slot-pickers">
+            <div class="field">
+              <label for="n-collect-date">Date</label>
+              <input id="n-collect-date" type="date">
+            </div>
+            <div class="field">
+              <label for="n-collect-time">Time</label>
+              <input id="n-collect-time" type="time" step="1800">
+            </div>
+          </div>
+          <p class="hint">Any time you like, even one that is full on the order page. The calendar invite is emailed when you mark it paid.</p>
+        </fieldset>
         <div class="field" id="n-fee-field">
           <label for="n-fee">Delivery fee</label>
           <input id="n-fee" type="text" inputmode="decimal" autocomplete="off" maxlength="12" aria-describedby="n-fee-hint">

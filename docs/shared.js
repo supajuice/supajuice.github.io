@@ -129,9 +129,9 @@
     lines.push(order.qty + ' x ' + c.product + ' @ ' + money(order.price, sym) + ' = ' + money(totalFor(order.qty, order.price, 0), sym));
     lines.push(order.collect ? 'Collection: free' : 'Delivery: ' + (order.fee > 0 ? money(order.fee, sym) : 'free'));
     lines.push((paid ? 'Total paid: ' : 'Total due: ') + money(order.total, sym));
-    if (order.collect && c.collectNote) {
+    if (order.collect) {
       lines.push('');
-      lines.push('Collecting: ' + c.collectNote);
+      lines.push('Collecting: ' + (order.collectAt ? formatWhen(order.collectAt) + ', ' : '') + (c.collectNote || ''));
     }
     if (paid) {
       lines.push('');

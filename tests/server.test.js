@@ -50,6 +50,7 @@ test('setup creates the tabs, defaults and an admin key, and is safe to repeat',
   assert.equal(header[0], 'Invoice');
   assert.equal(header[14], 'Request ID');
   assert.equal(gas.sheet('Orders').getRange(1, 16, 1, 2).getValues()[0].join('|'), 'Email|Invoice emailed');
+  assert.equal(gas.sheet('Orders').getRange(1, 20).getValue(), 'Collect at');
   const key = gas.key();
   assert.match(key, /^[0-9a-f]{64}$/);
 
@@ -78,10 +79,12 @@ test('orders are refused until price and bank details are set', () => {
 test('public config shows the price but no bank details', () => {
   const { gas } = ready();
   const cfg = gas.call({ action: 'config' }).config;
-  assert.deepEqual(cfg, {
-    brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30,
-    currency: 'R', area: 'Cape Town', collectNote: '', quote: false, minQty: 1, maxQty: 20, photo: null, ready: true
+  const { collectSlots, ...rest } = cfg;
+  assert.deepEqual(rest, {
+    brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R', area: 'Cape Town',
+    collectNote: 'Sea Point', collectAhead: 14, quote: false, minQty: 1, maxQty: 20, photo: null, ready: true
   });
+  assert.ok(collectSlots.length > 0, 'collection times are always offered');
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
 });
 
@@ -774,19 +777,20 @@ function readyWithCollection() {
   return env;
 }
 
-test('collection is only offered once Greg writes a collection note', () => {
+test('collection is always offered, at Sea Point until Greg names another place', () => {
   const { gas, key } = ready();
-  const refused = gas.call(order({ collect: true, address: '', areaConfirmed: false, qty: 3, expectedTotal: 120 }));
-  assert.equal(refused.error, 'invalid');
-  assert.match(refused.message, /Collection is not available/);
+  assert.equal(gas.call({ action: 'config' }).config.collectNote, 'Sea Point');
+  const r = gas.call(order({ collect: true, address: '', qty: 3, expectedTotal: 120, collectAt: '2026-10-29 17:00' }));
+  assert.equal(r.ok, true, JSON.stringify(r));
   gas.call({ action: 'saveSettings', key, values: { collection_note: COLLECT_NOTE } });
   assert.equal(gas.call({ action: 'config' }).config.collectNote, COLLECT_NOTE);
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { collection_note: '' } }).error, 'invalid', 'it cannot be switched off');
 });
 
 test('a collection order has no delivery fee and needs no address', () => {
   const { gas } = readyWithCollection();
   // 3 x R40, no R30 delivery fee.
-  const r = gas.call(order({ collect: true, address: '', areaConfirmed: false, qty: 3, expectedTotal: 120 }));
+  const r = gas.call(order({ collect: true, address: '', areaConfirmed: false, qty: 3, expectedTotal: 120, collectAt: '2026-10-29 17:00' }));
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.order.collect, true);
   assert.equal(r.order.fee, 0);
@@ -799,17 +803,17 @@ test('a collection order has no delivery fee and needs no address', () => {
   // The customer's invoice says where to collect, and Greg's alert says it is a collection.
   const invoice = gas.mail.find((m) => m.to === 'jane@example.com');
   assert.match(invoice.body, /3 x Running gel sachet @ R40 = R120\nCollection: free\nTotal due: R120/);
-  assert.match(invoice.body, /Collecting: Sea Point\. We DM you to arrange a time\./);
+  assert.match(invoice.body, /Collecting: Thu 29 Oct, 17:00, Sea Point\. We DM you to arrange a time\./);
   const html = invoice.attachments[0].getDataAsString();
   assert.ok(html.includes('Collecting:') && html.includes('Sea Point') && !html.includes('Deliver to'));
   const alert = gas.mail.find((m) => m.to === 'greg@example.com');
-  assert.match(alert.body, /Collects the order \(no delivery\)/);
+  assert.match(alert.body, /Collects: Thu 29 Oct, 17:00, Sea Point/);
 });
 
 test('a page that shows the delivery total cannot slip in a collection order, or the other way round', () => {
   const { gas } = readyWithCollection();
   // Collection chosen but the delivery total sent: the totals do not match, so the order is refused.
-  assert.equal(gas.call(order({ collect: true, qty: 3, expectedTotal: 150 })).error, 'price_changed');
+  assert.equal(gas.call(order({ collect: true, qty: 3, expectedTotal: 150, collectAt: '2026-10-29 17:00' })).error, 'price_changed');
   assert.equal(gas.call(order({ collect: false, qty: 3, expectedTotal: 120 })).error, 'price_changed');
   // Anything other than true means delivery.
   const r = gas.call(order({ collect: 'yes', qty: 3, expectedTotal: 150 }));
@@ -824,7 +828,7 @@ test('delivery orders need an address, and no longer a delivery-area tick', () =
   assert.equal(r.ok, true, 'Greg checks the address himself');
 });
 
-test('Greg can enter a collection order by DM even when collection is not offered on the order page', () => {
+test('Greg can enter a collection order by DM without picking a time', () => {
   const { gas, key } = ready();
   const r = gas.call(dm(key, { collect: true, qty: 2 }));
   assert.equal(r.ok, true);
@@ -1010,7 +1014,7 @@ test('the order page must show the sachets-only total for a request', () => {
 
 test('collection orders skip the request and get the invoice straight away', () => {
   const { gas } = readyQuote();
-  const r = gas.call(request({ collect: true, address: '', areaConfirmed: false }));
+  const r = gas.call(request({ collect: true, address: '', areaConfirmed: false, collectAt: '2026-10-29 17:00' }));
   assert.equal(r.order.status, 'Awaiting payment');
   assert.equal(r.order.total, 120);
   assert.equal(r.bank.number, '0012345678');
@@ -1128,4 +1132,263 @@ test('with fees confirmed per order switched off, delivery is charged straight a
   const r = gas.call(order());
   assert.equal(r.order.status, 'Awaiting payment');
   assert.equal(r.order.total, 150);
+});
+
+// ---------------------------------------------------------------------------
+// Collection times and calendar invites
+// ---------------------------------------------------------------------------
+// The mock clock is Wed 28 Oct 2026, 15:41 in Cape Town. The defaults are Monday to
+// Saturday, 17:00 to 19:00, 30 minutes each, one customer per time, 14 days ahead.
+
+const TOMORROW = '2026-10-29';
+const pickup = (over) => order(Object.assign({ collect: true, address: '', qty: 3, expectedTotal: 120, collectAt: TOMORROW + ' 17:00' }, over));
+const slotsOf = (gas) => gas.call({ action: 'config' }).config.collectSlots;
+const timesOn = (gas, date) => (slotsOf(gas).find((d) => d.date === date) || { times: [] }).times;
+const invite = (m) => (m.attachments || []).find((a) => a.getName() === 'invite.ics');
+
+test('collection times start tomorrow, skip days Greg does not collect, and follow his hours', () => {
+  const { gas, key } = ready();
+  const slots = slotsOf(gas);
+  assert.equal(slots[0].date, TOMORROW, 'never today');
+  assert.equal(slots[0].label, 'Thu 29 Oct');
+  assert.deepEqual(slots[0].times, ['17:00', '17:30', '18:00', '18:30'], 'the last time ends at 19:00');
+  assert.equal(slots.length, 12, '14 days ahead without the two Sundays');
+  assert.ok(!slots.some((d) => d.label.startsWith('Sun')));
+  assert.equal(slots[slots.length - 1].date, '2026-11-11');
+  assert.equal(gas.call({ action: 'config' }).config.collectAhead, 14);
+
+  const r = gas.call({ action: 'saveSettings', key, values: { collection_days: 'Sun', collection_hours: '9:00-10:00', collection_slot_minutes: '60', collection_days_ahead: '7' } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.values.collection_hours, '09:00-10:00');
+  assert.deepEqual(slotsOf(gas), [{ date: '2026-11-01', label: 'Sun 1 Nov', times: ['09:00'] }]);
+});
+
+test('collection is always on: a blank place or hours in the sheet fall back to the defaults', () => {
+  const { gas } = ready();
+  const settings = gas.sheet('Settings');
+  const keys = gas.rows('Settings').map((r) => r.Key);
+  for (const k of ['collection_note', 'collection_days', 'collection_hours']) settings.getRange(keys.indexOf(k) + 2, 2).setValue('');
+  const cfg = gas.call({ action: 'config' }).config;
+  assert.equal(cfg.collectNote, 'Sea Point');
+  assert.equal(cfg.collectSlots.length, 12);
+  assert.equal(gas.call({ action: 'getSettings', key: gas.key() }).values.collection_note, 'Sea Point', 'the admin page shows the place in use');
+  assert.equal(gas.call(pickup()).ok, true);
+});
+
+test('a booked time is taken off the order page, and booking it again is refused', () => {
+  const { gas, key } = ready();
+  const firstId = rid();
+  const first = gas.call(pickup({ requestId: firstId }));
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.order.collectAt, TOMORROW + ' 17:00');
+  assert.equal(gas.rows('Orders')[0]['Collect at'], TOMORROW + ' 17:00');
+  assert.deepEqual(timesOn(gas, TOMORROW), ['17:30', '18:00', '18:30']);
+
+  const again = gas.call(pickup({ name: 'Bob' }));
+  assert.equal(again.error, 'slot_taken');
+  assert.match(again.message, /just been taken/);
+  assert.deepEqual(again.config.collectSlots[0].times, ['17:30', '18:00', '18:30'], 'the fresh times come back');
+  assert.equal(gas.rows('Orders').length, 1, 'nothing written');
+
+  // A retry of the first order is the same order, not a clash with itself.
+  const retry = gas.call(pickup({ requestId: firstId }));
+  assert.equal(retry.ok, true);
+  assert.equal(retry.order.invoice, 'SJ-0001');
+  assert.equal(gas.rows('Orders').length, 1);
+
+  // Two per time: the second customer fits, the third does not.
+  gas.call({ action: 'saveSettings', key, values: { collection_per_slot: '2' } });
+  assert.equal(gas.call(pickup({ name: 'Bob' })).ok, true);
+  assert.equal(gas.call(pickup({ name: 'Cat' })).error, 'slot_taken');
+});
+
+test('cancelling an order frees its collection time', () => {
+  const { gas, key } = ready();
+  gas.call(pickup());
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Cancelled' });
+  assert.deepEqual(timesOn(gas, TOMORROW), ['17:00', '17:30', '18:00', '18:30']);
+  assert.equal(gas.call(pickup({ name: 'Bob' })).ok, true);
+});
+
+test('customers must pick a real, offered collection time', () => {
+  const { gas } = ready();
+  assert.match(gas.call(pickup({ collectAt: undefined })).message, /pick a collection time/);
+  assert.match(gas.call(pickup({ collectAt: 'tomorrow evening' })).message, /does not look right/);
+  assert.match(gas.call(pickup({ collectAt: '2026-02-30 17:00' })).message, /does not look right/);
+  for (const at of ['2026-10-28 17:00', TOMORROW + ' 17:15', TOMORROW + ' 19:00', '2026-11-01 17:00', '2026-11-12 17:00']) {
+    assert.equal(gas.call(pickup({ collectAt: at })).error, 'slot_taken', at);
+  }
+  assert.equal(gas.rows('Orders').length, 0);
+  // A delivery order ignores any time sent with it.
+  assert.equal(gas.call(order({ collectAt: TOMORROW + ' 17:00' })).order.collectAt, '');
+});
+
+test('Greg can put a DM collection at any time, even a full one, or leave the time open', () => {
+  const { gas, key } = ready();
+  gas.call(pickup());
+  const r = gas.call(dm(key, { collect: true, collectAt: TOMORROW + ' 17:00' }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.collectAt, TOMORROW + ' 17:00');
+  assert.equal(gas.call(dm(key, { collect: true, collectAt: '2026-10-28 08:15' })).ok, true);
+  assert.equal(gas.call(dm(key, { collect: true, collectAt: 'soon' })).error, 'invalid');
+  assert.equal(gas.call(dm(key, { collect: true })).order.collectAt, '');
+});
+
+test('the invoices and Greg\'s alert say when and where to collect', () => {
+  const { gas } = ready();
+  gas.call(pickup());
+  const invoice = gas.mail.find((m) => m.to === 'jane@example.com');
+  assert.match(invoice.body, /Collecting: Thu 29 Oct, 17:00, Sea Point/);
+  assert.ok(invoice.attachments[0].getDataAsString().includes('Thu 29 Oct, 17:00, Sea Point'));
+  assert.equal(invite(invoice), undefined, 'no invite before payment');
+  const alert = gas.mail.find((m) => m.to === 'greg@example.com');
+  assert.match(alert.body, /Collects: Thu 29 Oct, 17:00, Sea Point/);
+});
+
+test('marking a collection paid emails the paid invoice with a calendar invite', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'saveSettings', key, values: { collection_note: 'Sea Point, Main Rd; gate 2' } });
+  gas.call(pickup());
+  gas.mail.length = 0;
+  const paid = gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  assert.equal(paid.emailed, true);
+  assert.equal(gas.mail.length, 1, 'one email: the invite rides with the paid invoice');
+  const m = gas.mail[0];
+  assert.equal(m.subject, 'Supa Juice invoice SJ-0001 (paid)');
+  assert.match(m.body, /calendar invite for your collection on Thu 29 Oct, 17:00/);
+  assert.match(m.body, /https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE&text=Collect%20Supa%20Juice%20order%20SJ-0001&dates=20261029T150000Z\/20261029T153000Z/);
+
+  const ics = invite(m);
+  assert.ok(ics, 'invite.ics attached');
+  assert.match(ics.getContentType(), /^text\/calendar; .*method=REQUEST/);
+  const text = ics.getDataAsString();
+  assert.ok(text.endsWith('\r\n') && !/[^\r]\n/.test(text), 'lines end in CRLF');
+  assert.ok(text.split('\r\n').every((l) => l.length <= 75), 'long lines are folded');
+  const lines = text.replace(/\r\n /g, '').split('\r\n');
+  for (const want of [
+    'METHOD:REQUEST', 'UID:SJ-0001@supajuice.github.io',
+    'DTSTART:20261029T150000Z', 'DTEND:20261029T153000Z', // 17:00 to 17:30 in Cape Town
+    'SUMMARY:Collect Supa Juice order SJ-0001', 'LOCATION:Sea Point\\, Main Rd\\; gate 2', 'STATUS:CONFIRMED',
+    'ORGANIZER;CN="Supa Juice":mailto:greg@example.com', 'TRIGGER:-PT1H'
+  ]) assert.ok(lines.includes(want), want + '\n' + text);
+  assert.ok(lines.some((l) => /^ATTENDEE;CN="Jane Doe";.*:mailto:jane@example\.com$/.test(l)));
+});
+
+test('a paid delivery gets no invite', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.mail.length = 0;
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  assert.equal(invite(gas.mail[0]), undefined);
+  assert.equal(gas.mail[0].attachments.length, 1);
+});
+
+test('moving a paid collection emails an updated invite that replaces the old one', () => {
+  const { gas, key } = ready();
+  gas.call(pickup());
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  const seqOf = (m) => Number(/SEQUENCE:(\d+)/.exec(invite(m).getDataAsString())[1]);
+  const firstSeq = seqOf(gas.mail[gas.mail.length - 1]);
+  gas.mail.length = 0;
+  gas.clock.now += 60 * 1000;
+
+  const move = (collectAt, invoice) => gas.call({ action: 'setCollectTime', key, invoice: invoice || 'SJ-0001', collectAt });
+  const r = move('2026-10-30 18:30');
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.emailed, true);
+  assert.equal(r.order.collectAt, '2026-10-30 18:30');
+  assert.equal(gas.rows('Orders')[0]['Collect at'], '2026-10-30 18:30');
+  const m = gas.mail[0];
+  assert.equal(m.subject, 'Supa Juice new collection time: SJ-0001');
+  assert.match(m.body, /now on Fri 30 Oct, 18:30 at Sea Point/);
+  const text = invite(m).getDataAsString();
+  assert.match(text, /UID:SJ-0001@supajuice\.github\.io/);
+  assert.match(text, /DTSTART:20261030T163000Z/);
+  assert.ok(seqOf(m) > firstSeq, 'a higher sequence, so calendars take the new time');
+
+  // The old time is free again, and the same time twice sends nothing.
+  assert.deepEqual(timesOn(gas, TOMORROW), ['17:00', '17:30', '18:00', '18:30']);
+  assert.equal(move('2026-10-30 18:30').emailed, undefined);
+  assert.equal(gas.mail.length, 1);
+  assert.equal(gas.call({ action: 'setCollectTime', key: 'wrong', invoice: 'SJ-0001', collectAt: '2026-10-30 17:00' }).error, 'unauthorized');
+  assert.equal(move('').error, 'invalid');
+});
+
+test('moving an unpaid collection sends nothing, and deliveries or cancelled orders cannot be moved', () => {
+  const { gas, key } = ready();
+  gas.call(pickup());
+  gas.call(order());
+  gas.mail.length = 0;
+  const move = (invoice) => gas.call({ action: 'setCollectTime', key, invoice, collectAt: '2026-10-30 17:00' });
+  const r = move('SJ-0001');
+  assert.equal(r.ok, true);
+  assert.equal(r.emailed, undefined, 'no invite until it is paid');
+  assert.equal(gas.mail.length, 0);
+  assert.match(move('SJ-0002').message, /delivery, not a collection/);
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Cancelled' });
+  assert.match(move('SJ-0001').message, /cancelled/);
+  assert.equal(move('SJ-0099').error, 'not_found');
+});
+
+test('cancelling a paid collection emails a cancellation for the invite; unpaid ones send nothing', () => {
+  const { gas, key } = ready();
+  gas.call(pickup());
+  gas.call(pickup({ name: 'Bob', collectAt: TOMORROW + ' 17:30' }));
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  gas.mail.length = 0;
+  const r = gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Cancelled' });
+  assert.equal(r.emailed, true);
+  assert.equal(gas.mail.length, 1);
+  assert.equal(gas.mail[0].subject, 'Supa Juice collection cancelled: SJ-0001');
+  const ics = invite(gas.mail[0]);
+  assert.match(ics.getContentType(), /method=CANCEL/);
+  const text = ics.getDataAsString();
+  assert.match(text, /METHOD:CANCEL/);
+  assert.match(text, /STATUS:CANCELLED/);
+  assert.match(text, /UID:SJ-0001@supajuice\.github\.io/);
+  assert.ok(!text.includes('VALARM'));
+
+  gas.mail.length = 0;
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0002', status: 'Cancelled' });
+  assert.equal(gas.mail.length, 0);
+});
+
+test('without an email for Greg the invite is published, with no organiser', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'saveSettings', key, values: { alert_email: '' } });
+  gas.call(pickup());
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  const text = invite(gas.mail[gas.mail.length - 1]).getDataAsString();
+  assert.match(text, /METHOD:PUBLISH/);
+  assert.ok(!text.includes('ORGANIZER') && !text.includes('ATTENDEE'));
+});
+
+test('editing a collection keeps, changes or clears its time', () => {
+  const { gas, key } = ready();
+  gas.call(pickup());
+  const base = edit(key, { collect: true, address: '', fee: '0' });
+  delete base.collectAt;
+  assert.equal(gas.call(base).order.collectAt, TOMORROW + ' 17:00', 'an older admin page leaves the time alone');
+  assert.equal(gas.call(Object.assign({}, base, { collectAt: '2026-10-31 18:00' })).order.collectAt, '2026-10-31 18:00');
+  assert.equal(gas.call(Object.assign({}, base, { collectAt: 'later' })).error, 'invalid');
+  assert.equal(gas.call(edit(key, { collectAt: '2026-10-31 18:00' })).order.collectAt, '', 'a delivery has no time');
+});
+
+test('collection settings are checked and kept tidy', () => {
+  const { gas, key } = ready();
+  const bad = [
+    { collection_note: ' ' }, { collection_days: '' }, { collection_days: 'mon,funday' },
+    { collection_hours: '19:00-17:00' }, { collection_hours: '25:00-26:00' }, { collection_hours: '5pm' }, { collection_hours: '' },
+    { collection_slot_minutes: '45' }, { collection_per_slot: '0' }, { collection_per_slot: '1.5' }, { collection_days_ahead: '61' },
+    { collection_hours: '17:00-17:15' }, // shorter than one 30-minute time
+    { collection_slot_minutes: '60', collection_hours: '17:00-17:30' }
+  ];
+  for (const values of bad) {
+    const r = gas.call({ action: 'saveSettings', key, values });
+    assert.equal(r.error, 'invalid', JSON.stringify(values));
+  }
+  const r = gas.call({ action: 'saveSettings', key, values: { collection_days: 'Sat, mon sun', collection_per_slot: '3', collection_slot_minutes: '15' } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.values.collection_days, 'mon,sat,sun', 'week order, Monday first');
+  assert.equal(r.config.collectStep, 15);
 });

@@ -18,6 +18,7 @@
   var busy = false;
   var current = null;    // the order response being shown on the done view
   var photo = null;      // { version, alt, width, height } from the config, or null
+  var choice = null;     // 'collect' or 'deliver', null until the customer picks one
 
   function showView(id) {
     VIEWS.forEach(function (v) { $(v).hidden = v !== id; });
@@ -73,15 +74,30 @@
     $('qty-slot').appendChild(stepper.node);
     stepper.onChange(renderTotals);
     $('order-form').addEventListener('submit', onSubmit);
-    $('fulfil-delivery').addEventListener('change', syncFulfil);
-    $('fulfil-collect').addEventListener('change', syncFulfil);
+    $('choose-collect').addEventListener('click', function () { choose('collect'); });
+    $('choose-deliver').addEventListener('click', function () { choose('deliver'); });
+    $('choose-change').addEventListener('click', function () {
+      var was = choice;
+      choice = null;
+      hideError();
+      syncFulfil();
+      $(was === 'collect' ? 'choose-collect' : 'choose-deliver').focus();
+    });
+    $('collect-day').addEventListener('change', function () { fillTimes(''); });
   }
 
-  // ---------- Delivery or collection ----------
+  // ---------- Collect or delivery ----------
 
-  // Collection is offered only when Greg has written a collection note.
+  // The customer picks first. The rest of the form appears for that choice.
+  function choose(what) {
+    choice = what;
+    hideError();
+    syncFulfil();
+    $('chosen-text').focus();
+  }
+
   function collecting() {
-    return !!(config && config.collectNote) && $('fulfil-collect').checked;
+    return choice === 'collect';
   }
 
   // A delivery whose fee Greg confirms after the order: it is sent as a request.
@@ -89,31 +105,81 @@
     return !!(config && config.quote) && !collecting();
   }
 
+  // An older order service sends no collection times. Collection then works without one.
+  function slotsOn() {
+    return !!(config && Array.isArray(config.collectSlots));
+  }
+
+  function deliveryText(c) {
+    if (c.quote) return c.fee > 0 ? 'From ' + SJ.money(c.fee, c.currency) : 'Fee confirmed after you order';
+    return c.fee > 0 ? SJ.money(c.fee, c.currency) : 'Free';
+  }
+
   function syncFulfil() {
-    var offered = !!(config && config.collectNote);
-    if (!offered) $('fulfil-delivery').checked = true;
     var collect = collecting();
-    $('fulfil').hidden = !offered;
-    $('address-field').hidden = collect;
-    var note = $('collect-note');
-    note.textContent = offered ? config.collectNote : '';
-    note.hidden = !collect;
+    var place = config ? config.collectNote : '';
+    $('choose').hidden = !!choice;
+    $('chosen').hidden = !choice;
+    $('order-rest').hidden = !choice;
+    $('choose-collect').setAttribute('aria-pressed', String(collect));
+    $('choose-deliver').setAttribute('aria-pressed', String(choice === 'deliver'));
     if (config) {
-      $('fulfil-delivery-label').textContent = config.quote
-        ? (config.fee > 0 ? 'Delivery, from ' + SJ.money(config.fee, config.currency) : 'Delivery, fee confirmed after you order')
-        : 'Delivery, ' + (config.fee > 0 ? SJ.money(config.fee, config.currency) : 'free');
+      $('choose-collect-sub').textContent = 'Free' + (place ? ' · ' + place : '');
+      $('choose-deliver-sub').textContent = deliveryText(config);
     }
+    $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '') : 'Get delivered';
+    $('address-field').hidden = collect;
+    $('collect-time').hidden = !collect || !slotsOn();
     renderTotals();
+  }
+
+  // ---------- Collection time ----------
+
+  function slotDay(date) {
+    return (config.collectSlots || []).filter(function (d) { return d.date === date; })[0] || null;
+  }
+
+  function option(value, text) {
+    return el('option', { value: value }, text);
+  }
+
+  // Keeps the day and time already picked when they are still free.
+  function renderSlots() {
+    if (!slotsOn()) return;
+    var slots = config.collectSlots;
+    var day = $('collect-day');
+    var wantDay = day.value;
+    var wantTime = $('collect-hour').value;
+    SJ.clear(day);
+    day.appendChild(option('', slots.length ? 'Choose a day' : 'No times free'));
+    slots.forEach(function (d) { day.appendChild(option(d.date, d.label)); });
+    day.value = slotDay(wantDay) ? wantDay : '';
+    day.disabled = !slots.length;
+    fillTimes(wantTime);
+    $('collect-hint').textContent = slots.length
+      ? 'Free times for the next ' + (config.collectAhead || 14) + ' days.'
+      : 'No collection times are free in the next ' + (config.collectAhead || 14) + ' days. Choose delivery, or send us a DM.';
+  }
+
+  function fillTimes(want) {
+    var hour = $('collect-hour');
+    var day = slotDay($('collect-day').value);
+    SJ.clear(hour);
+    hour.appendChild(option('', day ? 'Choose a time' : 'Choose a day first'));
+    if (day) day.times.forEach(function (t) { hour.appendChild(option(t, t)); });
+    hour.value = day && day.times.indexOf(want) !== -1 ? want : '';
+    hour.disabled = !day;
   }
 
   function applyConfig(c) {
     config = c;
     $('brand').textContent = c.brand;
     document.title = c.brand;
-    $('lede').textContent = 'Order below. Pay by bank transfer.' + (c.collectNote ? ' We deliver, or you can collect.' : '');
+    $('lede').textContent = 'Order below. Pay by bank transfer. We deliver, or you can collect.';
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
     stepper.setItem(SJ.itemLine(c));
+    renderSlots();
     syncFulfil();
     applyPhoto(c.photo || null);
   }
@@ -136,11 +202,18 @@
       address: $('address').value.trim(),
       notes: $('notes').value.trim(),
       qty: stepper.get(),
-      collect: collecting()
+      collect: collecting(),
+      collectAt: collecting() && $('collect-day').value && $('collect-hour').value
+        ? $('collect-day').value + ' ' + $('collect-hour').value : ''
     };
   }
 
   function validate(d) {
+    if (d.collect && slotsOn()) {
+      if (!config.collectSlots.length) return { id: 'choose-change', message: 'No collection times are free right now. Choose delivery, or send us a DM.' };
+      if (!$('collect-day').value) return { id: 'collect-day', message: 'Pick a day to collect.' };
+      if (!d.collectAt) return { id: 'collect-hour', message: 'Pick a time to collect.' };
+    }
     if (!d.name) return { id: 'name', message: 'Enter your name.' };
     if (!d.email) return { id: 'email', message: 'Enter your email address so we can send your invoice.' };
     if (!SJ.isEmail(d.email)) return { id: 'email', message: 'Check your email address. It should look like name@example.com.' };
@@ -195,7 +268,7 @@
 
     // A collection order does not send the address that is hidden on the form.
     if (data.collect) data.address = '';
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect, data.collectAt]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 
     setSubmitting(true);
@@ -222,6 +295,13 @@
       SJ.store.set(CONFIG_KEY, err.data.config);
       applyConfig(err.data.config);
       showError('The price has just changed. Check the new total, then place your order again.');
+    } else if (err.code === 'slot_taken' && err.data && err.data.config) {
+      // Someone else booked the time first. The free times come back with the error.
+      pending = null;
+      SJ.store.set(CONFIG_KEY, err.data.config);
+      applyConfig(err.data.config);
+      showError(err.message);
+      $($('collect-day').value ? 'collect-hour' : 'collect-day').focus();
     } else if (err.code === 'not_ready') {
       showClosed('Ordering opens soon', 'We are not taking orders on this page yet. Please check back soon.');
     } else if (err.code === 'invalid') {
@@ -279,7 +359,10 @@
 
     var collectNote = $('done-collect');
     collectNote.hidden = !o.collect;
-    collectNote.textContent = o.collect ? 'You are collecting this order. ' + (res.collectNote || 'We will DM you to arrange a time.') : '';
+    var place = res.collectNote ? ' from ' + res.collectNote : '';
+    if (!o.collect) collectNote.textContent = '';
+    else if (o.collectAt) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. A calendar invite is emailed once your payment is confirmed.';
+    else collectNote.textContent = 'You are collecting this order' + place + '. We will DM you to arrange a time.';
 
     var bib = $('bib');
     SJ.clear(bib);
@@ -312,10 +395,28 @@
     pending = null;
     $('notes').value = '';
     if (stepper) stepper.reset();
+    choice = null;
+    $('collect-day').value = '';
+    if (config) {
+      renderSlots();
+      syncFulfil();
+    }
     hideError();
     showView(config && config.ready ? 'order-form' : 'view-loading');
     window.scrollTo(0, 0);
     if (!config) init();
+    else refreshConfig();
+  }
+
+  // Fresh collection times for the next order. The form keeps working if this fails.
+  async function refreshConfig() {
+    try {
+      var res = await SJ.api('config');
+      SJ.store.set(CONFIG_KEY, res.config);
+      if (res.config.ready) applyConfig(res.config);
+    } catch (err) {
+      // The times shown may be a little old. The server still checks the one picked.
+    }
   }
 
   // ---------- Closed or failed ----------
