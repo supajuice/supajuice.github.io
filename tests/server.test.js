@@ -1189,6 +1189,35 @@ test('customers see only the dates Greg ticks, and ticked dates run out as days 
   assert.equal(list.config.collectDatesLeft, 0);
 });
 
+test('each date can have its own times, within the earliest and latest times', () => {
+  const { gas, key } = ready();
+  const r = gas.call({ action: 'saveSettings', key, values: {
+    collection_hours: '07:00-19:00',
+    collection_dates: '2026-11-01 09:00, 2026-10-30 18:30 07:00 18:30,2026-11-03 17:15'
+  } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.values.collection_dates, '2026-10-30 07:00 18:30,2026-11-01 09:00,2026-11-03 17:15', 'in order, without repeats');
+  // 17:15 is not one of the 30-minute times, so 3 Nov has nothing to offer.
+  assert.deepEqual(slotsOf(gas), [
+    { date: '2026-10-30', label: 'Fri 30 Oct', times: ['07:00', '18:30'] },
+    { date: '2026-11-01', label: 'Sun 1 Nov', times: ['09:00'] }
+  ]);
+  assert.equal(r.config.collectDatesLeft, 2);
+
+  // Booking 07:00 fills it; the other time on that date stays.
+  assert.equal(gas.call(pickup({ collectAt: '2026-10-30 07:00' })).ok, true);
+  assert.deepEqual(timesOn(gas, '2026-10-30'), ['18:30']);
+  assert.equal(gas.call(pickup({ name: 'Bob', collectAt: '2026-10-30 08:00' })).error, 'slot_taken', 'a time not offered that day');
+
+  // A date on its own still offers every time.
+  gas.call({ action: 'saveSettings', key, values: { collection_hours: '17:00-18:00', collection_dates: '2026-11-02' } });
+  assert.deepEqual(slotsOf(gas), [{ date: '2026-11-02', label: 'Mon 2 Nov', times: ['17:00', '17:30'] }]);
+
+  for (const bad of ['2026-11-02 25:00', '2026-11-02 5pm', '2026-11-02 17:00 x']) {
+    assert.equal(gas.call({ action: 'saveSettings', key, values: { collection_dates: bad } }).error, 'invalid', bad);
+  }
+});
+
 test('Greg\'s old collection weekdays become the first ticked dates', () => {
   const { gas } = ready();
   const settings = gas.sheet('Settings');

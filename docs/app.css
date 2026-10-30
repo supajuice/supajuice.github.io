@@ -170,6 +170,19 @@ a {
 .photo-preview {
   max-width: 16rem;
 }
+.photo-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: 100%;
+  min-height: 8rem;
+  padding: var(--s3);
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  text-align: center;
+}
 
 /* ---------- Form ---------- */
 
@@ -357,6 +370,14 @@ a {
 .group-body {
   padding: 0 var(--s4) var(--s4);
 }
+@media (max-width: 360px) {
+  .group > summary {
+    padding-inline: var(--s3);
+  }
+  .group-body {
+    padding-inline: var(--s3);
+  }
+}
 @media (prefers-reduced-motion: no-preference) {
   .group > summary::after {
     transition: transform 0.15s ease;
@@ -379,8 +400,12 @@ a {
 .cal-day {
   position: relative;
   display: block;
+  min-width: 0;
   min-height: 48px;
   padding: 2px;
+  border: 0;
+  background: none;
+  font: inherit;
   cursor: pointer;
 }
 .cal-box {
@@ -407,17 +432,63 @@ a {
   font-weight: 600;
   line-height: 1.2;
 }
-.cal-day input:checked + .cal-box {
+.cal-day--on .cal-box {
   border-color: var(--ink);
   background: var(--ink);
   color: var(--paper);
 }
-.cal-day input:focus-visible + .cal-box {
+/* The date whose times are shown below: a thick ring around it. */
+.cal-day[aria-pressed='true'] .cal-box {
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
+}
+.cal-day:focus-visible {
+  outline: none;
+}
+.cal-day:focus-visible .cal-box {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.times-editor {
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.times-editor .label:focus {
+  outline: none;
+}
+.time-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+.time-chip {
+  display: block;
+  cursor: pointer;
+}
+.time-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.time-chip input:checked + .time-box {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+.time-chip input:focus-visible + .time-box {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
 .cal-tools {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--s3);
   margin-top: var(--s3);
 }
@@ -978,11 +1049,12 @@ details.more[open] > summary {
 
 .form-grid {
   display: grid;
+  grid-template-columns: minmax(0, 1fr); /* wide content such as the calendar never pushes past the screen */
   gap: var(--s4);
 }
 @media (min-width: 34rem) {
   .form-grid--two {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .form-grid--two .span-all {
     grid-column: 1 / -1;

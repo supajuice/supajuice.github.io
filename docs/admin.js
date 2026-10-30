@@ -50,10 +50,10 @@
       about: 'Place, dates and times customers can collect',
       fields: [
         { key: 'collection_note', label: 'Collection place', hint: 'Where customers collect, for example Sea Point. Shown on your order page, invoices and calendar invites. Collection is free.', wide: true, max: 200 },
-        { key: 'collection_dates', label: 'Dates you hand over orders', hint: 'Tick the dates customers can collect, from tomorrow up to 30 days ahead. Tick new dates as the weeks go by.', type: 'dates' },
-        { key: 'collection_hours', label: 'Collection hours', hint: 'Customers pick a time inside these hours.', type: 'hours' },
+        { key: 'collection_hours', label: 'Earliest and latest times', hint: 'The times you can choose from for each date below.', type: 'hours' },
         { key: 'collection_slot_minutes', label: 'Length of each time', type: 'select', options: [['15', '15 minutes'], ['30', '30 minutes'], ['60', '1 hour']] },
-        { key: 'collection_per_slot', label: 'Customers per time', hint: '1 means no two customers share a time', mode: 'numeric', max: 2 }
+        { key: 'collection_per_slot', label: 'Customers per time', hint: '1 means no two customers share a time', mode: 'numeric', max: 2 },
+        { key: 'collection_dates', label: 'Dates and times you hand over orders', hint: 'Tap a date, then tick the times customers can collect that day. From tomorrow up to 30 days ahead. Add new dates as the weeks go by.', type: 'dates' }
       ]
     },
     {
@@ -86,6 +86,8 @@
   SETTINGS_LAYOUT.forEach(function (s) { s.fields.forEach(function (f) { SETTING_FIELDS.push(f); }); });
 
   var WEEK_HEAD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  var datesDraft = {};     // collection times being set, by date. null means every time.
+  var datesEditing = null; // the date whose times are shown under the calendar
 
   var state = {
     key: null,
@@ -260,6 +262,7 @@
     state.settings = null;
     state.settingsLoaded = false;
     photoSrc = null;
+    photoSrcVersion = null;
     refreshBtn = null;
     cards = {};
     resetNewForm();
@@ -1408,7 +1411,10 @@
         el('span', { class: 'group-title' }, title),
         el('span', { class: 'group-about' }, about)),
       el('div', { class: 'group-body stack' }, content));
-    d.addEventListener('toggle', function () { state.openGroups[id] = d.open; });
+    d.addEventListener('toggle', function () {
+      state.openGroups[id] = d.open;
+      if (id === 'photo' && d.open) loadPhotoPreview();
+    });
     return d;
   }
 
@@ -1435,6 +1441,10 @@
     wrap.appendChild(form);
     body.appendChild(wrap);
     SETTING_FIELDS.forEach(writeSetting);
+    renderDates();
+    ['s-collection_hours-from', 's-collection_hours-until', 's-collection_slot_minutes'].forEach(function (id) {
+      $(id).addEventListener('input', function () { renderDates(); });
+    });
     renderPhotoSection();
     loadPhotoPreview();
   }
@@ -1447,6 +1457,9 @@
   var PHOTO_TARGET_BYTES = 350 * 1024;
   var photoBusy = false;
   var photoSrc = null; // data URL of the current photo, for the preview
+  var photoSrcVersion = null; // which photo photoSrc shows
+  var photoPreview = '';      // '', 'loading' or 'failed'
+  var PHOTO_STORE = 'sj_photo'; // where the order page keeps the photo on this phone
 
   function renderPhotoSection(status) {
     var box = $('photo-section');
@@ -1471,8 +1484,9 @@
       ? 'This photo shows at the top of your order page.'
       : 'Add a photo to show at the top of your order page. It is made smaller on this phone before it is sent.'));
     if (p) {
-      box.appendChild(el('figure', { class: 'photo photo-preview' },
-        el('img', { id: 'photo-preview', alt: p.alt || 'Your order page photo', src: photoSrc || null })));
+      // The photo's own shape keeps its space while it loads.
+      box.appendChild(el('figure', { class: 'photo photo-preview', style: p.width && p.height ? 'aspect-ratio: ' + p.width + ' / ' + p.height : null },
+        photoSrc ?el('img', { id: 'photo-preview', alt: p.alt || 'Your order page photo', src: photoSrc }) : previewNote()));
     }
     box.appendChild(el('div', { class: 'field' },
       el('label', { for: 'photo-alt' }, 'Describe the photo'),
@@ -1486,15 +1500,39 @@
       file));
   }
 
+  // Shown in the photo's place until it has loaded, or when it could not be loaded.
+  function previewNote() {
+    if (photoPreview === 'failed') {
+      return el('div', { class: 'photo-note' },
+        el('p', null, 'The preview could not load.'),
+        el('button', { type: 'button', class: 'btn btn-quiet btn-small', 'data-role': 'photo-retry', onclick: loadPhotoPreview }, 'Try again'));
+    }
+    return el('div', { class: 'photo-note' }, el('p', { role: 'status' }, 'Loading the preview…'));
+  }
+
   async function loadPhotoPreview() {
-    if (!state.config || !state.config.photo || photoSrc) return;
-    try {
-      var res = await SJ.api('photo');
-      if (!res.photo) return;
-      photoSrc = 'data:' + res.photo.type + ';base64,' + res.photo.data;
-      var img = $('photo-preview');
-      if (img) img.src = photoSrc;
-    } catch (err) { /* the preview is only a convenience */ }
+    var p = state.config && state.config.photo;
+    if (!p || photoPreview === 'loading' || (photoSrc && photoSrcVersion === p.version)) return;
+    // The order page keeps the photo on this phone. Use it when it is the same one.
+    var saved = SJ.store.get(PHOTO_STORE);
+    var picture = saved && saved.version === p.version && saved.data ? saved : null;
+    if (!picture) {
+      photoPreview = 'loading';
+      if (!photoBusy) renderPhotoSection();
+      try {
+        var res = await SJ.api('photo');
+        picture = res.photo && res.photo.data ? res.photo : null;
+      } catch (err) {
+        picture = null;
+      }
+      if (picture) SJ.store.set(PHOTO_STORE, picture);
+    }
+    photoPreview = picture ? '' : 'failed';
+    if (picture) {
+      photoSrc = 'data:' + picture.type + ';base64,' + picture.data;
+      photoSrcVersion = picture.version;
+    }
+    if (!photoBusy) renderPhotoSection();
   }
 
   function readImage(file) {
@@ -1564,6 +1602,8 @@
       photoBusy = false;
       state.config.photo = res.photo;
       photoSrc = prepared.dataUrl;
+      photoSrcVersion = res.photo.version;
+      photoPreview = '';
       renderPhotoSection();
       SJ.toast('Photo saved. It now shows on your order page.');
     } catch (err) {
@@ -1596,6 +1636,7 @@
       photoBusy = false;
       state.config.photo = null;
       photoSrc = null;
+      photoSrcVersion = null;
       renderPhotoSection();
       SJ.toast('Photo removed from your order page.');
     } catch (err) {
@@ -1603,39 +1644,169 @@
     }
   }
 
-  // The next 30 dates as a calendar, Monday first. The month is shown on the first date and on each 1st.
-  function datesField(f) {
-    var days = (state.config && state.config.collectWindow) || [];
-    var grid = el('div', { class: 'cal' });
-    WEEK_HEAD.forEach(function (n) { grid.appendChild(el('span', { class: 'cal-head', 'aria-hidden': 'true' }, n)); });
-    var lead = days.length ? (days[0].weekday + 6) % 7 : 0;
-    for (var i = 0; i < lead; i++) grid.appendChild(el('span', { class: 'cal-blank', 'aria-hidden': 'true' }));
-    days.forEach(function (d, i) {
-      var num = Number(d.date.slice(8));
-      grid.appendChild(el('label', { class: 'cal-day' },
-        el('input', { type: 'checkbox', class: 'sr-only', id: 's-' + f.key + '-' + d.date, value: d.date }),
-        el('span', { class: 'cal-box', 'aria-hidden': 'true' },
-          el('span', { class: 'cal-month' }, i === 0 || num === 1 ? d.label.slice(-3) : ''),
-          el('span', { class: 'cal-num' }, String(num))),
-        el('span', { class: 'sr-only' }, d.label)));
-    });
-    function tickAll(on) {
-      Array.prototype.forEach.call(grid.querySelectorAll('input'), function (box) { box.checked = on; });
+  // The times Greg can choose from, worked out from the earliest and latest times and the length on the form.
+  function timeGrid() {
+    var from = /^(\d{2}):(\d{2})/.exec($('s-collection_hours-from').value);
+    var until = /^(\d{2}):(\d{2})/.exec($('s-collection_hours-until').value);
+    var step = Number($('s-collection_slot_minutes').value) || 30;
+    if (!from || !until) return [];
+    var out = [];
+    for (var m = +from[1] * 60 + +from[2]; m + step <= +until[1] * 60 + +until[2]; m += step) {
+      out.push((m < 600 ? '0' : '') + Math.floor(m / 60) + ':' + (m % 60 < 10 ? '0' : '') + (m % 60));
     }
+    return out;
+  }
+
+  // The times set for a date, among the ones that can be chosen now.
+  function draftTimes(date, grid) {
+    var own = datesDraft[date];
+    if (own === undefined) return [];
+    return own === null ? grid.slice() : grid.filter(function (t) { return own.indexOf(t) !== -1; });
+  }
+
+  function dateCellLabel(d, count) {
+    return d.label + ', ' + (count ? count + (count === 1 ? ' time' : ' times') : 'no times');
+  }
+
+  // The fieldset is built once. renderDates fills it, and again whenever the times change.
+  function datesField(f) {
     return el('fieldset', { class: 'field choice span-all', id: 's-' + f.key, 'aria-describedby': 's-' + f.key + '-hint' },
       el('legend', null, f.label),
       el('p', { class: 'hint', id: 's-' + f.key + '-hint' }, f.hint),
-      grid,
-      el('div', { class: 'cal-tools' },
-        el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: function () { tickAll(true); } }, 'Tick all'),
-        el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: function () { tickAll(false); } }, 'Untick all')));
+      el('div', { class: 'stack', id: 'dates-body' }));
+  }
+
+  // The next 30 dates as a calendar, Monday first, with the times of the tapped date below it.
+  // focusDate: the date button to focus afterwards, so redrawing keeps Greg's place.
+  function renderDates(focusDate) {
+    var body = $('dates-body');
+    if (!body) return;
+    var days = (state.config && state.config.collectWindow) || [];
+    var tgrid = timeGrid();
+    SJ.clear(body);
+
+    var cal = el('div', { class: 'cal' });
+    WEEK_HEAD.forEach(function (n) { cal.appendChild(el('span', { class: 'cal-head', 'aria-hidden': 'true' }, n)); });
+    var lead = days.length ? (days[0].weekday + 6) % 7 : 0;
+    for (var i = 0; i < lead; i++) cal.appendChild(el('span', { class: 'cal-blank', 'aria-hidden': 'true' }));
+    days.forEach(function (d, i) {
+      var num = Number(d.date.slice(8));
+      var count = draftTimes(d.date, tgrid).length;
+      var btn = el('button', {
+        type: 'button', class: 'cal-day' + (count ? ' cal-day--on' : ''), 'data-date': d.date,
+        'aria-pressed': String(datesEditing === d.date), 'aria-label': dateCellLabel(d, count)
+      }, el('span', { class: 'cal-box', 'aria-hidden': 'true' },
+        el('span', { class: 'cal-month' }, i === 0 || num === 1 ? d.label.slice(-3) : ''),
+        el('span', { class: 'cal-num' }, String(num))));
+      btn.addEventListener('click', function () {
+        datesEditing = d.date;
+        renderDates(d.date);
+      });
+      cal.appendChild(btn);
+    });
+    body.appendChild(cal);
+
+    body.appendChild(el('div', { class: 'cal-tools' },
+      el('button', {
+        type: 'button', class: 'btn btn-quiet btn-small', onclick: function () {
+          days.forEach(function (d) { datesDraft[d.date] = null; });
+          renderDates();
+        }
+      }, 'Every date, all times'),
+      el('button', {
+        type: 'button', class: 'btn btn-quiet btn-small', onclick: function () {
+          datesDraft = {};
+          renderDates();
+        }
+      }, 'Clear all')));
+
+    var day = days.filter(function (d) { return d.date === datesEditing; })[0];
+    if (!day) {
+      body.appendChild(el('p', { class: 'hint' }, 'Tap a date to choose its times.'));
+    } else {
+      body.appendChild(timesEditor(day, days, tgrid));
+    }
+    if (focusDate) {
+      var again = body.querySelector('[data-date="' + focusDate + '"]');
+      if (again) again.focus();
+    }
+  }
+
+  function timesEditor(day, days, tgrid) {
+    var chosen = draftTimes(day.date, tgrid);
+    var box = el('div', { class: 'times-editor', id: 'times-editor' });
+    box.appendChild(el('p', { class: 'label', id: 'times-title', tabindex: '-1' }, 'Times on ' + day.label));
+    if (!tgrid.length) {
+      box.appendChild(el('p', { class: 'hint' }, 'Set the earliest and latest times above first.'));
+      return box;
+    }
+    var chips = el('div', { class: 'time-chips', role: 'group', 'aria-labelledby': 'times-title' });
+    tgrid.forEach(function (t) {
+      var input = el('input', { type: 'checkbox', class: 'sr-only', id: 'time-' + t.replace(':', ''), value: t });
+      input.checked = chosen.indexOf(t) !== -1;
+      input.addEventListener('change', function () {
+        var now = draftTimes(day.date, tgrid).filter(function (x) { return x !== t; });
+        if (input.checked) now.push(t);
+        datesDraft[day.date] = now.sort();
+        syncDateCell(day, tgrid);
+      });
+      chips.appendChild(el('label', { class: 'time-chip' }, input, el('span', { class: 'time-box' }, t)));
+    });
+    box.appendChild(chips);
+
+    function setThisDate(list) {
+      datesDraft[day.date] = list;
+      renderDates();
+      $('times-title').focus();
+    }
+    box.appendChild(el('div', { class: 'cal-tools' },
+      el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: function () { setThisDate(tgrid.slice()); } }, 'All times'),
+      el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: function () { setThisDate([]); } }, 'No times'),
+      el('button', {
+        type: 'button', class: 'btn btn-quiet btn-small', onclick: function () {
+          var list = draftTimes(day.date, tgrid);
+          days.forEach(function (d) { if (draftTimes(d.date, tgrid).length) datesDraft[d.date] = list.slice(); });
+          renderDates();
+          SJ.toast('These times are now set on every date that has times.');
+        }
+      }, 'Use on all dates with times')));
+    return box;
+  }
+
+  // After a time is ticked: only the date's square changes, so focus stays on the time.
+  function syncDateCell(day, tgrid) {
+    var cell = document.querySelector('.cal-day[data-date="' + day.date + '"]');
+    if (!cell) return;
+    var count = draftTimes(day.date, tgrid).length;
+    cell.classList.toggle('cal-day--on', count > 0);
+    cell.setAttribute('aria-label', dateCellLabel(day, count));
+  }
+
+  // "2026-11-03 17:00 17:30,2026-11-04" -> datesDraft. A date on its own means every time.
+  function readDatesDraft(value) {
+    datesDraft = {};
+    String(value || '').split(',').forEach(function (entry) {
+      var parts = entry.trim().split(/\s+/).filter(String);
+      if (!parts.length) return;
+      datesDraft[parts[0]] = parts.length > 1 ? parts.slice(1) : null;
+    });
+    var days = (state.config && state.config.collectWindow) || [];
+    var stillShown = days.some(function (d) { return d.date === datesEditing; });
+    if (!stillShown) {
+      var first = days.filter(function (d) { return datesDraft[d.date] !== undefined; })[0] || days[0];
+      datesEditing = first ? first.date : null;
+    }
   }
 
   function readSetting(f) {
     var node = $('s-' + f.key);
     if (f.type === 'checkbox') return node.checked ? 'yes' : 'no';
     if (f.type === 'dates') {
-      return Array.prototype.map.call(node.querySelectorAll('input:checked'), function (box) { return box.value; }).join(',');
+      var tgrid = timeGrid();
+      var days = (state.config && state.config.collectWindow) || [];
+      return days.map(function (d) { return [d.date].concat(draftTimes(d.date, tgrid)); })
+        .filter(function (entry) { return entry.length > 1; })
+        .map(function (entry) { return entry.join(' '); }).join(',');
     }
     if (f.type === 'hours') return $('s-' + f.key + '-from').value + '-' + $('s-' + f.key + '-until').value;
     return node.value;
@@ -1647,8 +1818,7 @@
     if (f.type === 'checkbox') {
       node.checked = value.toLowerCase() !== 'no';
     } else if (f.type === 'dates') {
-      var picked = value.split(',');
-      Array.prototype.forEach.call(node.querySelectorAll('input'), function (box) { box.checked = picked.indexOf(box.value) !== -1; });
+      readDatesDraft(value);
     } else if (f.type === 'hours') {
       var parts = value.split('-');
       $('s-' + f.key + '-from').value = parts[0] || '';
@@ -1678,6 +1848,7 @@
       state.settings = res.values || {};
       state.config = res.config;
       SETTING_FIELDS.forEach(writeSetting);
+      renderDates();
       renderAll();
       SJ.toast(!wasReady && res.config.ready ? 'Settings saved. Your order page is open.' : 'Settings saved.');
     } catch (err) {

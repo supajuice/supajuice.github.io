@@ -85,8 +85,8 @@ const SETTING_DEFS = [
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
   { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page, invoices and calendar invites. Collection is free.' },
-  { key: 'collection_dates', value: '', note: 'Dates customers can collect, for example 2026-11-03, separated by commas. Tick them on the admin page, which shows the next 30 days.' },
-  { key: 'collection_hours', value: '17:00-19:00', note: 'Collection hours, for example 17:00-19:00.' },
+  { key: 'collection_dates', value: '', note: 'Dates and times customers can collect, for example "2026-11-03 17:00 17:30, 2026-11-04 09:00". A date on its own offers every time within the collection hours. Set them on the admin page, which shows the next 30 days.' },
+  { key: 'collection_hours', value: '17:00-19:00', note: 'The earliest and latest collection times, for example 17:00-19:00. The admin page offers the times in between for each date.' },
   { key: 'collection_slot_minutes', value: '30', note: 'Length of one collection time in minutes: 15, 30 or 60.' },
   { key: 'collection_per_slot', value: '1', note: 'How many customers can book the same collection time.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
@@ -104,7 +104,7 @@ const SETTING_DEFS = [
 // Longest allowed text per setting.
 const SETTING_MAX = {
   brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, alert_email: 120,
-  collection_dates: 400, collection_hours: 20,
+  collection_dates: 8000, collection_hours: 20,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
 
@@ -1178,12 +1178,15 @@ function validateSetting_(key, value) {
       if (text === '') throw fail_('invalid', 'Collection place cannot be blank.');
       return text;
     case 'collection_dates': {
-      const picked = text.split(/[\s,]+/).filter(String);
-      if (picked.some(function (d) { return !DATE_PATTERN.test(d); })) throw fail_('invalid', 'Collection dates must look like 2026-11-03.');
-      // Only dates customers can still book are kept, in order.
-      const dates = collectWindow_().map(function (d) { return d.date; }).filter(function (d) { return picked.indexOf(d) !== -1; });
-      if (!dates.length) throw fail_('invalid', 'Pick at least one collection date.');
-      return dates.join(',');
+      const picked = parseDates_(text);
+      if (!picked) throw fail_('invalid', 'Collection dates must look like 2026-11-03 17:00 17:30.');
+      // Only dates customers can still book are kept, in date order, each with its times in order.
+      const entries = collectWindow_().filter(function (d) { return picked[d.date] !== undefined; }).map(function (d) {
+        const times = picked[d.date];
+        return times ? d.date + ' ' + times.slice().sort().join(' ') : d.date;
+      });
+      if (!entries.length) throw fail_('invalid', 'Pick at least one collection date and time.');
+      return entries.join(',');
     }
     case 'collection_hours': {
       const h = parseHours_(text);
@@ -1228,7 +1231,6 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // Cape Town is UTC+2 all year: South Africa has no daylight saving.
 const COLLECT_UTC_OFFSET = 2;
 const DAY_MS = 86400000;
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 // Customers can book from tomorrow up to this many days ahead, on the dates Greg ticks.
 const COLLECT_WINDOW_DAYS = 30;
 
@@ -1265,19 +1267,52 @@ function datesOnWeekdays_(text) {
 // The settings as numbers. Unreadable hours or lengths fall back to the defaults.
 // dates: the ticked dates customers can still book, in order.
 function readSlots_(raw) {
-  const ticked = String(raw.collection_dates).split(/[\s,]+/);
-  const dates = collectWindow_().map(function (d) { return d.date; }).filter(function (d) { return ticked.indexOf(d) !== -1; });
   let step = parseNumber_(raw.collection_slot_minutes, 30);
   if ([15, 30, 60].indexOf(step) === -1) step = 30;
   let hours = parseHours_(raw.collection_hours);
   if (!hours || hours.end - hours.start < step) hours = parseHours_('17:00-19:00');
+  // Every time Greg can offer: from the earliest time, one slot length apart, ending by the latest.
+  const grid = [];
+  for (let m = hours.start; m + step <= hours.end; m += step) grid.push(clock_(m));
+  // Each date's own times, kept only when they fit the times above. A date on its own offers them all.
+  const picked = parseDates_(raw.collection_dates) || {};
+  const times = {};
+  const dates = [];
+  collectWindow_().forEach(function (d) {
+    if (picked[d.date] === undefined) return;
+    const own = picked[d.date];
+    const list = own ? grid.filter(function (t) { return own.indexOf(t) !== -1; }) : grid.slice();
+    if (!list.length) return;
+    times[d.date] = list;
+    dates.push(d.date);
+  });
   return {
     dates: dates,
-    start: hours.start,
-    end: hours.end,
+    times: times,
     step: step,
     perSlot: Math.min(20, Math.max(1, Math.floor(parseNumber_(raw.collection_per_slot, 1))))
   };
+}
+
+// "2026-11-03 17:00 17:30, 2026-11-04" -> { '2026-11-03': ['17:00', '17:30'], '2026-11-04': null }
+// null means every time. Returns null when anything does not look like a date or a time.
+function parseDates_(text) {
+  const out = {};
+  let ok = true;
+  String(text || '').split(',').forEach(function (entry) {
+    const parts = entry.trim().split(/\s+/).filter(String);
+    if (!parts.length) return;
+    const date = parts[0];
+    const times = parts.slice(1);
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    const real = m && new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDate() === Number(m[3]);
+    if (!real || times.some(function (t) { return !/^([01]\d|2[0-3]):[0-5]\d$/.test(t); })) {
+      ok = false;
+      return;
+    }
+    out[date] = times.length ? times.filter(function (t, i) { return times.indexOf(t) === i; }) : null;
+  });
+  return ok ? out : null;
 }
 
 // "2026-11-03 17:30" as text, '' for blank. Throws for anything else.
@@ -1330,14 +1365,9 @@ function allSlots_(s, sheet) {
   const out = [];
   collectWindow_().forEach(function (day) {
     if (slots.dates.indexOf(day.date) === -1) return;
-    const times = [];
-    const full = [];
-    for (let m = slots.start; m + slots.step <= slots.end; m += slots.step) {
-      const t = clock_(m);
-      times.push(t);
-      if ((booked[day.date + ' ' + t] || 0) >= slots.perSlot) full.push(t);
-    }
-    out.push({ date: day.date, label: day.label, times: times, full: full });
+    const times = slots.times[day.date];
+    const full = times.filter(function (t) { return (booked[day.date + ' ' + t] || 0) >= slots.perSlot; });
+    out.push({ date: day.date, label: day.label, times: times.slice(), full: full });
   });
   return out;
 }
