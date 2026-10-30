@@ -35,6 +35,7 @@
         { key: 'price', label: 'Price per sachet', hint: 'A number, for example 40', mode: 'decimal', max: 12 },
         { key: 'delivery_fee', label: 'Delivery fee', hint: '0 means free delivery', mode: 'decimal', max: 12 },
         { key: 'delivery_area', label: 'Delivery area', hint: 'Customers tick a box to say their address is inside it', wide: true, max: 60 },
+        { key: 'collection_note', label: 'Collection', hint: 'Where and how customers collect, for example: Sea Point. We DM you to arrange a time. Collection is free. Leave blank to offer delivery only.', long: true, wide: true, max: 200 },
         { key: 'min_quantity', label: 'Fewest sachets per order', hint: 'The quantity starts here. 1 means no minimum', mode: 'numeric', max: 3 },
         { key: 'max_quantity', label: 'Most sachets per order', mode: 'numeric', max: 3 }
       ]
@@ -79,6 +80,9 @@
     moreOpen: null,
     working: null,      // invoice being saved
     preview: null,      // invoice whose text is shown because copying failed
+    editing: null,      // invoice being edited
+    editDraft: null,    // what has been typed into the edit form so far
+    editError: null,
     flash: null,
     focus: null,        // { invoice?, role } to focus after the next draw
     settings: null,
@@ -216,6 +220,9 @@
     state.moreOpen = null;
     state.working = null;
     state.preview = null;
+    state.editing = null;
+    state.editDraft = null;
+    state.editError = null;
     state.flash = null;
     state.focus = null;
     state.settings = null;
@@ -409,8 +416,9 @@
     var row = el('div', { class: 'order-meta' });
     row.appendChild(el('span', null, 'Ordered ' + SJ.formatWhen(o.created)));
     if (o.paidOn) row.appendChild(el('span', null, 'Paid ' + SJ.formatWhen(o.paidOn)));
-    if (o.deliveredOn) row.appendChild(el('span', null, 'Delivered ' + SJ.formatWhen(o.deliveredOn)));
+    if (o.deliveredOn) row.appendChild(el('span', null, (o.collect ? 'Collected ' : 'Delivered ') + SJ.formatWhen(o.deliveredOn)));
     if (o.emailedOn) row.appendChild(el('span', null, 'Invoice emailed ' + SJ.formatWhen(o.emailedOn)));
+    if (o.editedOn) row.appendChild(el('span', null, 'Edited ' + SJ.formatWhen(o.editedOn)));
     row.appendChild(el('span', null, o.source === 'kiosk' ? 'From the order page' : 'DM order'));
     return row;
   }
@@ -433,9 +441,14 @@
       el('span', { class: 'order-name' }, o.name),
       el('span', { class: 'status status-' + (STATUS_CLASS[o.status] || 'cancelled') }, o.status)));
 
+    if (state.editing === o.invoice && awaiting) {
+      card.appendChild(editForm(o));
+      return card;
+    }
+
     card.appendChild(el('p', { class: 'order-text' },
       o.qty + ' x ' + c.product + ' at ' + SJ.money(o.price, sym) + ', ' +
-      (o.fee > 0 ? 'delivery ' + SJ.money(o.fee, sym) : 'free delivery')));
+      (o.collect ? 'collection' : (o.fee > 0 ? 'delivery ' + SJ.money(o.fee, sym) : 'free delivery'))));
 
     if (awaiting) {
       card.appendChild(el('p', { class: 'order-match' },
@@ -445,7 +458,8 @@
     var contact = contactNode(o.contact);
     if (contact) card.appendChild(labelled('Contact', contact));
     if (o.email) card.appendChild(labelled('Email', el('a', { href: 'mailto:' + o.email }, o.email)));
-    if (o.address) card.appendChild(labelled('Address', addressNode(o.address)));
+    if (o.collect) card.appendChild(labelled('Collect', 'The customer collects this order'));
+    else if (o.address) card.appendChild(labelled('Address', addressNode(o.address)));
     if (o.notes) card.appendChild(labelled('Note', o.notes));
 
     card.appendChild(metaRow(o));
@@ -552,11 +566,12 @@
     if (o.status === AWAITING) {
       row.appendChild(actionButton(working ? saving : 'Mark paid', 'btn-primary', 'mark-paid', function () { askConfirm(o, 'paid'); }, working));
       row.appendChild(invoiceButton(o, working));
+      row.appendChild(actionButton('Edit', 'btn-quiet', 'edit', function () { startEdit(o); }, working));
       row.appendChild(moreMenu(o, resend.concat([
         { label: 'Cancel order', role: 'cancel', danger: true, run: function () { askConfirm(o, 'cancel'); } }
       ]), working));
     } else if (o.status === PAID) {
-      row.appendChild(actionButton(working ? saving : 'Mark delivered', 'btn-primary', 'mark-delivered', function () { setStatus(o, DELIVERED); }, working));
+      row.appendChild(actionButton(working ? saving : (o.collect ? 'Mark collected' : 'Mark delivered'), 'btn-primary', 'mark-delivered', function () { setStatus(o, DELIVERED); }, working));
       row.appendChild(invoiceButton(o, working));
       row.appendChild(moreMenu(o, resend.concat([
         { label: 'Undo paid', role: 'undo-paid', run: function () { setStatus(o, AWAITING); } },
@@ -565,7 +580,7 @@
     } else if (o.status === DELIVERED) {
       row.appendChild(invoiceButton(o, working));
       row.appendChild(moreMenu(o, resend.concat([
-        { label: 'Undo delivered', role: 'undo-delivered', run: function () { setStatus(o, PAID); } }
+        { label: o.collect ? 'Undo collected' : 'Undo delivered', role: 'undo-delivered', run: function () { setStatus(o, PAID); } }
       ]), working));
     } else if (o.status === CANCELLED) {
       row.appendChild(actionButton(working ? saving : 'Reopen order', 'btn-quiet', 'reopen', function () { setStatus(o, AWAITING); }, working));
@@ -616,7 +631,7 @@
       } else {
         renderOrders();
         if (target === PAID) SJ.toast(inv + ' is back under Paid.');
-        else if (target === DELIVERED) SJ.toast(inv + ' marked delivered.');
+        else if (target === DELIVERED) SJ.toast(inv + (res.order.collect ? ' marked collected.' : ' marked delivered.'));
         else if (target === CANCELLED) SJ.toast(inv + ' cancelled.');
         else SJ.toast(inv + ' is waiting for payment again.');
       }
@@ -629,6 +644,164 @@
       SJ.toast(err.message, 'bad');
       if (err.code === 'invalid' || err.code === 'not_found') refresh({ quiet: true });
       else renderOrders();
+    }
+  }
+
+  // ---------- Editing an unpaid order ----------
+
+  function startEdit(o) {
+    state.editing = o.invoice;
+    state.editDraft = {
+      name: o.name, email: o.email, contact: o.contact, address: o.address, notes: o.notes,
+      qty: String(o.qty), collect: o.collect, price: String(o.price), fee: String(o.fee), sendInvoice: true
+    };
+    state.editError = null;
+    state.confirm = null;
+    state.preview = null;
+    state.moreOpen = null;
+    state.focus = { invoice: o.invoice, role: 'edit-name' };
+    renderOrders();
+  }
+
+  function stopEdit(o) {
+    state.editing = null;
+    state.editDraft = null;
+    state.editError = null;
+    state.focus = { invoice: o.invoice, role: 'edit' };
+    renderOrders();
+  }
+
+  // The total as it will be saved, or null while a number does not make sense yet.
+  function draftTotal(d) {
+    var qty = Number(d.qty);
+    var price = Number(String(d.price).replace(',', '.'));
+    var fee = d.collect ? 0 : Number(String(d.fee).replace(',', '.'));
+    if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1 || !isFinite(price) || price < 0 || !isFinite(fee) || fee < 0) return null;
+    return SJ.totalFor(qty, price, fee);
+  }
+
+  function editForm(o) {
+    var d = state.editDraft;
+    var sym = state.config.currency;
+    var working = state.working === o.invoice;
+    var totalLine = el('p', { class: 'list-total', role: 'status' });
+    var sendRow;
+    var addressField;
+    var feeField;
+
+    function sync() {
+      var total = draftTotal(d);
+      totalLine.textContent = total === null ? 'Check the quantity and prices.' : 'New total: ' + SJ.money(total, sym);
+      addressField.hidden = d.collect;
+      feeField.hidden = d.collect;
+      var email = d.email.trim();
+      sendRow.hidden = !email;
+      sendRow.querySelector('span').textContent = 'Email the updated invoice to ' + email;
+    }
+
+    function input(key, label, opts) {
+      opts = opts || {};
+      var id = 'e-' + key;
+      var attrs = { id: id, 'data-role': 'edit-' + key, maxlength: String(opts.max || 80), autocomplete: 'off' };
+      var node = opts.long
+        ? el('textarea', Object.assign({ rows: '2' }, attrs))
+        : el('input', Object.assign({ type: opts.type || 'text', inputmode: opts.mode || null }, attrs));
+      node.value = d[key];
+      node.addEventListener('input', function () { d[key] = node.value; sync(); });
+      return el('div', { class: 'field' }, el('label', { for: id }, label), node);
+    }
+
+    var collect = el('input', { type: 'checkbox', id: 'e-collect', 'data-role': 'edit-collect' });
+    collect.checked = d.collect;
+    collect.addEventListener('change', function () { d.collect = collect.checked; sync(); });
+
+    var send = el('input', { type: 'checkbox', id: 'e-send', 'data-role': 'edit-send' });
+    send.checked = d.sendInvoice;
+    send.addEventListener('change', function () { d.sendInvoice = send.checked; });
+    sendRow = el('label', { class: 'check' }, send, el('span'));
+
+    addressField = input('address', 'Delivery address', { long: true, max: 300 });
+    feeField = input('fee', 'Delivery fee', { mode: 'decimal', max: 12 });
+
+    var form = el('form', { class: 'stack confirm-row', novalidate: true, 'aria-label': 'Edit order ' + o.invoice },
+      el('p', { class: 'fine' }, 'Change anything below. The invoice number stays ' + o.invoice + '.'),
+      input('name', 'Customer name'),
+      input('email', 'Email', { type: 'email', max: 120 }),
+      input('contact', 'Instagram handle or phone'),
+      input('qty', 'Quantity', { mode: 'numeric', max: 3 }),
+      input('price', 'Price per sachet', { mode: 'decimal', max: 12 }),
+      el('label', { class: 'check' }, collect, el('span', null, 'Customer collects (no delivery fee)')),
+      feeField,
+      addressField,
+      input('notes', 'Notes', { max: 300 }),
+      totalLine,
+      sendRow,
+      state.editError ? el('div', { class: 'alert alert-bad', role: 'alert' }, state.editError) : null,
+      el('div', { class: 'order-actions' },
+        el('button', { type: 'submit', class: 'btn btn-small btn-primary', 'data-role': 'edit-save', disabled: working }, working ? 'Saving…' : 'Save changes'),
+        actionButton('Cancel', 'btn-quiet', 'edit-cancel', function () { stopEdit(o); }, working)));
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      saveEdit(o);
+    });
+    sync();
+    return form;
+  }
+
+  async function saveEdit(o) {
+    if (state.working) return;
+    var d = state.editDraft;
+    if (!d.name.trim()) {
+      state.editError = 'Enter the name of the customer.';
+      state.focus = { invoice: o.invoice, role: 'edit-name' };
+      renderOrders();
+      return;
+    }
+    if (d.email.trim() && !SJ.isEmail(d.email.trim())) {
+      state.editError = 'Check the email address. It should look like name@example.com.';
+      state.focus = { invoice: o.invoice, role: 'edit-email' };
+      renderOrders();
+      return;
+    }
+    state.working = o.invoice;
+    state.editError = null;
+    renderOrders();
+    try {
+      var email = d.email.trim();
+      var res = await SJ.api('editOrder', {
+        key: state.key, invoice: o.invoice,
+        name: d.name.trim(), email: email, contact: d.contact.trim(),
+        address: d.collect ? '' : d.address.trim(), notes: d.notes.trim(),
+        qty: Number(d.qty), collect: d.collect, price: d.price, fee: d.collect ? '0' : d.fee,
+        sendInvoice: !!(email && d.sendInvoice)
+      });
+      state.version++;
+      replaceOrder(res.order);
+      state.working = null;
+      state.editing = null;
+      state.editDraft = null;
+      state.focus = { invoice: o.invoice, role: 'edit' };
+      renderOrders();
+      var inv = res.order.invoice;
+      if (res.emailed === true) SJ.toast(inv + ' updated. The new invoice was emailed to ' + res.order.email + '.');
+      else if (res.emailed === false) SJ.toast(inv + ' updated, but the invoice email did not send. Try More > Email invoice later.', 'bad');
+      else SJ.toast(inv + ' updated.');
+    } catch (err) {
+      state.working = null;
+      if (err.code === 'unauthorized') {
+        lock(err.message);
+        return;
+      }
+      if (err.code === 'not_found' || /Only orders waiting for payment/.test(err.message)) {
+        // Someone changed it on another phone: show the order as it is now.
+        state.editing = null;
+        state.editDraft = null;
+        SJ.toast(err.message, 'bad');
+        refresh({ quiet: true });
+        return;
+      }
+      state.editError = err.message;
+      renderOrders();
     }
   }
 
@@ -664,6 +837,7 @@
     $('new-qty-slot').appendChild(newStepper.node);
     newStepper.onChange(renderNewTotals);
     $('new-form').addEventListener('submit', onCreate);
+    $('n-collect').addEventListener('change', renderNewTotals);
   }
 
   function applyConfigToNew() {
@@ -679,7 +853,9 @@
 
   function renderNewTotals() {
     if (!state.config || !newStepper) return;
-    SJ.renderSummary($('n-summary'), state.config, newStepper.get());
+    var collect = $('n-collect').checked;
+    $('n-address-field').hidden = collect;
+    SJ.renderSummary($('n-summary'), state.config, newStepper.get(), collect);
   }
 
   function showNewError(message) {
@@ -699,13 +875,15 @@
     if (newBusy) return;
     $('n-error').hidden = true;
 
+    var collect = $('n-collect').checked;
     var data = {
       name: $('n-name').value.trim(),
       email: $('n-email').value.trim(),
       contact: $('n-contact').value.trim(),
-      address: $('n-address').value.trim(),
+      address: collect ? '' : $('n-address').value.trim(),
       notes: $('n-notes').value.trim(),
-      qty: newStepper.get()
+      qty: newStepper.get(),
+      collect: collect
     };
     if (!data.name) {
       showNewError('Enter the name of the customer.');
@@ -718,7 +896,7 @@
       return;
     }
 
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect]);
     if (!newPending || newPending.sig !== sig) newPending = { sig: sig, id: SJ.newRequestId() };
 
     setNewBusy(true);
@@ -795,6 +973,8 @@
   function resetNewForm() {
     newPending = null;
     ['n-name', 'n-email', 'n-contact', 'n-address', 'n-notes'].forEach(function (id) { $(id).value = ''; });
+    $('n-collect').checked = false;
+    renderNewTotals();
     if (newStepper) newStepper.reset();
     $('n-error').hidden = true;
     $('new-form').hidden = false;

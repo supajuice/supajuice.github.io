@@ -122,6 +122,57 @@ test('order page: with a minimum order the quantity starts there and cannot go b
   noErrors(errors);
 });
 
+test('order page: a customer can choose to collect, and the delivery fee comes off', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.match(await text(page, '#lede'), /or you can collect/);
+  assert.equal(await text(page, '#fulfil-delivery-label'), 'Delivery, R30');
+  assert.equal(await page.locator('#collect-note').isHidden(), true);
+  assert.equal(await text(page, '#submit'), 'Place order for R70');
+
+  await page.check('#fulfil-collect');
+  assert.equal(await page.locator('#address-field').isHidden(), true, 'no address needed');
+  assert.equal(await text(page, '#collect-note'), 'Sea Point. We DM you to arrange a time.');
+  assert.match(await text(page, '#summary'), /Collection\s+Free/);
+  assert.equal(await text(page, '#submit'), 'Place order for R40');
+
+  await page.click('[aria-label="One more"]');
+  await page.fill('#name', 'Sam Collect');
+  await page.fill('#email', 'sam@example.com');
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.match(await text(page, '#done-sub'), /Pay R80 by bank transfer/);
+  assert.match(await text(page, '#done-collect'), /You are collecting this order\. Sea Point/);
+
+  const row = orderRows(dev)[0];
+  assert.equal(row.Collect, 'yes');
+  assert.equal(row['Delivery fee'], 0);
+  assert.equal(row.Total, 80);
+  assert.equal(row.Address, '');
+
+  await page.click('#copy-invoice');
+  const invoice = await clipboard(page);
+  assert.match(invoice, /Collection: free\nTotal due: R80\n\nCollecting: Sea Point/);
+
+  // Switching back to delivery brings the address and the fee back.
+  await page.click('#new-order');
+  await page.waitForSelector('#order-form:not([hidden])');
+  await page.check('#fulfil-delivery');
+  assert.equal(await page.locator('#address-field').isHidden(), false);
+  assert.equal(await text(page, '#submit'), 'Place order for R70');
+  noErrors(errors);
+});
+
+test('order page: without a collection note there is no choice, only delivery', async (t) => {
+  const { dev, page } = await open(t, { mode: 'ready' });
+  dev.gas.call({ action: 'saveSettings', key: dev.key, values: { collection_note: '' } });
+  await page.goto(kioskUrl(dev));
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await page.locator('#fulfil').isHidden(), true);
+  assert.equal(await page.locator('#address-field').isHidden(), false);
+  assert.doesNotMatch(await text(page, '#lede'), /collect/);
+});
+
 test('order page: free delivery is shown as Free', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready', fee: 0 });
   await page.waitForSelector('#order-form:not([hidden])');
@@ -999,6 +1050,120 @@ test('admin: a file that is not a picture is refused and nothing changes', async
   assert.equal(dev.gas.sheet('Photo'), null);
 });
 
+// --- Collection and editing on Greg's page ---
+
+test('admin: Greg edits an unpaid order completely, and the customer gets the new invoice', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  const c5 = card(page, 'SJ-0005');
+  await c5.locator('[data-role="edit"]').click();
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'e-name', 'the form opens ready to type');
+  assert.equal(await page.inputValue('#e-qty'), '5');
+  assert.equal(await page.inputValue('#e-price'), '40');
+  assert.equal(await page.inputValue('#e-fee'), '30');
+  assert.match(await c5.innerText(), /New total: R230/);
+  assert.equal(await page.isChecked('#e-send'), true, 'emailing the new invoice is ticked');
+  assert.match(await c5.innerText(), /Email the updated invoice to pieter@example\.com/);
+
+  await page.fill('#e-qty', '6');
+  await page.fill('#e-price', '35');
+  await page.check('#e-collect');
+  assert.equal(await page.locator('#e-fee').isHidden(), true);
+  assert.equal(await page.locator('#e-address').isHidden(), true);
+  assert.match(await c5.innerText(), /New total: R210/);
+  await page.fill('#e-notes', 'Collecting Saturday');
+
+  const mailBefore = dev.gas.mail.length;
+  await c5.locator('[data-role="edit-save"]').click();
+  await toast(page, 'SJ-0005 updated. The new invoice was emailed to pieter@example.com.');
+  const after = card(page, 'SJ-0005');
+  assert.match(await after.innerText(), /6 x Running gel sachet at R35, collection/);
+  assert.match(await after.innerText(), /R210/);
+  assert.match(await after.innerText(), /The customer collects this order/);
+  assert.match(await after.innerText(), /Edited Wed 28 Oct, 15:41/);
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('data-role')), 'edit');
+
+  const row = serverStatus(dev, 'SJ-0005');
+  assert.deepEqual([row.Qty, row['Unit price'], row['Delivery fee'], row.Total, row.Collect, row.Notes], [6, 35, 0, 210, 'yes', 'Collecting Saturday']);
+  assert.equal(dev.gas.mail.length, mailBefore + 1);
+  assert.match(dev.gas.mail[mailBefore].body, /6 x Running gel sachet @ R35 = R210\nCollection: free\nTotal due: R210/);
+
+  // Once paid, the next step reads "Mark collected", and editing is no longer offered.
+  await after.locator('[data-role="mark-paid"]').click();
+  await after.getByRole('button', { name: 'Yes, mark paid' }).click();
+  await toast(page, /SJ-0005 marked paid/);
+  const paid = card(page, 'SJ-0005');
+  assert.equal(await paid.locator('[data-role="mark-delivered"]').innerText(), 'Mark collected');
+  assert.equal(await paid.locator('[data-role="edit"]').count(), 0);
+  await paid.locator('[data-role="mark-delivered"]').click();
+  await toast(page, 'SJ-0005 marked collected.');
+  noErrors(errors);
+});
+
+test('admin: an edit can be cancelled, a mistake is explained, and unticking skips the email', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  const c5 = card(page, 'SJ-0005');
+  await c5.locator('[data-role="edit"]').click();
+  await page.fill('#e-name', 'Somebody Else');
+  await c5.locator('[data-role="edit-cancel"]').click();
+  assert.match(await c5.innerText(), /Pieter van der Merwe/);
+  assert.equal(serverStatus(dev, 'SJ-0005').Name, 'Pieter van der Merwe');
+
+  await c5.locator('[data-role="edit"]').click();
+  assert.equal(await page.inputValue('#e-name'), 'Pieter van der Merwe', 'a cancelled draft is not kept');
+  await page.fill('#e-qty', '0');
+  assert.match(await c5.innerText(), /Check the quantity and prices/);
+  await c5.locator('[data-role="edit-save"]').click();
+  await page.waitForSelector('article.order[aria-label="Order SJ-0005"] .alert-bad');
+  assert.match(await c5.locator('.alert-bad').innerText(), /quantity/);
+  assert.equal(await page.inputValue('#e-qty'), '0', 'what Greg typed is still there');
+  assert.equal(serverStatus(dev, 'SJ-0005').Qty, 5);
+
+  const mailBefore = dev.gas.mail.length;
+  await page.fill('#e-qty', '7');
+  await page.uncheck('#e-send');
+  await c5.locator('[data-role="edit-save"]').click();
+  await toast(page, 'SJ-0005 updated.');
+  assert.equal(serverStatus(dev, 'SJ-0005').Qty, 7);
+  assert.equal(dev.gas.mail.length, mailBefore, 'no email when unticked');
+  noErrors(errors);
+});
+
+test('admin: an order paid on another phone while being edited is not overwritten', async (t) => {
+  const { dev, page } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  const c5 = card(page, 'SJ-0005');
+  await c5.locator('[data-role="edit"]').click();
+  await page.fill('#e-qty', '9');
+  dev.gas.call({ action: 'setStatus', key: dev.key, invoice: 'SJ-0005', status: 'Paid' });
+  await c5.locator('[data-role="edit-save"]').click();
+  await toast(page, /SJ-0005 is Paid\. Only orders waiting for payment can be edited/);
+  assert.equal(serverStatus(dev, 'SJ-0005').Qty, 5);
+});
+
+test('admin: a DM order can be a collection, with no delivery fee', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await page.click('.tab[data-tab="new"]');
+  await page.fill('#n-name', 'Lerato Collect');
+  await page.check('#n-collect');
+  assert.equal(await page.locator('#n-address-field').isHidden(), true);
+  assert.match(await text(page, '#n-summary'), /Collection\s+Free/);
+  assert.match(await text(page, '#n-summary'), /Total\s+R40/);
+  await page.click('#n-submit');
+  await page.waitForSelector('#new-result:not([hidden])');
+  assert.match(await text(page, '#new-result .preview'), /Collection: free\nTotal due: R40/);
+  const row = serverStatus(dev, 'SJ-0006');
+  assert.equal(row.Collect, 'yes');
+  assert.equal(row.Total, 40);
+
+  await page.getByRole('button', { name: 'New order' }).last().click();
+  assert.equal(await page.isChecked('#n-collect'), false, 'the next order starts as delivery');
+  assert.equal(await page.locator('#n-address-field').isHidden(), false);
+  noErrors(errors);
+});
+
 test('admin: a DM order needs a name, and a double tap makes one order', async (t) => {
   const { dev, page } = await openAdmin(t, { latency: 400 });
   await page.waitForSelector('.order');
@@ -1054,7 +1219,8 @@ test('admin: settings show the current values and the order page link', async (t
     return out;
   });
   assert.deepEqual(values, {
-    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', min_quantity: '1', max_quantity: '20',
+    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', collection_note: 'Sea Point. We DM you to arrange a time.',
+    min_quantity: '1', max_quantity: '20',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',
     brand_name: 'Supa Juice', product_name: 'Running gel sachet', currency_symbol: 'R', invoice_prefix: 'SJ',
@@ -1258,7 +1424,8 @@ function tapTargetFailures() {
     const cs = getComputedStyle(n);
     if (cs.display === 'none' || cs.visibility === 'hidden') return;
     let rect = n.getBoundingClientRect();
-    if (n.type === 'checkbox' && n.closest('label')) rect = n.closest('label').getBoundingClientRect();
+    // A tick box or radio button inside its label can be tapped anywhere on the label.
+    if ((n.type === 'checkbox' || n.type === 'radio') && n.closest('label')) rect = n.closest('label').getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     if (rect.height < 40 || rect.width < 40) {
       out.push({ tag: n.tagName.toLowerCase(), text: (n.textContent || n.value || n.id || '').trim().slice(0, 30), w: Math.round(rect.width), h: Math.round(rect.height) });

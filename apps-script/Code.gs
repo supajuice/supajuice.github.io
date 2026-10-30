@@ -11,7 +11,7 @@
  * which avoids a CORS preflight request (Apps Script cannot answer one).
  *
  * Public actions   config, order, photo
- * Admin actions    list, create, setStatus, sendInvoice, getSettings, saveSettings,
+ * Admin actions    list, create, editOrder, setStatus, sendInvoice, getSettings, saveSettings,
  *                  setPhoto, removePhoto
  *                  (all need the admin key kept in Script properties)
  *
@@ -38,16 +38,16 @@ const MAX_ORDERS_LISTED = 500;
 const HEADERS = [
   'Invoice', 'Created', 'Source', 'Name', 'Contact', 'Address', 'Notes',
   'Qty', 'Unit price', 'Delivery fee', 'Total', 'Status', 'Paid on', 'Delivered on', 'Request ID',
-  'Email', 'Invoice emailed'
+  'Email', 'Invoice emailed', 'Collect', 'Edited on'
 ];
 // New columns go at the end, so rows written by an older version still line up.
 const COL = {
   INVOICE: 0, CREATED: 1, SOURCE: 2, NAME: 3, CONTACT: 4, ADDRESS: 5, NOTES: 6,
   QTY: 7, PRICE: 8, FEE: 9, TOTAL: 10, STATUS: 11, PAID: 12, DELIVERED: 13, REQUEST: 14,
-  EMAIL: 15, EMAILED: 16
+  EMAIL: 15, EMAILED: 16, COLLECT: 17, EDITED: 18
 };
 // Text columns are stored as plain text so Sheets never turns input into a formula or a date.
-const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@'];
+const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@', '@', '@'];
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -72,6 +72,7 @@ const SETTING_DEFS = [
   { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
   { key: 'delivery_area', value: 'Cape Town', note: 'Customers tick a box to confirm their address is inside this area.' },
+  { key: 'collection_note', value: '', note: 'Where and how customers collect, for example "Sea Point. We DM you to arrange a time." Collection is free. Leave blank to offer delivery only.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
   { key: 'invoice_prefix', value: 'SJ', note: 'Letters before the invoice number, for example SJ-0001. Up to 6 letters or digits.' },
@@ -86,7 +87,7 @@ const SETTING_DEFS = [
 
 // Longest allowed text per setting.
 const SETTING_MAX = {
-  brand_name: 60, product_name: 60, currency_symbol: 4, delivery_area: 60, alert_email: 120,
+  brand_name: 60, product_name: 60, currency_symbol: 4, delivery_area: 60, collection_note: 200, alert_email: 120,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
 
@@ -129,6 +130,7 @@ function handle_(body) {
     switch (body.action) {
       case 'list': return listOrders_();
       case 'create': return createOrder_(body, 'dm');
+      case 'editOrder': return editOrder_(body);
       case 'setStatus': return setStatus_(body);
       case 'sendInvoice': return sendInvoice_(body);
       case 'getSettings': return { ok: true, values: readSettings_() };
@@ -177,13 +179,14 @@ function createOrder_(body, source) {
   const address = clean_(body.address, 300);
   const notes = clean_(body.notes, 300);
   const qty = Number(body.qty);
+  const collect = body.collect === true;
   const requestId = /^[A-Za-z0-9_-]{8,64}$/.test(String(body.requestId || '')) ? String(body.requestId) : '';
 
   if (!name) throw fail_('invalid', 'Please enter a name.');
   if (kiosk && !email) throw fail_('invalid', 'Please enter your email address so we can send your invoice.');
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
-  if (kiosk && !address) throw fail_('invalid', 'Please enter your delivery address.');
-  if (kiosk && body.areaConfirmed !== true) throw fail_('invalid', 'Please confirm your address is inside the delivery area.');
+  if (kiosk && !collect && !address) throw fail_('invalid', 'Please enter your delivery address.');
+  if (kiosk && !collect && body.areaConfirmed !== true) throw fail_('invalid', 'Please confirm your address is inside the delivery area.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
 
   const lock = LockService.getScriptLock();
@@ -200,6 +203,8 @@ function createOrder_(body, source) {
     if (!settings.ready) throw fail_('not_ready', 'Ordering is not open yet.');
     if (qty < settings.minQty) throw fail_('invalid', 'The smallest order is ' + settings.minQty + '.');
     if (qty > settings.maxQty) throw fail_('invalid', 'The most you can order at once is ' + settings.maxQty + '.');
+    // Customers can only choose collection when Greg offers it. Greg can always enter a collection order.
+    if (kiosk && collect && !settings.collectNote) throw fail_('invalid', 'Collection is not available. Please choose delivery.');
 
     const sheet = ordersSheet_();
 
@@ -210,7 +215,8 @@ function createOrder_(body, source) {
       if (existing) return orderResponse_(existing, settings);
     }
 
-    const totalCents = Math.round(settings.price * 100) * qty + Math.round(settings.fee * 100);
+    const fee = collect ? 0 : settings.fee;
+    const totalCents = Math.round(settings.price * 100) * qty + Math.round(fee * 100);
     const total = totalCents / 100;
 
     // The total the customer saw must still be the real total.
@@ -225,9 +231,9 @@ function createOrder_(body, source) {
     const row = [
       invoice, nowString_(), source,
       safe_(name), safe_(contact), safe_(address), safe_(notes),
-      qty, settings.price, settings.fee, total,
+      qty, settings.price, fee, total,
       STATUS.AWAITING, '', '', requestId,
-      safe_(email), ''
+      safe_(email), '', collect ? 'yes' : '', ''
     ];
     writeRow_(sheet, sheet.getLastRow() + 1, row);
     SpreadsheetApp.flush();
@@ -251,6 +257,7 @@ function orderResponse_(order, s, emailed) {
     product: s.product,
     currency: s.currency,
     area: s.area,
+    collectNote: s.collectNote,
     bank: s.bank,
     paymentNote: s.paymentNote
   };
@@ -333,6 +340,74 @@ function sendInvoice_(body) {
   return { ok: true, order: order, emailed: true };
 }
 
+// Greg changes an order that is still waiting for payment: the customer's details, the quantity,
+// delivery or collection, and the price and fee for this order (for example a discount).
+// The invoice number stays the same and the total is worked out again here.
+function editOrder_(body) {
+  const invoice = clean_(body.invoice, 32);
+  const name = clean_(body.name, 80);
+  const contact = clean_(body.contact, 80);
+  const email = clean_(body.email, 120);
+  const address = clean_(body.address, 300);
+  const notes = clean_(body.notes, 300);
+  const qty = Number(body.qty);
+  const collect = body.collect === true;
+  const price = parseNumber_(body.price, NaN);
+  const fee = collect ? 0 : parseNumber_(body.fee, NaN);
+
+  if (!name) throw fail_('invalid', 'Please enter a name.');
+  if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
+  if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
+  if (!isFinite(price) || price < 0 || price > 100000) throw fail_('invalid', 'Price per sachet must be a number, for example 40.');
+  if (!isFinite(fee) || fee < 0 || fee > 100000) throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
+
+  const settings = readTypedSettings_();
+  if (qty < settings.minQty) throw fail_('invalid', 'The smallest order is ' + settings.minQty + '.');
+  if (qty > settings.maxQty) throw fail_('invalid', 'The most one order can include is ' + settings.maxQty + '.');
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    throw fail_('busy', 'Busy right now. Please try again.');
+  }
+  let order;
+  try {
+    const sheet = ordersSheet_();
+    const rowNum = findRow_(sheet, invoice);
+    if (!rowNum) throw fail_('not_found', 'Order ' + invoice + ' was not found.');
+    const row = sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0];
+    const status = str_(row[COL.STATUS]);
+    if (status !== STATUS.AWAITING) {
+      throw fail_('invalid', 'Order ' + str_(row[COL.INVOICE]) + ' is ' + status + '. Only orders waiting for payment can be edited.');
+    }
+
+    const unit = round2_(price);
+    const delivery = round2_(fee);
+    const total = (Math.round(unit * 100) * qty + Math.round(delivery * 100)) / 100;
+    row[COL.NAME] = safe_(name);
+    row[COL.CONTACT] = safe_(contact);
+    row[COL.ADDRESS] = safe_(address);
+    row[COL.NOTES] = safe_(notes);
+    row[COL.QTY] = qty;
+    row[COL.PRICE] = unit;
+    row[COL.FEE] = delivery;
+    row[COL.TOTAL] = total;
+    row[COL.EMAIL] = safe_(email);
+    row[COL.COLLECT] = collect ? 'yes' : '';
+    row[COL.EDITED] = nowString_();
+    // The whole row is written back with its formats, which also fills in columns older rows lack.
+    sheet.getRange(rowNum, 1, 1, HEADERS.length).setNumberFormats([FORMATS]).setValues([row]);
+    SpreadsheetApp.flush();
+    order = rowToOrder_(row);
+  } finally {
+    lock.releaseLock();
+  }
+  const out = { ok: true, order: order };
+  if (body.sendInvoice === true && order.email) out.emailed = emailInvoice_(order, settings);
+  return out;
+}
+
 function rowToOrder_(r) {
   return {
     invoice: str_(r[COL.INVOICE]),
@@ -350,7 +425,9 @@ function rowToOrder_(r) {
     paidOn: str_(r[COL.PAID]),
     deliveredOn: str_(r[COL.DELIVERED]),
     email: str_(r[COL.EMAIL]),
-    emailedOn: str_(r[COL.EMAILED])
+    emailedOn: str_(r[COL.EMAILED]),
+    collect: str_(r[COL.COLLECT]).toLowerCase() === 'yes',
+    editedOn: str_(r[COL.EDITED])
   };
 }
 
@@ -422,10 +499,10 @@ function sendAlert_(order, s) {
       '',
       'Name: ' + order.name,
       'Contact: ' + order.contact,
-      'Address: ' + order.address,
+      order.collect ? 'Collects the order (no delivery)' : 'Address: ' + order.address,
       'Notes: ' + (order.notes || '-'),
       'Order: ' + order.qty + ' x ' + s.product + ' at ' + money_(order.price, s.currency),
-      'Delivery: ' + money_(order.fee, s.currency),
+      order.collect ? 'Collection: free' : 'Delivery: ' + money_(order.fee, s.currency),
       'Total: ' + money_(order.total, s.currency),
       '',
       'Check your bank statement for the reference ' + order.invoice + ', then mark the order paid on the admin page.'
@@ -490,8 +567,9 @@ function invoiceText_(o, s) {
   if (paid && o.paidOn) lines.push('Paid: ' + formatDay_(o.paidOn));
   lines.push('', 'For: ' + o.name);
   lines.push(o.qty + ' x ' + s.product + ' @ ' + money_(o.price, s.currency) + ' = ' + money_(lineTotal_(o), s.currency));
-  lines.push('Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free'));
+  lines.push(o.collect ? 'Collection: free' : 'Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free'));
   lines.push((paid ? 'Total paid: ' : 'Total due: ') + money_(o.total, s.currency));
+  if (o.collect && s.collectNote) lines.push('', 'Collecting: ' + s.collectNote);
   if (paid) {
     lines.push('', 'Thank you for your order.');
   } else {
@@ -544,11 +622,12 @@ function invoiceHtml_(o, s) {
     '</div>'
   );
   parts.push('<p><strong>For:</strong> ' + esc_(o.name) + '</p>');
-  if (o.address) parts.push('<p><strong>Deliver to:</strong> ' + esc_(o.address) + '</p>');
+  if (o.collect) parts.push('<p><strong>Collecting:</strong> ' + esc_(s.collectNote || 'We will arrange a time with you.') + '</p>');
+  else if (o.address) parts.push('<p><strong>Deliver to:</strong> ' + esc_(o.address) + '</p>');
   parts.push(
     '<table><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>',
     '<tr><td>' + esc_(s.product) + '</td><td class="r">' + o.qty + '</td><td class="r">' + m(o.price) + '</td><td class="r">' + m(lineTotal_(o)) + '</td></tr>',
-    '<tr><td>Delivery</td><td></td><td></td><td class="r">' + (o.fee > 0 ? m(o.fee) : 'Free') + '</td></tr>',
+    '<tr><td>' + (o.collect ? 'Collection' : 'Delivery') + '</td><td></td><td></td><td class="r">' + (o.fee > 0 ? m(o.fee) : 'Free') + '</td></tr>',
     '<tr class="total"><td>' + (paid ? 'Total paid' : 'Total due') + '</td><td></td><td></td><td class="r">' + m(o.total) + '</td></tr>',
     '</table>'
   );
@@ -610,6 +689,7 @@ function readTypedSettings_() {
     fee: fee,
     currency: raw.currency_symbol || 'R',
     area: raw.delivery_area || 'Cape Town',
+    collectNote: raw.collection_note,
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
     minQty: Math.min(maxQty, Math.max(1, Math.floor(parseNumber_(raw.min_quantity, 1)))),
     maxQty: maxQty,
@@ -631,6 +711,7 @@ function publicConfig_(s) {
     fee: s.fee,
     currency: s.currency,
     area: s.area,
+    collectNote: s.collectNote, // blank means collection is not offered
     minQty: s.minQty,
     maxQty: s.maxQty,
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
@@ -983,7 +1064,7 @@ function setup() {
   FORMATS.forEach(function (format, i) {
     orders.getRange(2, i + 1, orders.getMaxRows() - 1, 1).setNumberFormat(format);
   });
-  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130].forEach(function (w, i) {
+  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130, 70, 130].forEach(function (w, i) {
     orders.setColumnWidth(i + 1, w);
   });
 

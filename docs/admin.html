@@ -71,7 +71,11 @@
           <input id="n-email" type="email" inputmode="email" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="n-email-hint">
           <p class="hint" id="n-email-hint">The invoice PDF is emailed here, and again when you mark it paid.</p>
         </div>
-        <div class="field">
+        <label class="check">
+          <input id="n-collect" type="checkbox">
+          <span>Customer collects (no delivery fee)</span>
+        </label>
+        <div class="field" id="n-address-field">
           <label for="n-address">Delivery address (optional)</label>
           <textarea id="n-address" rows="2" autocomplete="off" maxlength="300"></textarea>
         </div>

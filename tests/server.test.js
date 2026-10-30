@@ -79,7 +79,7 @@ test('public config shows the price but no bank details', () => {
   const cfg = gas.call({ action: 'config' }).config;
   assert.deepEqual(cfg, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30,
-    currency: 'R', area: 'Cape Town', minQty: 1, maxQty: 20, photo: null, ready: true
+    currency: 'R', area: 'Cape Town', collectNote: '', minQty: 1, maxQty: 20, photo: null, ready: true
   });
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
 });
@@ -760,4 +760,199 @@ test('a broken Photo tab, for example edited by hand, means no photo instead of 
   assert.equal(gas.call({ action: 'config' }).config.photo, null);
   assert.equal(gas.call({ action: 'photo' }).photo, null);
   assert.equal(gas.call(order()).ok, true, 'orders still work');
+});
+
+// ---------------------------------------------------------------------------
+// Collection
+// ---------------------------------------------------------------------------
+
+const COLLECT_NOTE = 'Sea Point. We DM you to arrange a time.';
+
+function readyWithCollection() {
+  const env = ready();
+  const r = env.gas.call({ action: 'saveSettings', key: env.key, values: { collection_note: COLLECT_NOTE } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  return env;
+}
+
+test('collection is only offered once Greg writes a collection note', () => {
+  const { gas, key } = ready();
+  const refused = gas.call(order({ collect: true, address: '', areaConfirmed: false, qty: 3, expectedTotal: 120 }));
+  assert.equal(refused.error, 'invalid');
+  assert.match(refused.message, /Collection is not available/);
+  gas.call({ action: 'saveSettings', key, values: { collection_note: COLLECT_NOTE } });
+  assert.equal(gas.call({ action: 'config' }).config.collectNote, COLLECT_NOTE);
+});
+
+test('a collection order has no delivery fee and needs no address', () => {
+  const { gas } = readyWithCollection();
+  // 3 x R40, no R30 delivery fee.
+  const r = gas.call(order({ collect: true, address: '', areaConfirmed: false, qty: 3, expectedTotal: 120 }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.collect, true);
+  assert.equal(r.order.fee, 0);
+  assert.equal(r.order.total, 120);
+  assert.equal(r.collectNote, COLLECT_NOTE);
+  const row = gas.rows('Orders')[0];
+  assert.equal(row.Collect, 'yes');
+  assert.equal(row['Delivery fee'], 0);
+
+  // The customer's invoice says where to collect, and Greg's alert says it is a collection.
+  const invoice = gas.mail.find((m) => m.to === 'jane@example.com');
+  assert.match(invoice.body, /3 x Running gel sachet @ R40 = R120\nCollection: free\nTotal due: R120/);
+  assert.match(invoice.body, /Collecting: Sea Point\. We DM you to arrange a time\./);
+  const html = invoice.attachments[0].getDataAsString();
+  assert.ok(html.includes('Collecting:') && html.includes('Sea Point') && !html.includes('Deliver to'));
+  const alert = gas.mail.find((m) => m.to === 'greg@example.com');
+  assert.match(alert.body, /Collects the order \(no delivery\)/);
+});
+
+test('a page that shows the delivery total cannot slip in a collection order, or the other way round', () => {
+  const { gas } = readyWithCollection();
+  // Collection chosen but the delivery total sent: the totals do not match, so the order is refused.
+  assert.equal(gas.call(order({ collect: true, qty: 3, expectedTotal: 150 })).error, 'price_changed');
+  assert.equal(gas.call(order({ collect: false, qty: 3, expectedTotal: 120 })).error, 'price_changed');
+  // Anything other than true means delivery.
+  const r = gas.call(order({ collect: 'yes', qty: 3, expectedTotal: 150 }));
+  assert.equal(r.order.collect, false);
+  assert.equal(r.order.fee, 30);
+});
+
+test('delivery orders still need an address and the area tick', () => {
+  const { gas } = readyWithCollection();
+  assert.match(gas.call(order({ address: '' })).message, /delivery address/);
+  assert.match(gas.call(order({ areaConfirmed: false })).message, /delivery area/);
+});
+
+test('Greg can enter a collection order by DM even when collection is not offered on the order page', () => {
+  const { gas, key } = ready();
+  const r = gas.call(dm(key, { collect: true, qty: 2 }));
+  assert.equal(r.ok, true);
+  assert.equal(r.order.total, 80);
+  assert.equal(r.order.collect, true);
+});
+
+// ---------------------------------------------------------------------------
+// Editing an order
+// ---------------------------------------------------------------------------
+
+const edit = (key, over) => Object.assign({
+  action: 'editOrder', key, invoice: 'SJ-0001', name: 'Jane Doe', contact: '@jane', email: 'jane@example.com',
+  address: '12 Beach Rd, Sea Point', notes: '', qty: 3, collect: false, price: '40', fee: '30', sendInvoice: false
+}, over);
+
+test('Greg can change everything on an unpaid order, and the total is worked out again', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.clock.now += 3600 * 1000;
+  const r = gas.call(edit(key, {
+    name: 'Jane Smith', contact: '082 555 0000', email: 'jane.smith@example.com', address: '1 Long St, Gardens',
+    notes: 'Ring the bell', qty: 5, price: '35.50', fee: '20'
+  }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.emailed, undefined, 'not emailed unless asked');
+  const o = r.order;
+  assert.equal(o.invoice, 'SJ-0001', 'same invoice number');
+  assert.deepEqual([o.name, o.contact, o.email, o.address, o.notes], ['Jane Smith', '082 555 0000', 'jane.smith@example.com', '1 Long St, Gardens', 'Ring the bell']);
+  assert.deepEqual([o.qty, o.price, o.fee, o.total], [5, 35.5, 20, 197.5]);
+  assert.equal(o.status, 'Awaiting payment');
+  assert.equal(o.created, '2026-10-28 15:41', 'the order date does not change');
+  assert.equal(o.editedOn, '2026-10-28 16:41');
+
+  const row = gas.rows('Orders')[0];
+  assert.equal(row.Total, 197.5);
+  assert.equal(row['Edited on'], '2026-10-28 16:41');
+  assert.equal(gas.rows('Orders').length, 1, 'no new row');
+});
+
+test('switching an order to collection takes the delivery fee off, whatever fee is sent', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  const r = gas.call(edit(key, { collect: true, fee: '30', address: '' }));
+  assert.equal(r.order.collect, true);
+  assert.equal(r.order.fee, 0);
+  assert.equal(r.order.total, 120);
+  // And back to delivery with a fee Greg chooses.
+  const back = gas.call(edit(key, { collect: false, fee: '45' }));
+  assert.equal(back.order.fee, 45);
+  assert.equal(back.order.total, 165);
+});
+
+test('a price of 0 is allowed, for example a free sample', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  const r = gas.call(edit(key, { price: '0', fee: '0' }));
+  assert.equal(r.ok, true);
+  assert.equal(r.order.total, 0);
+});
+
+test('the updated invoice is emailed only when Greg asks and the order has an email', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.mail.length = 0;
+  const r = gas.call(edit(key, { qty: 4, sendInvoice: true }));
+  assert.equal(r.emailed, true);
+  assert.equal(gas.mail.length, 1);
+  assert.match(gas.mail[0].body, /4 x Running gel sachet @ R40 = R160\nDelivery: R30\nTotal due: R190/);
+  assert.equal(gas.call(edit(key, { email: '', sendInvoice: true })).emailed, undefined, 'no address, no email');
+  assert.equal(gas.mail.length, 1);
+});
+
+test('only orders waiting for payment can be edited', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  const r = gas.call(edit(key, { qty: 9 }));
+  assert.equal(r.error, 'invalid');
+  assert.match(r.message, /SJ-0001 is Paid\. Only orders waiting for payment can be edited/);
+  assert.equal(gas.rows('Orders')[0].Qty, 3, 'unchanged');
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Cancelled' });
+  assert.equal(gas.call(edit(key)).error, 'invalid');
+  assert.equal(gas.call(edit(key, { invoice: 'SJ-0404' })).error, 'not_found');
+});
+
+test('edits are checked like new orders, and nothing is saved when one is wrong', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  const bad = [
+    [{ name: ' ' }, /name/],
+    [{ email: 'nope' }, /email address/],
+    [{ qty: 0 }, /quantity/],
+    [{ qty: 2.5 }, /quantity/],
+    [{ qty: 21 }, /most one order/],
+    [{ price: 'abc' }, /Price per sachet/],
+    [{ price: '-1' }, /Price per sachet/],
+    [{ fee: 'R abc' }, /Delivery fee/]
+  ];
+  for (const [over, message] of bad) {
+    const r = gas.call(edit(key, over));
+    assert.equal(r.error, 'invalid', JSON.stringify(over));
+    assert.match(r.message, message);
+  }
+  const row = gas.rows('Orders')[0];
+  assert.equal(row.Name, 'Jane Doe');
+  assert.equal(row['Edited on'], '');
+  assert.equal(gas.call(Object.assign(edit(key), { key: 'wrong' })).error, 'unauthorized');
+});
+
+test('edited text can never become a formula', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call(edit(key, { name: '=HYPERLINK("http://evil.example")', notes: '+1', address: '@x' }));
+  const sheet = gas.sheet('Orders');
+  for (const col of [4, 6, 7]) assert.equal(sheet.cells.get('2,' + col).formula, false, 'column ' + col);
+});
+
+test('rows from before these columns existed can still be edited', () => {
+  const { gas, key } = ready();
+  gas.sheet('Orders').getRange(2, 1, 1, 15).setValues([[
+    'SJ-0001', '2026-10-27 10:00', 'kiosk', 'Old Row', '@old', '1 Old St', '',
+    1, 40, 30, 70, 'Awaiting payment', '', '', 'req_old_0001'
+  ]]);
+  const listed = gas.call({ action: 'list', key }).orders[0];
+  assert.equal(listed.collect, false);
+  assert.equal(listed.editedOn, '');
+  const r = gas.call(edit(key, { name: 'Old Row', qty: 2, email: '' }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.total, 110);
 });

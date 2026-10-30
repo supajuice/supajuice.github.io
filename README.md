@@ -99,6 +99,10 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Delivered.** Tap **Mark delivered** on the order under **Paid**. Tap an address to open it in Maps and a phone number to call.
 
+**Collection.** Write a collection note in **Settings > Collection**, for example "Sea Point. We DM you to arrange a time." The order page then offers **Delivery** or **Collect, free**. Collection orders have no delivery fee and no address, the invoice tells the customer where to collect, and the button reads **Mark collected**. Leave the note blank to offer delivery only. For a DM order, tick **Customer collects**.
+
+**Changing an order.** Tap **Edit** on an order under **Awaiting payment**. Everything can be changed: name, email, contact, quantity, collection, address, notes, and the price and delivery fee for that order (for example a discount). The invoice number stays the same and the total is worked out again. Leave **Email the updated invoice** ticked to send the customer the new PDF. Paid orders cannot be edited: tap **More > Undo paid** first.
+
 **Mistakes.** Tap **More** on an order: **Undo paid**, **Undo delivered**, **Cancel order**. A cancelled order can be reopened.
 
 **Underpaid.** Partial payments are not tracked. Leave the order under **Awaiting payment** until the full amount arrives.

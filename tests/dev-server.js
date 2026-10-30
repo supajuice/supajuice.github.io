@@ -97,7 +97,8 @@ function build(mode, opts) {
       values: Object.assign({
         price: '40',
         delivery_fee: String(opts.fee === undefined ? 30 : opts.fee),
-        alert_email: 'greg@example.com'
+        alert_email: 'greg@example.com',
+        collection_note: 'Sea Point. We DM you to arrange a time.'
       }, BANK)
     }));
   }

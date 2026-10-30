@@ -42,7 +42,20 @@
         <input id="contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
       </div>
 
-      <div class="field">
+      <fieldset class="field choice" id="fulfil" hidden>
+        <legend>Delivery or collection</legend>
+        <label class="check">
+          <input type="radio" name="fulfil" id="fulfil-delivery" value="delivery" checked>
+          <span id="fulfil-delivery-label">Delivery</span>
+        </label>
+        <label class="check">
+          <input type="radio" name="fulfil" id="fulfil-collect" value="collect">
+          <span>Collect, free</span>
+        </label>
+        <p class="hint" id="collect-note" hidden></p>
+      </fieldset>
+
+      <div class="field" id="address-field">
         <label for="address">Delivery address</label>
         <textarea id="address" autocomplete="street-address" rows="3" maxlength="300"></textarea>
         <label class="check">
@@ -73,6 +86,7 @@
         <h2 class="done-title" id="done-title" tabindex="-1">Order received</h2>
         <p class="lede" id="done-sub"></p>
         <p class="fine" id="done-email" hidden></p>
+        <p class="fine" id="done-collect" hidden></p>
       </div>
       <div class="bib" id="bib"></div>
       <div class="stack">

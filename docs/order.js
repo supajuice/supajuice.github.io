@@ -73,24 +73,48 @@
     $('qty-slot').appendChild(stepper.node);
     stepper.onChange(renderTotals);
     $('order-form').addEventListener('submit', onSubmit);
+    $('fulfil-delivery').addEventListener('change', syncFulfil);
+    $('fulfil-collect').addEventListener('change', syncFulfil);
+  }
+
+  // ---------- Delivery or collection ----------
+
+  // Collection is offered only when Greg has written a collection note.
+  function collecting() {
+    return !!(config && config.collectNote) && $('fulfil-collect').checked;
+  }
+
+  function syncFulfil() {
+    var offered = !!(config && config.collectNote);
+    if (!offered) $('fulfil-delivery').checked = true;
+    var collect = collecting();
+    $('fulfil').hidden = !offered;
+    $('address-field').hidden = collect;
+    var note = $('collect-note');
+    note.textContent = offered ? config.collectNote : '';
+    note.hidden = !collect;
+    if (config) {
+      $('fulfil-delivery-label').textContent = 'Delivery, ' + (config.fee > 0 ? SJ.money(config.fee, config.currency) : 'free');
+    }
+    renderTotals();
   }
 
   function applyConfig(c) {
     config = c;
     $('brand').textContent = c.brand;
     document.title = c.brand;
-    $('lede').textContent = 'Order below. Pay by bank transfer. We deliver in ' + c.area + '.';
+    $('lede').textContent = 'Order below. Pay by bank transfer. We deliver in ' + c.area + (c.collectNote ? ', or you can collect.' : '.');
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
     stepper.setItem(SJ.itemLine(c));
     $('area-label').textContent = 'My address is in ' + c.area;
-    renderTotals();
+    syncFulfil();
     applyPhoto(c.photo || null);
   }
 
   function renderTotals() {
     if (!config) return;
-    var total = SJ.renderSummary($('summary'), config, stepper.get());
+    var total = SJ.renderSummary($('summary'), config, stepper.get(), collecting());
     if (!busy) $('submit').textContent = 'Place order for ' + SJ.money(total, config.currency);
   }
 
@@ -102,6 +126,7 @@
       address: $('address').value.trim(),
       notes: $('notes').value.trim(),
       qty: stepper.get(),
+      collect: collecting(),
       areaConfirmed: $('area-ok').checked
     };
   }
@@ -110,6 +135,7 @@
     if (!d.name) return { id: 'name', message: 'Enter your name.' };
     if (!d.email) return { id: 'email', message: 'Enter your email address so we can send your invoice.' };
     if (!SJ.isEmail(d.email)) return { id: 'email', message: 'Check your email address. It should look like name@example.com.' };
+    if (d.collect) return null;
     if (!d.address) return { id: 'address', message: 'Enter your delivery address.' };
     if (!d.areaConfirmed) return { id: 'area-ok', message: 'Tick the box to confirm your address is in ' + config.area + '.' };
     return null;
@@ -159,14 +185,19 @@
       return;
     }
 
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty]);
+    // A collection order does not send the address that is hidden on the form.
+    if (data.collect) {
+      data.address = '';
+      data.areaConfirmed = false;
+    }
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 
     setSubmitting(true);
     try {
       var res = await SJ.api('order', Object.assign({}, data, {
         requestId: pending.id,
-        expectedTotal: SJ.totalFor(data.qty, config.price, config.fee),
+        expectedTotal: SJ.totalFor(data.qty, config.price, data.collect ? 0 : config.fee),
         website: $('website').value
       }));
       pending = null;
@@ -226,6 +257,10 @@
     emailNote.hidden = restored || !o.email;
     if (o.emailedOn) emailNote.textContent = 'We have emailed your invoice to ' + o.email + '. Check your spam folder if it is not there.';
     else emailNote.textContent = 'We could not email your invoice just now. Take a screenshot of this page instead.';
+
+    var collectNote = $('done-collect');
+    collectNote.hidden = !o.collect;
+    collectNote.textContent = o.collect ? 'You are collecting this order. ' + (res.collectNote || 'We will DM you to arrange a time.') : '';
 
     var bib = $('bib');
     SJ.clear(bib);

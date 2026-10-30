@@ -115,7 +115,7 @@
 
   // ---------- The invoice text that gets pasted into DMs ----------
 
-  // c: { brand, product, currency, bank, paymentNote }
+  // c: { brand, product, currency, bank, paymentNote, collectNote }
   function invoiceText(order, c) {
     var sym = c.currency || 'R';
     var paid = order.status === 'Paid' || order.status === 'Delivered';
@@ -127,8 +127,12 @@
     lines.push('');
     lines.push('For: ' + order.name);
     lines.push(order.qty + ' x ' + c.product + ' @ ' + money(order.price, sym) + ' = ' + money(totalFor(order.qty, order.price, 0), sym));
-    lines.push('Delivery: ' + (order.fee > 0 ? money(order.fee, sym) : 'free'));
+    lines.push(order.collect ? 'Collection: free' : 'Delivery: ' + (order.fee > 0 ? money(order.fee, sym) : 'free'));
     lines.push((paid ? 'Total paid: ' : 'Total due: ') + money(order.total, sym));
+    if (order.collect && c.collectNote) {
+      lines.push('');
+      lines.push('Collecting: ' + c.collectNote);
+    }
     if (paid) {
       lines.push('');
       lines.push('Thank you for your order.');
@@ -323,17 +327,18 @@
     return (c.minQty || 1) > 1 ? text + '. Minimum order ' + c.minQty + '.' : text;
   }
 
-  // The "3 x sachet / Delivery / Total" block.
-  function renderSummary(dl, c, qty) {
+  // The "3 x sachet / Delivery / Total" block. Collection has no fee.
+  function renderSummary(dl, c, qty, collect) {
     var sym = c.currency;
-    var total = totalFor(qty, c.price, c.fee);
+    var fee = collect ? 0 : c.fee;
+    var total = totalFor(qty, c.price, fee);
     clear(dl);
     dl.appendChild(el('div', { class: 'summary-row' },
       el('dt', null, qty + ' x ' + c.product),
       el('dd', null, money(totalFor(qty, c.price, 0), sym))));
     dl.appendChild(el('div', { class: 'summary-row' },
-      el('dt', null, 'Delivery'),
-      el('dd', null, c.fee > 0 ? money(c.fee, sym) : 'Free')));
+      el('dt', null, collect ? 'Collection' : 'Delivery'),
+      el('dd', null, fee > 0 ? money(fee, sym) : 'Free')));
     dl.appendChild(el('div', { class: 'summary-row summary-total' },
       el('dt', null, 'Total'),
       el('dd', null, money(total, sym))));

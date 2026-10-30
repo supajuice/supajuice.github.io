@@ -214,6 +214,8 @@ Put your **order page address** in your Instagram bio. That's it, you're open.
 | **Someone orders by DM** | Admin page → **New order**. Enter the quantity and their name (email optional), then tap **Create order**. Tap **Copy invoice** and paste it into the DM. |
 | **Money arrives** | Find the invoice number (e.g. SJ-0004) in your bank statement reference. Tap **Mark paid** on that order. The customer is emailed the paid invoice. |
 | **You delivered** | Tap **Mark delivered**. Tap an address to open it in Maps. |
+| **Offer collection** | Admin page → **Settings** → **Collection**: write where and how to collect. Customers can then choose **Collect, free**. Leave it blank for delivery only. |
+| **Change an order before it is paid** | Tap **Edit** on the order. Change anything, including the price or fee, then **Save changes**. The customer is emailed the new invoice unless you untick it. |
 | **Customer lost the email** | On the order tap **More** → **Email invoice**. |
 | **You made a mistake** | **More** → **Undo paid**, **Undo delivered** or **Cancel order**. A cancelled order can be reopened. |
 | **Change price or bank details** | Admin page → **Settings**. Orders already placed keep their old price. |
