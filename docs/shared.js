@@ -321,6 +321,35 @@
     };
   }
 
+  // ---------- Collection day and time pickers (order page and Greg's DM form) ----------
+
+  // days: [{ date, label, times, full? }]. full lists booked-up times, which only Greg sees.
+  // Both keep what was picked while it is still on offer.
+  function fillSlotDays(select, days, firstText) {
+    var want = select.value;
+    clear(select);
+    select.appendChild(el('option', { value: '' }, firstText));
+    days.forEach(function (d) { select.appendChild(el('option', { value: d.date }, d.label)); });
+    select.value = days.some(function (d) { return d.date === want; }) ? want : '';
+  }
+
+  function fillSlotTimes(select, day, want) {
+    clear(select);
+    select.appendChild(el('option', { value: '' }, day ? 'Choose a time' : 'Choose a day first'));
+    if (day) {
+      day.times.forEach(function (t) {
+        var full = day.full && day.full.indexOf(t) !== -1;
+        select.appendChild(el('option', { value: t }, full ? t + ' (full)' : t));
+      });
+    }
+    select.value = day && day.times.indexOf(want) !== -1 ? want : '';
+    select.disabled = !day;
+  }
+
+  function slotDay(days, date) {
+    return (days || []).filter(function (d) { return d.date === date; })[0] || null;
+  }
+
   // The line under the quantity, e.g. "Running gel sachet, R40 each. Minimum order 3."
   function itemLine(c) {
     var text = c.product + ', ' + money(c.price, c.currency) + ' each';
@@ -372,6 +401,9 @@
     store: store,
     qtyStepper: qtyStepper,
     itemLine: itemLine,
+    fillSlotDays: fillSlotDays,
+    fillSlotTimes: fillSlotTimes,
+    slotDay: slotDay,
     renderSummary: renderSummary
   };
 })();

@@ -81,7 +81,7 @@ test('public config shows the price but no bank details', () => {
   const cfg = gas.call({ action: 'config' }).config;
   const { collectSlots, ...rest } = cfg;
   assert.deepEqual(rest, {
-    brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R', area: 'Cape Town',
+    brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R',
     collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, ready: true
   });
   assert.ok(collectSlots.length > 0, 'collection times are always offered');
@@ -1430,4 +1430,14 @@ test('collection settings are checked and kept tidy', () => {
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.values.collection_dates, '2026-11-02', 'dates customers cannot book are left out');
   assert.equal(r.config.collectStep, 15);
+});
+
+test('Greg sees every collection time for DM orders, with full ones marked; the area for Maps is gone', () => {
+  const { gas, key } = ready();
+  gas.call(pickup());
+  const c = gas.call({ action: 'list', key }).config;
+  assert.deepEqual(c.collectSlotsAll[0], { date: TOMORROW, label: 'Thu 29 Oct', times: ['17:00', '17:30', '18:00', '18:30'], full: ['17:00'] });
+  assert.equal(c.collectSlotsAll.length, 26);
+  assert.ok(!('area' in c));
+  assert.ok(!('delivery_area' in gas.call({ action: 'getSettings', key }).values));
 });

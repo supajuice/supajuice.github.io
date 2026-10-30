@@ -564,6 +564,21 @@ const store = (page, key) => page.evaluate((k) => {
 // Windows hands back copied line breaks as \r\n.
 const clipboard = (page) => page.evaluate(() => navigator.clipboard.readText()).then((s) => s.replace(/\r\n/g, '\n'));
 
+// The Settings tab, with every folded section opened.
+async function openSettings(page) {
+  await page.click('.tab[data-tab="settings"]');
+  await page.waitForSelector('#settings-form');
+  const closed = page.locator('details.group:not([open]) > summary');
+  while (await closed.count()) await closed.first().click();
+}
+
+// The DM form, like the order page, starts with Collect or Get delivered.
+async function openNew(page, what) {
+  await page.click('.tab[data-tab="new"]');
+  if (await page.locator('#n-choose').isVisible()) await page.click(what === 'collect' ? '#n-choose-collect' : '#n-choose-deliver');
+  await page.waitForSelector('#n-rest:not([hidden])');
+}
+
 async function chip(page, id) {
   await page.click('[data-role="chip-' + id + '"]');
   assert.equal(await page.getAttribute('[data-role="chip-' + id + '"]', 'aria-pressed'), 'true');
@@ -676,7 +691,7 @@ test('admin: shows the orders that need attention first, newest on top, with the
   assert.equal(await c5.locator('a', { hasText: '0719876543' }).getAttribute('href'), 'tel:0719876543');
   assert.equal(
     await c5.locator('a', { hasText: '22 Main Rd' }).getAttribute('href'),
-    'https://www.google.com/maps/search/?api=1&query=22%20Main%20Rd%2C%20Claremont%2C%20Cape%20Town'
+    'https://www.google.com/maps/search/?api=1&query=22%20Main%20Rd%2C%20Claremont%2C%20South%20Africa'
   );
 
   const c4 = card(page, 'SJ-0004');
@@ -949,7 +964,7 @@ test('admin: customer text is shown as plain text, never as page code', async (t
 test('admin: a DM order is created, shows the invoice to send, and appears in the list', async (t) => {
   const { dev, page, errors } = await openAdmin(t);
   const mailBefore = dev.gas.mail.length;
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   await page.waitForSelector('#panel-new:not([hidden])');
   assert.equal(await page.evaluate(() => document.querySelector('.tab[aria-current="page"]').dataset.tab), 'new');
   assert.match(await text(page, '#n-summary'), /Total\s+R70/);
@@ -989,7 +1004,7 @@ test('admin: a DM order is created, shows the invoice to send, and appears in th
   assert.match(await c.innerText(), /DM order/);
 
   // And another order can be started with a clean form.
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   await page.getByRole('button', { name: 'New order' }).last().click();
   assert.equal(await page.inputValue('#n-name'), '');
   assert.equal(await page.inputValue('#n-qty'), '1');
@@ -999,7 +1014,7 @@ test('admin: a DM order is created, shows the invoice to send, and appears in th
 test('admin: a DM order with an email gets the invoice PDF, and a bad address is caught first', async (t) => {
   const { dev, page, errors } = await openAdmin(t);
   await page.waitForSelector('.order');
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   await page.fill('#n-name', 'Zanele Dlamini');
   await page.fill('#n-email', 'zanele@example');
   await page.click('#n-submit');
@@ -1046,7 +1061,7 @@ test('admin: an order shows its email and when the invoice was emailed, and can 
 test('admin: Greg sets a minimum order and the DM form starts from it', async (t) => {
   const { page, errors } = await openAdmin(t);
   await page.waitForSelector('.order');
-  await page.click('.tab[data-tab="settings"]');
+  await openSettings(page);
   await page.waitForSelector('#settings-form');
   assert.equal(await page.inputValue('#s-min_quantity'), '1');
 
@@ -1058,7 +1073,7 @@ test('admin: Greg sets a minimum order and the DM form starts from it', async (t
   await page.click('#settings-save');
   await toast(page, 'Settings saved.');
 
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   assert.equal(await page.inputValue('#n-qty'), '2');
   assert.match(await text(page, '#n-summary'), /Total\s+R110/);
   assert.equal(await page.locator('#panel-new [aria-label="One fewer"]').isDisabled(), true);
@@ -1088,8 +1103,8 @@ const bigPng = (page) => page.evaluate(() => {
 const photoCalls = (dev) => dev.calls.filter((c) => c.action === 'photo').length;
 
 async function openPhotoSettings(page) {
-  await page.click('.tab[data-tab="settings"]');
-  await page.waitForSelector('#photo-section h2');
+  await openSettings(page);
+  await page.waitForSelector('#photo-section #photo-pick');
 }
 
 test('admin: Greg adds a photo, it is made smaller on the phone, and the order page shows it', async (t) => {
@@ -1281,30 +1296,42 @@ test('admin: a DM order can be a collection, with no delivery fee', async (t) =>
   const { dev, page, errors } = await openAdmin(t);
   await page.waitForSelector('.order');
   await page.click('.tab[data-tab="new"]');
+  // Like the order page: only the two choices until Greg picks one.
+  assert.equal(await page.locator('#n-rest').isHidden(), true);
+  assert.equal(await text(page, '#n-choose-collect'), 'Collect\nFree · Sea Point');
+  assert.equal(await text(page, '#n-choose-deliver'), 'Get delivered\nUsual fee R30');
+  await page.click('#n-choose-collect');
+  assert.equal(await text(page, '#n-chosen-text'), 'Collect from Sea Point');
   await page.fill('#n-name', 'Lerato Collect');
-  assert.equal(await page.locator('#n-time-field').isHidden(), true);
-  await page.check('#n-collect');
   assert.equal(await page.locator('#n-address-field').isHidden(), true);
-  await page.fill('#n-collect-date', '2026-10-31');
+  assert.equal(await page.locator('#n-fee-field').isHidden(), true);
+
+  // Every time on the collection dates, with full ones marked. Greg may still book them.
+  assert.equal(await page.inputValue('#n-collect-day'), '', 'no time yet');
+  await page.selectOption('#n-collect-day', '2026-10-31');
   await page.click('#n-submit');
-  assert.equal(await text(page, '#n-error'), 'Pick both a date and a time to collect, or leave both empty.');
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'n-collect-time');
-  await page.fill('#n-collect-time', '10:00');
+  assert.equal(await text(page, '#n-error'), 'Pick a time to collect, or set the day back to No time yet.');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'n-collect-hour');
+  await page.selectOption('#n-collect-hour', '17:30');
   assert.match(await text(page, '#n-summary'), /Collection\s+Free/);
   assert.match(await text(page, '#n-summary'), /Total\s+R40/);
   await page.click('#n-submit');
   await page.waitForSelector('#new-result:not([hidden])');
   assert.match(await text(page, '#new-result .preview'), /Collection: free\nTotal due: R40/);
-  assert.match(await text(page, '#new-result .preview'), /Collecting: Sat 31 Oct, 10:00, Sea Point/);
+  assert.match(await text(page, '#new-result .preview'), /Collecting: Sat 31 Oct, 17:30, Sea Point/);
   const row = serverStatus(dev, 'SJ-0006');
   assert.equal(row.Collect, 'yes');
-  assert.equal(row['Collect at'], '2026-10-31 10:00');
+  assert.equal(row['Collect at'], '2026-10-31 17:30');
   assert.equal(row.Total, 40);
 
   await page.getByRole('button', { name: 'New order' }).last().click();
-  assert.equal(await page.isChecked('#n-collect'), false, 'the next order starts as delivery');
-  assert.equal(await page.locator('#n-address-field').isHidden(), false);
-  assert.equal(await page.inputValue('#n-collect-date'), '');
+  assert.equal(await page.locator('#n-choose').isVisible(), true, 'the next order starts with the choice');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'n-choose-collect');
+  await page.click('#n-choose-collect');
+  assert.equal(await page.inputValue('#n-collect-day'), '');
+  // The time just booked now shows as full.
+  await page.selectOption('#n-collect-day', '2026-10-31');
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('#n-collect-hour option')).some((o) => o.textContent === '17:30 (full)'));
   noErrors(errors);
 });
 
@@ -1381,7 +1408,7 @@ const dateBox = (page, date) => page.locator('label.cal-day:has(#s-collection_da
 test('admin: collection dates and hours are set in Settings, and the order page follows them', async (t) => {
   const { dev, page, errors } = await openAdmin(t);
   await page.waitForSelector('.order');
-  await page.click('.tab[data-tab="settings"]');
+  await openSettings(page);
   await page.waitForSelector('#settings-form');
 
   // A calendar of the next 30 days, Monday first: 29 Oct is a Thursday, so three blanks come first.
@@ -1505,15 +1532,18 @@ test('admin: declining a request cancels it and emails the customer the reason',
 test('admin: a DM order can have its own delivery fee', async (t) => {
   const { dev, page, errors } = await openAdmin(t, { quote: true });
   await page.waitForSelector('.order');
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   assert.equal(await page.inputValue('#n-fee'), '30');
   await page.fill('#n-name', 'Far Away Friend');
   await page.fill('#n-fee', '80');
   assert.match(await text(page, '#n-summary'), /Delivery\s+R80/);
   assert.match(await text(page, '#n-summary'), /Total\s+R120/);
-  await page.check('#n-collect');
+  await page.click('#n-choose-change');
+  await page.click('#n-choose-collect');
   assert.equal(await page.locator('#n-fee-field').isHidden(), true);
-  await page.uncheck('#n-collect');
+  await page.click('#n-choose-change');
+  await page.click('#n-choose-deliver');
+  assert.equal(await page.inputValue('#n-name'), 'Far Away Friend', 'what was typed stays');
   await page.click('#n-submit');
   await page.waitForSelector('#new-result:not([hidden])');
   const row = serverStatus(dev, 'SJ-0007');
@@ -1526,7 +1556,7 @@ test('admin: a DM order can have its own delivery fee', async (t) => {
 test('admin: unticking "Confirm the delivery fee" charges the fee straight away again', async (t) => {
   const { dev, page, errors } = await openAdmin(t, { quote: true });
   await page.waitForSelector('.order');
-  await page.click('.tab[data-tab="settings"]');
+  await openSettings(page);
   await page.waitForSelector('#settings-form');
   assert.equal(await page.isChecked('#s-delivery_quote'), true);
   await page.uncheck('#s-delivery_quote');
@@ -1547,7 +1577,7 @@ test('admin: unticking "Confirm the delivery fee" charges the fee straight away 
 test('admin: a DM order needs a name, and a double tap makes one order', async (t) => {
   const { dev, page } = await openAdmin(t, { latency: 400 });
   await page.waitForSelector('.order');
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   const before = orderRows(dev).length;
   await page.click('#n-submit');
   assert.equal(await text(page, '#n-error'), 'Enter the name of the customer.');
@@ -1563,7 +1593,7 @@ test('admin: a DM order needs a name, and a double tap makes one order', async (
 test('admin: a dropped connection while creating a DM order does not create it twice', async (t) => {
   const { dev, page } = await openAdmin(t);
   await page.waitForSelector('.order');
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   await page.fill('#n-name', 'Retry Person');
   const before = orderRows(dev).length;
 
@@ -1591,7 +1621,7 @@ test('admin: a dropped connection while creating a DM order does not create it t
 
 test('admin: settings show the current values and the order page link', async (t) => {
   const { dev, page } = await openAdmin(t);
-  await page.click('.tab[data-tab="settings"]');
+  await openSettings(page);
   await page.waitForSelector('#settings-form');
   const values = await page.evaluate(() => {
     const out = {};
@@ -1599,7 +1629,7 @@ test('admin: settings show the current values and the order page link', async (t
     return out;
   });
   assert.deepEqual(values, {
-    price: '40', delivery_fee: '30', delivery_area: 'Cape Town', delivery_quote: 'on',
+    price: '40', delivery_fee: '30', delivery_quote: 'on',
     min_quantity: '1', max_quantity: '20',
     collection_note: 'Sea Point', collection_slot_minutes: '30', collection_per_slot: '1',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
@@ -1620,11 +1650,10 @@ test('admin: settings show the current values and the order page link', async (t
 
 test('admin: saving settings changes what customers see and what the invoices say', async (t) => {
   const { dev, page, errors } = await openAdmin(t);
-  await page.click('.tab[data-tab="settings"]');
+  await openSettings(page);
   await page.waitForSelector('#settings-form');
   await page.fill('#s-price', '45');
   await page.fill('#s-delivery_fee', '0');
-  await page.fill('#s-delivery_area', 'Southern Suburbs');
   await page.fill('#s-brand_name', 'Supa Juice Co');
   await page.fill('#s-invoice_prefix', 'gel');
   await page.click('#settings-save');
@@ -1640,7 +1669,7 @@ test('admin: saving settings changes what customers see and what the invoices sa
   assert.equal(val('invoice_prefix'), 'GEL');
 
   // The DM form uses them.
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   assert.match(await text(page, '.qty-item'), /R45 each/);
   await page.fill('#n-name', 'New Price');
   await page.click('#n-submit');
@@ -1653,16 +1682,15 @@ test('admin: saving settings changes what customers see and what the invoices sa
   await customer.goto(dev.siteUrl + '/');
   await customer.waitForSelector('#order-form:not([hidden])');
   assert.equal(await customer.locator('#brand').innerText(), 'Supa Juice Co');
-  assert.doesNotMatch(await customer.locator('#lede').innerText(), /Southern Suburbs/, 'the area is not shown to customers');
-  const mapsLink = await page.locator('article.order a[href*="google.com/maps"]').first().getAttribute('href');
-  assert.ok(mapsLink.includes(encodeURIComponent('Southern Suburbs')), 'but it helps Maps find addresses');
+  assert.equal(await page.locator('#s-delivery_area').count(), 0, 'there is no area for Maps any more');
+  await choose(customer, 'deliver');
   assert.equal(await customer.locator('#submit').innerText(), 'Place order for R45');
   noErrors(errors);
 });
 
 test('admin: settings that make no sense are refused with a reason, and nothing is saved', async (t) => {
   const { dev, page } = await openAdmin(t);
-  await page.click('.tab[data-tab="settings"]');
+  await openSettings(page);
   await page.waitForSelector('#settings-form');
 
   await page.fill('#s-price', 'abc');
@@ -1689,7 +1717,7 @@ test('admin: before the shop is set up Greg is told, and filling in the details 
   await page.waitForSelector('.alert-wait');
   assert.match(await text(page, '#panel-orders .alert-wait'), /closed until you add the price and your bank details/);
 
-  await page.click('.tab[data-tab="new"]');
+  await openNew(page);
   assert.match(await text(page, '#new-warning'), /Add the price and your bank details in Settings before you create orders/);
   await page.fill('#n-name', 'Too Early');
   await page.click('#n-submit');
@@ -1880,12 +1908,16 @@ async function everyScreen(t, scheme, check) {
   await run(a.page, 'admin: more menu');
   await a.page.click('.tab[data-tab="new"]');
   await run(a.page, 'admin: new order');
+  await openNew(a.page);
+  await run(a.page, 'admin: new order form');
   await a.page.fill('#n-name', 'Contrast Check');
   await a.page.click('#n-submit');
   await a.page.waitForSelector('#new-result:not([hidden])');
   await run(a.page, 'admin: order created');
   await a.page.click('.tab[data-tab="settings"]');
   await a.page.waitForSelector('#settings-form');
+  await run(a.page, 'admin: settings, folded');
+  await openSettings(a.page);
   await run(a.page, 'admin: settings');
   await a.page.fill('#s-price', 'abc');
   await a.page.click('#settings-save');
@@ -1942,8 +1974,9 @@ for (const width of [320, 390, 768, 1280]) {
     bad.push(['orders', await over(a.page)]);
     await a.page.click('.tab[data-tab="new"]');
     bad.push(['new order', await over(a.page)]);
-    await a.page.click('.tab[data-tab="settings"]');
-    await a.page.waitForSelector('#settings-form');
+    await openNew(a.page, 'collect');
+    bad.push(['new order, collect', await over(a.page)]);
+    await openSettings(a.page);
     bad.push(['settings', await over(a.page)]);
 
     assert.deepEqual(bad.filter((b) => b[1] > 0), [], 'screens that scroll sideways');

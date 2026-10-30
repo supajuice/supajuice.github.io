@@ -68,7 +68,7 @@ You need a Google account and a GitHub account. For now everything runs under yo
    The page remembers the key on that phone and removes it from the address bar. Save the full link as a bookmark: it always works, even if the phone clears the page's memory. Treat the link like a password.
 
    A home screen icon works too, but on an iPhone the icon keeps its own separate memory, so the first time it asks for the key: paste it in once.
-2. Open **Settings**. Fill in the price, the delivery fee (0 for free), the delivery area, the bank details and the email address for new-order alerts. Save. You will see "Settings saved. Your order page is open."
+2. Open **Settings**. Fill in the price, the delivery fee (0 for free), the bank details and the email address for new-order alerts. Save. You will see "Settings saved. Your order page is open."
    - Until the price and the bank name, account holder and account number are set, the order page shows "Ordering opens soon".
    - The Settings screen also shows the order page link to put in the Instagram bio.
 
@@ -93,7 +93,7 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Fixed delivery fee instead.** Untick **Settings > Confirm the delivery fee for each order**. Delivery orders then go straight to **Awaiting payment** with the usual fee, as before.
 
-**An order comes in by DM.** Open **New order**, enter the quantity and the customer's name (the rest is optional), and tap **Create order**. Tap **Copy invoice** and paste it into the DM. It has the bank details and the reference. If you filled in their email, the PDF is emailed as well.
+**An order comes in by DM.** Open **New order** and tap **Collect** or **Get delivered**, just like on the order page. Enter the quantity and the customer's name (the rest is optional), and tap **Create order**. Tap **Copy invoice** and paste it into the DM. It has the bank details and the reference. If you filled in their email, the PDF is emailed as well.
 
 **Money arrives.** Find the invoice number in the bank statement reference. In the app tap **Mark paid** on that order, then **Yes, mark paid**. If the order has an email address, the paid invoice PDF is emailed straight away. The order moves to **Paid** with a **Copy invoice** button, so you can paste the paid invoice into the DM too.
 
@@ -103,7 +103,9 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Delivered.** Tap **Mark delivered** on the order under **Paid**. Tap an address to open it in Maps and a phone number to call.
 
-**Collection.** The order page always opens with two buttons, **Collect** and **Get delivered**, and shows the rest of the form once the customer picks one. Customers who collect choose a day and a time. Set these in **Settings > Collection**: the **Collection place** (for example Sea Point), the **dates** (tick them on a calendar of the next 30 days, from tomorrow), the **hours** (for example 17:00 to 19:00), the **length of each time** (15, 30 or 60 minutes), and how many **customers per time**. Tick new dates as the weeks go by: the Orders tab warns you when only a few are left, and customers cannot collect once they run out. A time that is full disappears from the order page, and a cancelled order frees its time again. Collection orders have no delivery fee and no address, and the button reads **Mark collected**. For a DM order, tick **Customer collects** and, if you like, enter a date and time. Any time works there, even one that is full.
+**Collection.** The order page always opens with two buttons, **Collect** and **Get delivered**, and shows the rest of the form once the customer picks one. Customers who collect choose a day and a time. Set these in **Settings > Collection**: the **Collection place** (for example Sea Point), the **dates** (tick them on a calendar of the next 30 days, from tomorrow), the **hours** (for example 17:00 to 19:00), the **length of each time** (15, 30 or 60 minutes), and how many **customers per time**. Tick new dates as the weeks go by: the Orders tab warns you when only a few are left, and customers cannot collect once they run out. A time that is full disappears from the order page, and a cancelled order frees its time again. Collection orders have no delivery fee and no address, and the button reads **Mark collected**. For a DM order, tap **Collect** and, if you like, pick a day and time. You see every time on your collection dates, with full ones marked **(full)**, and you can still book them.
+
+**Settings.** Each part of **Settings** folds open: tap a heading to see its settings. One **Save settings** button at the bottom saves them all. Addresses open in Google Maps with "South Africa" added, so there is no area to set.
 
 **Moving a collection.** Before payment, tap **Edit** and change the date or time. After payment, tap **More > Change collection time**: the customer is emailed an updated invite that moves the event in their calendar. Cancelling a paid collection emails a cancellation that removes it.
 

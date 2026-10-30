@@ -33,18 +33,21 @@
 
   var SETTINGS_LAYOUT = [
     {
+      id: 'price',
       title: 'Price and delivery',
+      about: 'Price, delivery fee, how many per order',
       fields: [
         { key: 'price', label: 'Price per sachet', hint: 'A number, for example 40', mode: 'decimal', max: 12 },
         { key: 'delivery_fee', label: 'Delivery fee', hint: '0 means free delivery. With the box below ticked, customers see it as "from".', mode: 'decimal', max: 12 },
         { key: 'delivery_quote', label: 'Confirm the delivery fee for each order', hint: 'Delivery orders from your order page wait under New requests until you set the fee and accept them. The invoice is emailed then. Untick to charge the fee above straight away.', type: 'checkbox', wide: true },
-        { key: 'delivery_area', label: 'Area for Maps', hint: 'Added when you tap an address, so Maps finds the right street. Customers do not see it.', wide: true, max: 60 },
         { key: 'min_quantity', label: 'Fewest sachets per order', hint: 'The quantity starts here. 1 means no minimum', mode: 'numeric', max: 3 },
         { key: 'max_quantity', label: 'Most sachets per order', mode: 'numeric', max: 3 }
       ]
     },
     {
+      id: 'collection',
       title: 'Collection',
+      about: 'Place, dates and times customers can collect',
       fields: [
         { key: 'collection_note', label: 'Collection place', hint: 'Where customers collect, for example Sea Point. Shown on your order page, invoices and calendar invites. Collection is free.', wide: true, max: 200 },
         { key: 'collection_dates', label: 'Dates you hand over orders', hint: 'Tick the dates customers can collect, from tomorrow up to 30 days ahead. Tick new dates as the weeks go by.', type: 'dates' },
@@ -54,7 +57,9 @@
       ]
     },
     {
+      id: 'bank',
       title: 'Bank details',
+      about: 'Where customers pay',
       fields: [
         { key: 'bank_name', label: 'Bank', max: 60 },
         { key: 'account_holder', label: 'Account holder', max: 80 },
@@ -65,7 +70,9 @@
       ]
     },
     {
+      id: 'shop',
       title: 'Shop',
+      about: 'Names, invoice numbers, order alerts',
       fields: [
         { key: 'brand_name', label: 'Brand name', max: 60 },
         { key: 'product_name', label: 'Product name', max: 60 },
@@ -105,7 +112,8 @@
     flash: null,
     focus: null,        // { invoice?, role } to focus after the next draw
     settings: null,
-    settingsLoaded: false
+    settingsLoaded: false,
+    openGroups: {}      // settings sections Greg has opened, by id
   };
 
   var cards = {};
@@ -114,6 +122,7 @@
   var newPending = null; // { sig, id }: a retry of the same order reuses one request id
   var newBusy = false;
   var newFeeTouched = false; // Greg typed his own fee, so a settings change does not overwrite it
+  var newChoice = null;      // 'collect' or 'deliver' on the DM form, null until Greg picks
   var savingSettings = false;
 
   // ---------- Small helpers ----------
@@ -133,10 +142,11 @@
     return digits.length >= 7 ? 'tel:' + (t.charAt(0) === '+' ? '+' : '') + digits : null;
   }
 
-  function mapsHref(address, area) {
+  // Customers order from all over South Africa, so Maps is only told the country.
+  function mapsHref(address) {
     var q = String(address || '').replace(/\s+/g, ' ').trim();
     if (!q) return null;
-    if (area && q.toLowerCase().indexOf(String(area).toLowerCase()) === -1) q += ', ' + area;
+    if (!/south africa/i.test(q)) q += ', South Africa';
     return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
   }
 
@@ -434,7 +444,7 @@
   }
 
   function addressNode(address) {
-    var href = mapsHref(address, state.config.area);
+    var href = mapsHref(address);
     return href ? el('a', { href: href, target: '_blank', rel: 'noopener' }, address) : address;
   }
 
@@ -1098,11 +1108,57 @@
     $('new-qty-slot').appendChild(newStepper.node);
     newStepper.onChange(renderNewTotals);
     $('new-form').addEventListener('submit', onCreate);
-    $('n-collect').addEventListener('change', renderNewTotals);
+    $('n-choose-collect').addEventListener('click', function () { chooseNew('collect'); });
+    $('n-choose-deliver').addEventListener('click', function () { chooseNew('deliver'); });
+    $('n-choose-change').addEventListener('click', function () {
+      var was = newChoice;
+      newChoice = null;
+      $('n-error').hidden = true;
+      syncNewChoice();
+      $(was === 'collect' ? 'n-choose-collect' : 'n-choose-deliver').focus();
+    });
+    $('n-collect-day').addEventListener('change', function () { fillNewTimes(''); });
     $('n-fee').addEventListener('input', function () {
       newFeeTouched = true;
       renderNewTotals();
     });
+  }
+
+  // Like the order page: Collect or Get delivered first, then the rest of the form.
+  function chooseNew(what) {
+    newChoice = what;
+    $('n-error').hidden = true;
+    syncNewChoice();
+    $('n-chosen-text').focus();
+  }
+
+  function syncNewChoice() {
+    var c = state.config;
+    var collect = newChoice === 'collect';
+    $('n-choose').hidden = !!newChoice;
+    $('n-chosen').hidden = !newChoice;
+    $('n-rest').hidden = !newChoice;
+    $('n-choose-collect').setAttribute('aria-pressed', String(collect));
+    $('n-choose-deliver').setAttribute('aria-pressed', String(newChoice === 'deliver'));
+    if (c) {
+      $('n-choose-collect-sub').textContent = 'Free' + (c.collectNote ? ' · ' + c.collectNote : '');
+      $('n-choose-deliver-sub').textContent = c.fee > 0 ? 'Usual fee ' + SJ.money(c.fee, c.currency) : 'Free';
+    }
+    $('n-chosen-text').textContent = collect ? 'Collect' + (c && c.collectNote ? ' from ' + c.collectNote : '') : 'Get delivered';
+    renderNewTotals();
+  }
+
+  // Greg sees every time on his collection dates, full ones marked, and can book any of them.
+  function renderNewSlots() {
+    var days = (state.config && state.config.collectSlotsAll) || [];
+    var wantTime = $('n-collect-hour').value;
+    SJ.fillSlotDays($('n-collect-day'), days, 'No time yet');
+    fillNewTimes(wantTime);
+  }
+
+  function fillNewTimes(want) {
+    var days = (state.config && state.config.collectSlotsAll) || [];
+    SJ.fillSlotTimes($('n-collect-hour'), SJ.slotDay(days, $('n-collect-day').value), want);
   }
 
   function applyConfigToNew() {
@@ -1111,7 +1167,8 @@
     newStepper.setRange(c.minQty, c.maxQty);
     newStepper.setItem(SJ.itemLine(c));
     if (!newFeeTouched) $('n-fee').value = String(c.fee);
-    $('n-collect-time').step = String((c.collectStep || 30) * 60);
+    renderNewSlots();
+    syncNewChoice();
     var warn = $('new-warning');
     SJ.clear(warn);
     if (!c.ready) warn.appendChild(setupBanner('Add the price and your bank details in Settings before you create orders.'));
@@ -1120,7 +1177,7 @@
 
   function renderNewTotals() {
     if (!state.config || !newStepper) return;
-    var collect = $('n-collect').checked;
+    var collect = newChoice === 'collect';
     $('n-address-field').hidden = collect;
     $('n-fee-field').hidden = collect;
     $('n-time-field').hidden = !collect;
@@ -1145,7 +1202,8 @@
     if (newBusy) return;
     $('n-error').hidden = true;
 
-    var collect = $('n-collect').checked;
+    var collect = newChoice === 'collect';
+    var day = $('n-collect-day').value;
     var data = {
       name: $('n-name').value.trim(),
       email: $('n-email').value.trim(),
@@ -1154,7 +1212,7 @@
       notes: $('n-notes').value.trim(),
       qty: newStepper.get(),
       collect: collect,
-      collectAt: collect ? joinSlot($('n-collect-date').value, $('n-collect-time').value) : '',
+      collectAt: collect ? joinSlot(day, $('n-collect-hour').value) : '',
       fee: collect ? '' : $('n-fee').value.trim()
     };
     if (!data.name) {
@@ -1168,8 +1226,8 @@
       return;
     }
     if (data.collectAt === null) {
-      showNewError('Pick both a date and a time to collect, or leave both empty.');
-      $($('n-collect-date').value ? 'n-collect-time' : 'n-collect-date').focus();
+      showNewError('Pick a time to collect, or set the day back to No time yet.');
+      $('n-collect-hour').focus();
       return;
     }
 
@@ -1185,6 +1243,8 @@
       state.filter = 'awaiting';
       renderOrders();
       showCreated(res);
+      // A booked collection time is now full, so fetch the times again for the next DM order.
+      if (data.collectAt) refresh({ quiet: true });
     } catch (err) {
       if (err.code === 'unauthorized') {
         lock(err.message);
@@ -1237,7 +1297,7 @@
         type: 'button', class: 'btn btn-quiet',
         onclick: function () {
           resetNewForm();
-          $('n-name').focus();
+          $('n-choose-collect').focus();
         }
       }, 'New order')));
 
@@ -1249,8 +1309,10 @@
 
   function resetNewForm() {
     newPending = null;
-    ['n-name', 'n-email', 'n-contact', 'n-address', 'n-notes', 'n-collect-date', 'n-collect-time'].forEach(function (id) { $(id).value = ''; });
-    $('n-collect').checked = false;
+    ['n-name', 'n-email', 'n-contact', 'n-address', 'n-notes', 'n-collect-day'].forEach(function (id) { $(id).value = ''; });
+    newChoice = null;
+    fillNewTimes('');
+    syncNewChoice();
     newFeeTouched = false;
     if (state.config) $('n-fee').value = String(state.config.fee);
     renderNewTotals();
@@ -1337,23 +1399,35 @@
       f.hint ? el('p', { class: 'hint', id: id + '-hint' }, f.hint) : null);
   }
 
+  // One folded section of the Settings tab. It stays open or closed while Greg is on the page.
+  function settingsGroup(id, title, about, content) {
+    // Until the shop is set up, the sections with what is missing start open.
+    var needed = !(state.config && state.config.ready) && (id === 'price' || id === 'bank');
+    var d = el('details', { class: 'group', id: 'group-' + id, open: !!state.openGroups[id] || needed },
+      el('summary', null,
+        el('span', { class: 'group-title' }, title),
+        el('span', { class: 'group-about' }, about)),
+      el('div', { class: 'group-body stack' }, content));
+    d.addEventListener('toggle', function () { state.openGroups[id] = d.open; });
+    return d;
+  }
+
   function renderSettings() {
     var body = $('settings-body');
     SJ.clear(body);
-    var wrap = el('div', { class: 'stack-xl' });
+    var wrap = el('div', { class: 'stack' });
 
-    wrap.appendChild(el('section', { class: 'stack' },
-      el('h2', { class: 'section-title' }, 'Your order page'),
+    wrap.appendChild(settingsGroup('link', 'Your order page', 'The link for your Instagram bio', [
       el('p', { class: 'fine' }, 'Put this link in your Instagram bio.'),
-      el('div', { class: 'pay' }, orderLinkRow())));
+      el('div', { class: 'pay' }, orderLinkRow())]));
 
-    wrap.appendChild(el('section', { class: 'stack', id: 'photo-section' }));
+    wrap.appendChild(settingsGroup('photo', 'Order page photo', 'The photo above the order form', el('div', { class: 'stack', id: 'photo-section' })));
 
-    var form = el('form', { id: 'settings-form', class: 'stack-xl', novalidate: true });
+    var form = el('form', { id: 'settings-form', class: 'stack', novalidate: true });
     SETTINGS_LAYOUT.forEach(function (section) {
       var grid = el('div', { class: 'form-grid form-grid--two' });
       section.fields.forEach(function (f) { grid.appendChild(settingField(f)); });
-      form.appendChild(el('section', { class: 'stack' }, el('h2', { class: 'section-title' }, section.title), grid));
+      form.appendChild(settingsGroup(section.id, section.title, section.about, grid));
     });
     form.appendChild(el('div', { class: 'alert alert-bad', id: 'settings-error', role: 'alert', hidden: true }));
     form.appendChild(el('button', { type: 'submit', class: 'btn btn-primary btn-block', id: 'settings-save' }, 'Save settings'));
@@ -1393,7 +1467,6 @@
     }, p ? 'Replace photo' : 'Add photo');
     pick.addEventListener('click', function () { file.click(); });
 
-    box.appendChild(el('h2', { class: 'section-title' }, 'Order page photo'));
     box.appendChild(el('p', { class: 'fine' }, p
       ? 'This photo shows at the top of your order page.'
       : 'Add a photo to show at the top of your order page. It is made smaller on this phone before it is sent.'));

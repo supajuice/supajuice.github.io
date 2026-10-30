@@ -173,7 +173,6 @@ GitHub will host your website for free.
 3. Tap the **Settings** tab and fill in:
    - **Price per sachet**, e.g. `40`
    - **Delivery fee**: `0` for free delivery
-   - **Delivery area**, e.g. `Cape Town`
    - **Bank**, **Account holder**, **Account number**, **Branch code**, **Account type**
    - **Email me new orders**: your own email. You get an email for every new order.
 4. Tap **Save settings**. You should see **"Settings saved. Your order page is open."**

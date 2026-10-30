@@ -84,7 +84,6 @@ const SETTING_DEFS = [
   { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery. When fees are confirmed per order, customers see it as "from" and it is suggested when you accept a request.' },
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
-  { key: 'delivery_area', value: 'Cape Town', note: 'Added to addresses when you open them in Maps from the admin page, so the right street is found. Customers do not see it.' },
   { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page, invoices and calendar invites. Collection is free.' },
   { key: 'collection_dates', value: '', note: 'Dates customers can collect, for example 2026-11-03, separated by commas. Tick them on the admin page, which shows the next 30 days.' },
   { key: 'collection_hours', value: '17:00-19:00', note: 'Collection hours, for example 17:00-19:00.' },
@@ -104,7 +103,7 @@ const SETTING_DEFS = [
 
 // Longest allowed text per setting.
 const SETTING_MAX = {
-  brand_name: 60, product_name: 60, currency_symbol: 4, delivery_area: 60, collection_note: 200, alert_email: 120,
+  brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, alert_email: 120,
   collection_dates: 400, collection_hours: 20,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
@@ -295,7 +294,6 @@ function orderResponse_(order, s, emailed) {
     brand: s.brand,
     product: s.product,
     currency: s.currency,
-    area: s.area,
     collectNote: s.collectNote,
     bank: request ? null : s.bank,
     paymentNote: request ? '' : s.paymentNote
@@ -1013,7 +1011,7 @@ function readSettings_() {
 
 const NEVER_BLANK = ['collection_note', 'collection_hours', 'collection_slot_minutes', 'collection_per_slot'];
 // Settings from earlier versions. setup marks their rows as no longer used.
-const OLD_SETTINGS = ['collection_days', 'collection_days_ahead'];
+const OLD_SETTINGS = ['collection_days', 'collection_days_ahead', 'delivery_area'];
 
 function readTypedSettings_() {
   const raw = readSettings_();
@@ -1033,7 +1031,6 @@ function readTypedSettings_() {
     price: price,
     fee: fee,
     currency: raw.currency_symbol || 'R',
-    area: raw.delivery_area || 'Cape Town',
     collectNote: raw.collection_note,
     quote: String(raw.delivery_quote).toLowerCase() !== 'no',
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
@@ -1058,8 +1055,7 @@ function publicConfig_(s, slots) {
     price: s.price,
     fee: s.fee,
     currency: s.currency,
-    area: s.area,
-    collectNote: s.collectNote, // blank means collection is not offered
+    collectNote: s.collectNote, // where customers collect
     quote: s.quote, // true: the delivery fee is confirmed by Greg after the customer orders
     minQty: s.minQty,
     maxQty: s.maxQty,
@@ -1086,6 +1082,8 @@ function adminConfig_(s) {
   c.collectWindow = collectWindow_().map(function (d) { return { date: d.date, label: d.label, weekday: d.weekday }; });
   c.collectDatesLeft = s.slots.dates.length;
   c.collectLastDate = s.slots.dates.length ? s.slots.dates[s.slots.dates.length - 1] : '';
+  // Every time on the ticked dates, full ones included, for Greg's DM orders.
+  c.collectSlotsAll = allSlots_(s, ordersSheet_());
   return c;
 }
 
@@ -1211,8 +1209,7 @@ function validateSetting_(key, value) {
     case 'brand_name':
     case 'product_name':
     case 'currency_symbol':
-    case 'delivery_area':
-      if (text === '') throw fail_('invalid', 'Brand, product, currency and area for Maps cannot be blank.');
+      if (text === '') throw fail_('invalid', 'Brand, product and currency cannot be blank.');
       return text;
     default:
       return text;
@@ -1325,22 +1322,31 @@ function bookedCounts_(sheet) {
   return counts;
 }
 
-// The times customers can still book on the ticked dates, grouped by day:
-// [{ date: '2026-11-03', label: 'Tue 3 Nov', times: ['17:00', '17:30'] }]
-function freeSlots_(s, sheet) {
+// Every time on the ticked dates, grouped by day, with the ones already booked up:
+// [{ date: '2026-11-03', label: 'Tue 3 Nov', times: ['17:00', '17:30'], full: ['17:00'] }]
+function allSlots_(s, sheet) {
   const slots = s.slots;
   const booked = bookedCounts_(sheet);
   const out = [];
   collectWindow_().forEach(function (day) {
     if (slots.dates.indexOf(day.date) === -1) return;
     const times = [];
+    const full = [];
     for (let m = slots.start; m + slots.step <= slots.end; m += slots.step) {
       const t = clock_(m);
-      if ((booked[day.date + ' ' + t] || 0) < slots.perSlot) times.push(t);
+      times.push(t);
+      if ((booked[day.date + ' ' + t] || 0) >= slots.perSlot) full.push(t);
     }
-    if (times.length) out.push({ date: day.date, label: day.label, times: times });
+    out.push({ date: day.date, label: day.label, times: times, full: full });
   });
   return out;
+}
+
+// The times customers can still book: [{ date: '2026-11-03', label: 'Tue 3 Nov', times: ['17:30'] }]
+function freeSlots_(s, sheet) {
+  return allSlots_(s, sheet).map(function (d) {
+    return { date: d.date, label: d.label, times: d.times.filter(function (t) { return d.full.indexOf(t) === -1; }) };
+  }).filter(function (d) { return d.times.length; });
 }
 
 function slotIsFree_(free, text) {

@@ -310,6 +310,59 @@ a {
   grid-template-columns: 1fr 1fr;
   gap: var(--s3);
 }
+/* ---------- Settings sections that fold open ---------- */
+
+.group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.group > summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--s3);
+  align-items: center;
+  min-height: 56px;
+  padding: var(--s3) var(--s4);
+  cursor: pointer;
+  list-style: none;
+}
+.group > summary::-webkit-details-marker {
+  display: none;
+}
+.group > summary::after {
+  content: '';
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--ink-soft);
+  border-bottom: 2px solid var(--ink-soft);
+  transform: rotate(45deg);
+  margin-top: -4px;
+}
+.group[open] > summary::after {
+  transform: rotate(-135deg);
+  margin-top: 4px;
+}
+.group-title {
+  font-weight: 700;
+  font-size: 1.0625rem;
+}
+.group-about {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.group-body {
+  padding: 0 var(--s4) var(--s4);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .group > summary::after {
+    transition: transform 0.15s ease;
+  }
+}
+
 /* The collection dates calendar in Settings. No gaps, so seven cells fit at 320px wide. */
 .cal {
   display: grid;

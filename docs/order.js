@@ -135,40 +135,22 @@
 
   // ---------- Collection time ----------
 
-  function slotDay(date) {
-    return (config.collectSlots || []).filter(function (d) { return d.date === date; })[0] || null;
-  }
-
-  function option(value, text) {
-    return el('option', { value: value }, text);
-  }
-
   // Keeps the day and time already picked when they are still free.
   function renderSlots() {
     if (!slotsOn()) return;
     var slots = config.collectSlots;
     var day = $('collect-day');
-    var wantDay = day.value;
     var wantTime = $('collect-hour').value;
-    SJ.clear(day);
-    day.appendChild(option('', slots.length ? 'Choose a day' : 'No times free'));
-    slots.forEach(function (d) { day.appendChild(option(d.date, d.label)); });
-    day.value = slotDay(wantDay) ? wantDay : '';
+    SJ.fillSlotDays(day, slots, slots.length ? 'Choose a day' : 'No times free');
     day.disabled = !slots.length;
     fillTimes(wantTime);
     $('collect-hint').textContent = slots.length
-      ? 'Free times for the next ' + (config.collectAhead || 14) + ' days.'
-      : 'No collection times are free in the next ' + (config.collectAhead || 14) + ' days. Choose delivery, or send us a DM.';
+      ? 'Free times for the next ' + (config.collectAhead || 30) + ' days.'
+      : 'No collection times are free in the next ' + (config.collectAhead || 30) + ' days. Choose delivery, or send us a DM.';
   }
 
   function fillTimes(want) {
-    var hour = $('collect-hour');
-    var day = slotDay($('collect-day').value);
-    SJ.clear(hour);
-    hour.appendChild(option('', day ? 'Choose a time' : 'Choose a day first'));
-    if (day) day.times.forEach(function (t) { hour.appendChild(option(t, t)); });
-    hour.value = day && day.times.indexOf(want) !== -1 ? want : '';
-    hour.disabled = !day;
+    SJ.fillSlotTimes($('collect-hour'), SJ.slotDay(config.collectSlots, $('collect-day').value), want);
   }
 
   function applyConfig(c) {

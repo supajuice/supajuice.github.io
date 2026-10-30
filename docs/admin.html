@@ -57,55 +57,72 @@
       <div id="new-warning"></div>
       <form id="new-form" class="stack-lg" novalidate>
         <h2 class="section-title">Order from a DM</h2>
-        <div id="new-qty-slot"></div>
-        <div class="field">
-          <label for="n-name">Customer name</label>
-          <input id="n-name" type="text" autocomplete="off" maxlength="80">
-        </div>
-        <div class="field">
-          <label for="n-contact">Instagram handle or phone (optional)</label>
-          <input id="n-contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
-        </div>
-        <div class="field">
-          <label for="n-email">Email (optional)</label>
-          <input id="n-email" type="email" inputmode="email" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="n-email-hint">
-          <p class="hint" id="n-email-hint">The invoice PDF is emailed here, and again when you mark it paid.</p>
-        </div>
-        <label class="check">
-          <input id="n-collect" type="checkbox">
-          <span>Customer collects (no delivery fee)</span>
-        </label>
-        <fieldset class="field choice" id="n-time-field" hidden>
-          <legend>Collection time (optional)</legend>
-          <div class="slot-pickers">
-            <div class="field">
-              <label for="n-collect-date">Date</label>
-              <input id="n-collect-date" type="date">
-            </div>
-            <div class="field">
-              <label for="n-collect-time">Time</label>
-              <input id="n-collect-time" type="time" step="1800">
-            </div>
+        <fieldset class="choose" id="n-choose">
+          <legend class="choose-legend">How does the customer want it?</legend>
+          <div class="choose-row">
+            <button type="button" class="choose-btn" id="n-choose-collect" aria-pressed="false">
+              <span class="choose-title">Collect</span>
+              <span class="choose-sub" id="n-choose-collect-sub">Free</span>
+            </button>
+            <button type="button" class="choose-btn" id="n-choose-deliver" aria-pressed="false">
+              <span class="choose-title">Get delivered</span>
+              <span class="choose-sub" id="n-choose-deliver-sub"></span>
+            </button>
           </div>
-          <p class="hint">Any time you like, even one that is full on the order page. The calendar invite is emailed when you mark it paid.</p>
         </fieldset>
-        <div class="field" id="n-fee-field">
-          <label for="n-fee">Delivery fee</label>
-          <input id="n-fee" type="text" inputmode="decimal" autocomplete="off" maxlength="12" aria-describedby="n-fee-hint">
-          <p class="hint" id="n-fee-hint">For this order. It starts at your usual fee.</p>
+
+        <div class="chosen" id="n-chosen" hidden>
+          <p class="chosen-text" id="n-chosen-text" tabindex="-1"></p>
+          <button type="button" class="btn btn-quiet btn-small" id="n-choose-change">Change</button>
         </div>
-        <div class="field" id="n-address-field">
-          <label for="n-address">Delivery address (optional)</label>
-          <textarea id="n-address" rows="2" autocomplete="off" maxlength="300"></textarea>
+
+        <div class="stack-lg" id="n-rest" hidden>
+          <fieldset class="field choice" id="n-time-field" hidden>
+            <legend>Collection time (optional)</legend>
+            <div class="slot-pickers">
+              <div class="field">
+                <label for="n-collect-day">Day</label>
+                <select id="n-collect-day"></select>
+              </div>
+              <div class="field">
+                <label for="n-collect-hour">Time</label>
+                <select id="n-collect-hour"></select>
+              </div>
+            </div>
+            <p class="hint">Full times are marked, and you can still book them. Leave the day on No time yet to arrange it later. The calendar invite is emailed when you mark it paid.</p>
+          </fieldset>
+          <div id="new-qty-slot"></div>
+          <div class="field">
+            <label for="n-name">Customer name</label>
+            <input id="n-name" type="text" autocomplete="off" maxlength="80">
+          </div>
+          <div class="field">
+            <label for="n-email">Email (optional)</label>
+            <input id="n-email" type="email" inputmode="email" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="n-email-hint">
+            <p class="hint" id="n-email-hint">The invoice PDF is emailed here, and again when you mark it paid.</p>
+          </div>
+          <div class="field">
+            <label for="n-contact">Instagram handle or phone (optional)</label>
+            <input id="n-contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
+          </div>
+          <div class="field" id="n-address-field">
+            <label for="n-address">Delivery address (optional)</label>
+            <textarea id="n-address" rows="2" autocomplete="off" maxlength="300"></textarea>
+          </div>
+          <div class="field" id="n-fee-field">
+            <label for="n-fee">Delivery fee</label>
+            <input id="n-fee" type="text" inputmode="decimal" autocomplete="off" maxlength="12" aria-describedby="n-fee-hint">
+            <p class="hint" id="n-fee-hint">For this order. It starts at your usual fee.</p>
+          </div>
+          <div class="field">
+            <label for="n-notes">Notes (optional)</label>
+            <input id="n-notes" type="text" autocomplete="off" maxlength="300">
+          </div>
+          <hr class="tear">
+          <dl class="summary" id="n-summary"></dl>
+          <div class="alert alert-bad" id="n-error" role="alert" hidden></div>
+          <button type="submit" class="btn btn-primary btn-block" id="n-submit">Create order</button>
         </div>
-        <div class="field">
-          <label for="n-notes">Notes (optional)</label>
-          <input id="n-notes" type="text" autocomplete="off" maxlength="300">
-        </div>
-        <hr class="tear">
-        <dl class="summary" id="n-summary"></dl>
-        <div class="alert alert-bad" id="n-error" role="alert" hidden></div>
-        <button type="submit" class="btn btn-primary btn-block" id="n-submit">Create order</button>
       </form>
       <div id="new-result" class="stack-lg" hidden></div>
     </section>
