@@ -73,8 +73,9 @@
         </div>
 
         <div class="field">
-          <label for="contact">Instagram handle or phone (optional)</label>
-          <input id="contact" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80">
+          <label for="contact">Phone number</label>
+          <input id="contact" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" aria-describedby="contact-hint">
+          <p class="hint" id="contact-hint">So we can reach you about your order.</p>
         </div>
 
         <div class="field" id="address-field">

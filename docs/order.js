@@ -190,6 +190,13 @@
     };
   }
 
+  // A phone number: digits with optional spaces, dashes, brackets and a leading +.
+  function isPhone(s) {
+    if (!/^\+?[\d\s()-]{9,20}$/.test(s)) return false;
+    var digits = s.replace(/\D/g, '').length;
+    return digits >= 9 && digits <= 15;
+  }
+
   function validate(d) {
     if (d.collect && slotsOn()) {
       if (!config.collectSlots.length) return { id: 'choose-change', message: 'No collection times are free right now. Choose delivery, or send us a DM.' };
@@ -199,6 +206,8 @@
     if (!d.name) return { id: 'name', message: 'Enter your name.' };
     if (!d.email) return { id: 'email', message: 'Enter your email address so we can send your invoice.' };
     if (!SJ.isEmail(d.email)) return { id: 'email', message: 'Check your email address. It should look like name@example.com.' };
+    if (!d.contact) return { id: 'contact', message: 'Enter your phone number.' };
+    if (!isPhone(d.contact)) return { id: 'contact', message: 'Check your phone number. It should look like 082 123 4567.' };
     if (d.collect) return null;
     if (!d.address) return { id: 'address', message: 'Enter your delivery address.' };
     return null;

@@ -69,7 +69,7 @@ async function pickTime(page, time) {
 
 async function fillKiosk(page, over) {
   const d = Object.assign({
-    name: 'Jane Doe', email: 'jane@example.com', contact: '@jane.runs', address: '12 Beach Rd, Sea Point', notes: '', more: 0
+    name: 'Jane Doe', email: 'jane@example.com', contact: '082 123 4567', address: '12 Beach Rd, Sea Point', notes: '', more: 0
   }, over);
   await choose(page, d.collect ? 'collect' : 'deliver');
   if (d.collect) await pickTime(page, d.time);
@@ -188,6 +188,7 @@ test('order page: a customer can collect at a time they pick, and the delivery f
   await page.click('[aria-label="One more"]');
   await page.fill('#name', 'Sam Collect');
   await page.fill('#email', 'sam@example.com');
+  await page.fill('#contact', '072 555 0101');
   await page.click('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
   assert.match(await text(page, '#done-sub'), /Pay R80 by bank transfer/);
@@ -421,11 +422,29 @@ test('order page: missing details are caught before anything is sent', async (t)
 
   await page.fill('#email', 'jane@example.com');
   await page.click('#submit');
+  assert.match(await text(page, '#form-error'), /Enter your phone number/);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'contact');
+
+  await page.fill('#contact', '@jane.runs');
+  await page.click('#submit');
+  assert.match(await text(page, '#form-error'), /Check your phone number/);
+
+  await page.fill('#contact', '+27 82 123 4567');
+  await page.click('#submit');
   assert.match(await text(page, '#form-error'), /delivery address/);
   assert.equal(await page.locator('#area-ok').count(), 0, 'there is no delivery-area tick box');
 
   assert.equal(dev.calls.length, before, 'nothing was sent');
   assert.equal(orderRows(dev).length, 0);
+});
+
+test('order page: a collection also needs a phone number', async (t) => {
+  const { dev, page } = await openKiosk(t, { mode: 'ready' });
+  await fillKiosk(page, { collect: true, contact: '' });
+  const before = dev.calls.length;
+  await page.click('#submit');
+  assert.match(await text(page, '#form-error'), /Enter your phone number/);
+  assert.equal(dev.calls.length, before, 'nothing was sent');
 });
 
 test('order page: a double tap places one order', async (t) => {
