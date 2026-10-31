@@ -911,9 +911,11 @@ a {
   margin: 0;
   accent-color: var(--accent);
 }
-.order--picked {
+/* A ticked order: a line down its left side, with the details moved clear of it.
+   Two classes, so the padding of .order further down does not undo it. */
+.order.order--picked {
   box-shadow: inset 4px 0 0 var(--ink);
-  padding-left: var(--s4);
+  padding-left: var(--s5);
 }
 .bulk-bar {
   position: sticky;
