@@ -85,8 +85,8 @@ const SETTING_DEFS = [
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
   { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page, invoices and calendar invites. Collection is free.' },
-  { key: 'collection_dates', value: '', note: 'Dates and times customers can collect, for example "2026-11-03 17:00 17:30, 2026-11-04 09:00". A date on its own offers every time within the collection hours. Set them on the admin page, which shows the next 30 days.' },
-  { key: 'collection_hours', value: '17:00-19:00', note: 'The earliest and latest collection times, for example 17:00-19:00. The admin page offers the times in between for each date.' },
+  { key: 'collection_dates', value: '', note: 'Dates and times customers can collect, for example "2026-11-03 07:00-08:00 17:00-19:00, 2026-11-04". A date on its own uses the usual times. Set them on the admin page, which shows the next 30 days.' },
+  { key: 'collection_hours', value: '17:00-19:00', note: 'The usual collection times, for example 17:00-19:00. New dates start with these, and each date can have its own.' },
   { key: 'collection_slot_minutes', value: '30', note: 'Length of one collection time in minutes: 15, 30 or 60.' },
   { key: 'collection_per_slot', value: '1', note: 'How many customers can book the same collection time.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
@@ -1109,7 +1109,21 @@ function saveSettings_(body) {
     const saved = readSettings_();
     const hours = parseHours_(checked.collection_hours !== undefined ? checked.collection_hours : saved.collection_hours);
     const step = Number(checked.collection_slot_minutes !== undefined ? checked.collection_slot_minutes : saved.collection_slot_minutes);
-    if (hours && hours.end - hours.start < step) throw fail_('invalid', 'The collection hours are shorter than one collection time.');
+    if (hours && hours.end - hours.start < step) throw fail_('invalid', 'The usual times are shorter than one collection time.');
+  }
+
+  // The same for every time set on a date.
+  if (checked.collection_dates !== undefined || checked.collection_slot_minutes !== undefined) {
+    const saved = readSettings_();
+    const step = Number(checked.collection_slot_minutes !== undefined ? checked.collection_slot_minutes : saved.collection_slot_minutes);
+    const picked = parseDates_(checked.collection_dates !== undefined ? checked.collection_dates : saved.collection_dates, step) || {};
+    Object.keys(picked).forEach(function (date) {
+      (picked[date] || []).forEach(function (r) {
+        if (r.end - r.start < step) {
+          throw fail_('invalid', clock_(r.start) + '-' + clock_(r.end) + ' on ' + dayOf_(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8)))).label + ' is shorter than one collection time.');
+        }
+      });
+    });
   }
 
   const lock = LockService.getScriptLock();
@@ -1179,11 +1193,11 @@ function validateSetting_(key, value) {
       return text;
     case 'collection_dates': {
       const picked = parseDates_(text);
-      if (!picked) throw fail_('invalid', 'Collection dates must look like 2026-11-03 17:00 17:30.');
+      if (!picked) throw fail_('invalid', 'Collection times must look like 2026-11-03 17:00-19:00, each ending after it starts.');
       // Only dates customers can still book are kept, in date order, each with its times in order.
       const entries = collectWindow_().filter(function (d) { return picked[d.date] !== undefined; }).map(function (d) {
-        const times = picked[d.date];
-        return times ? d.date + ' ' + times.slice().sort().join(' ') : d.date;
+        const ranges = picked[d.date];
+        return ranges ? d.date + ' ' + ranges.map(function (r) { return clock_(r.start) + '-' + clock_(r.end); }).join(' ') : d.date;
       });
       if (!entries.length) throw fail_('invalid', 'Pick at least one collection date and time.');
       return entries.join(',');
@@ -1271,17 +1285,18 @@ function readSlots_(raw) {
   if ([15, 30, 60].indexOf(step) === -1) step = 30;
   let hours = parseHours_(raw.collection_hours);
   if (!hours || hours.end - hours.start < step) hours = parseHours_('17:00-19:00');
-  // Every time Greg can offer: from the earliest time, one slot length apart, ending by the latest.
-  const grid = [];
-  for (let m = hours.start; m + step <= hours.end; m += step) grid.push(clock_(m));
-  // Each date's own times, kept only when they fit the times above. A date on its own offers them all.
-  const picked = parseDates_(raw.collection_dates) || {};
+  // Each date's times: every From-To split into collection times, one length apart and ending by To.
+  // A date on its own uses the usual times.
+  const picked = parseDates_(raw.collection_dates, step) || {};
   const times = {};
   const dates = [];
   collectWindow_().forEach(function (d) {
     if (picked[d.date] === undefined) return;
-    const own = picked[d.date];
-    const list = own ? grid.filter(function (t) { return own.indexOf(t) !== -1; }) : grid.slice();
+    const list = [];
+    (picked[d.date] || [hours]).forEach(function (r) {
+      for (let m = r.start; m + step <= r.end; m += step) if (list.indexOf(clock_(m)) === -1) list.push(clock_(m));
+    });
+    list.sort();
     if (!list.length) return;
     times[d.date] = list;
     dates.push(d.date);
@@ -1294,23 +1309,34 @@ function readSlots_(raw) {
   };
 }
 
-// "2026-11-03 17:00 17:30, 2026-11-04" -> { '2026-11-03': ['17:00', '17:30'], '2026-11-04': null }
-// null means every time. Returns null when anything does not look like a date or a time.
-function parseDates_(text) {
+// "2026-11-03 07:00-08:00 17:00-19:00, 2026-11-04" ->
+//   { '2026-11-03': [{ start: 420, end: 480 }, { start: 1020, end: 1140 }], '2026-11-04': null }
+// Times are in minutes, sorted. null means the usual times. A single time such as 17:30 (from an
+// earlier version) is one collection time long. Returns null when anything does not make sense.
+function parseDates_(text, step) {
   const out = {};
   let ok = true;
   String(text || '').split(',').forEach(function (entry) {
     const parts = entry.trim().split(/\s+/).filter(String);
     if (!parts.length) return;
-    const date = parts[0];
-    const times = parts.slice(1);
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(parts[0]);
     const real = m && new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDate() === Number(m[3]);
-    if (!real || times.some(function (t) { return !/^([01]\d|2[0-3]):[0-5]\d$/.test(t); })) {
+    const ranges = parts.slice(1).map(function (token) {
+      const r = parseHours_(token);
+      if (r) return r;
+      const single = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(token);
+      if (!single) return null;
+      const start = Number(single[1]) * 60 + Number(single[2]);
+      return { start: start, end: start + (step || 30) };
+    });
+    if (!real || ranges.some(function (r) { return !r; })) {
       ok = false;
       return;
     }
-    out[date] = times.length ? times.filter(function (t, i) { return times.indexOf(t) === i; }) : null;
+    ranges.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+    out[parts[0]] = ranges.length ? ranges.filter(function (r, i) {
+      return !i || r.start !== ranges[i - 1].start || r.end !== ranges[i - 1].end;
+    }) : null;
   });
   return ok ? out : null;
 }

@@ -456,35 +456,15 @@ a {
 .times-editor .label:focus {
   outline: none;
 }
-.time-chips {
+.range-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
   gap: var(--s2);
-  margin-top: var(--s2);
+  justify-items: start;
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--line);
 }
-.time-chip {
-  display: block;
-  cursor: pointer;
-}
-.time-box {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--surface);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.time-chip input:checked + .time-box {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--paper);
-}
-.time-chip input:focus-visible + .time-box {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
+.range-row .slot-pickers {
+  width: 100%;
 }
 .cal-tools {
   display: flex;

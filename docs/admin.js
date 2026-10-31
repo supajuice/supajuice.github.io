@@ -50,10 +50,10 @@
       about: 'Place, dates and times customers can collect',
       fields: [
         { key: 'collection_note', label: 'Collection place', hint: 'Where customers collect, for example Sea Point. Shown on your order page, invoices and calendar invites. Collection is free.', wide: true, max: 200 },
-        { key: 'collection_hours', label: 'Earliest and latest times', hint: 'The times you can choose from for each date below.', type: 'hours' },
+        { key: 'collection_hours', label: 'Usual times', hint: 'New dates start with these. You can change any date below.', type: 'hours' },
         { key: 'collection_slot_minutes', label: 'Length of each time', type: 'select', options: [['15', '15 minutes'], ['30', '30 minutes'], ['60', '1 hour']] },
         { key: 'collection_per_slot', label: 'Customers per time', hint: '1 means no two customers share a time', mode: 'numeric', max: 2 },
-        { key: 'collection_dates', label: 'Dates and times you hand over orders', hint: 'Tap a date, then tick the times customers can collect that day. From tomorrow up to 30 days ahead. Add new dates as the weeks go by.', type: 'dates' }
+        { key: 'collection_dates', label: 'Dates and times you hand over orders', hint: 'Tap a date, then set From and To for each time you are there that day. Customers pick a time inside it. From tomorrow up to 30 days ahead. Add new dates as the weeks go by.', type: 'dates' }
       ]
     },
     {
@@ -86,7 +86,7 @@
   SETTINGS_LAYOUT.forEach(function (s) { s.fields.forEach(function (f) { SETTING_FIELDS.push(f); }); });
 
   var WEEK_HEAD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  var datesDraft = {};     // collection times being set, by date. null means every time.
+  var datesDraft = {};     // collection times being set: { date: [{ from, to }] }. null means the usual times.
   var datesEditing = null; // the date whose times are shown under the calendar
 
   var state = {
@@ -1644,28 +1644,59 @@
     }
   }
 
-  // The times Greg can choose from, worked out from the earliest and latest times and the length on the form.
-  function timeGrid() {
-    var from = /^(\d{2}):(\d{2})/.exec($('s-collection_hours-from').value);
-    var until = /^(\d{2}):(\d{2})/.exec($('s-collection_hours-until').value);
-    var step = Number($('s-collection_slot_minutes').value) || 30;
-    if (!from || !until) return [];
-    var out = [];
-    for (var m = +from[1] * 60 + +from[2]; m + step <= +until[1] * 60 + +until[2]; m += step) {
-      out.push((m < 600 ? '0' : '') + Math.floor(m / 60) + ':' + (m % 60 < 10 ? '0' : '') + (m % 60));
-    }
-    return out;
+  // ---------- Settings: collection dates and times ----------
+
+  function toMinutes(t) {
+    var m = /^(\d{2}):(\d{2})/.exec(t || '');
+    return m ? +m[1] * 60 + +m[2] : null;
   }
 
-  // The times set for a date, among the ones that can be chosen now.
-  function draftTimes(date, grid) {
+  function clockText(min) {
+    return (min < 600 ? '0' : '') + Math.floor(min / 60) + ':' + (min % 60 < 10 ? '0' : '') + (min % 60);
+  }
+
+  function slotStep() {
+    return Number($('s-collection_slot_minutes').value) || 30;
+  }
+
+  // The usual From and To on the form, or null while one of them is empty.
+  function usualRange() {
+    var from = $('s-collection_hours-from').value.slice(0, 5);
+    var to = $('s-collection_hours-until').value.slice(0, 5);
+    return from && to ? { from: from, to: to } : null;
+  }
+
+  // A date's From-To times. In the draft, null means the usual times and a missing date has none.
+  function draftRanges(date) {
     var own = datesDraft[date];
     if (own === undefined) return [];
-    return own === null ? grid.slice() : grid.filter(function (t) { return own.indexOf(t) !== -1; });
+    if (own === null) {
+      var usual = usualRange();
+      return usual ? [usual] : [];
+    }
+    return own;
   }
 
-  function dateCellLabel(d, count) {
-    return d.label + ', ' + (count ? count + (count === 1 ? ' time' : ' times') : 'no times');
+  // The times customers can pick: each From-To split by the length, ending by To. The same rule as the server.
+  function rangeTimes(ranges) {
+    var step = slotStep();
+    var out = [];
+    ranges.forEach(function (r) {
+      var start = toMinutes(r.from);
+      var end = toMinutes(r.to);
+      if (start === null || end === null) return;
+      for (var m = start; m + step <= end; m += step) if (out.indexOf(clockText(m)) === -1) out.push(clockText(m));
+    });
+    return out.sort();
+  }
+
+  function rangesText(ranges) {
+    return ranges.filter(function (r) { return r.from && r.to; })
+      .map(function (r) { return r.from + ' to ' + r.to; }).join(', ');
+  }
+
+  function dateCellLabel(d, ranges) {
+    return d.label + ', ' + (rangeTimes(ranges).length ? rangesText(ranges) : 'no times');
   }
 
   // The fieldset is built once. renderDates fills it, and again whenever the times change.
@@ -1677,12 +1708,11 @@
   }
 
   // The next 30 dates as a calendar, Monday first, with the times of the tapped date below it.
-  // focusDate: the date button to focus afterwards, so redrawing keeps Greg's place.
-  function renderDates(focusDate) {
+  // focus: what to focus afterwards ({ date } or { id }), so redrawing keeps Greg's place.
+  function renderDates(focus) {
     var body = $('dates-body');
     if (!body) return;
     var days = (state.config && state.config.collectWindow) || [];
-    var tgrid = timeGrid();
     SJ.clear(body);
 
     var cal = el('div', { class: 'cal' });
@@ -1691,16 +1721,16 @@
     for (var i = 0; i < lead; i++) cal.appendChild(el('span', { class: 'cal-blank', 'aria-hidden': 'true' }));
     days.forEach(function (d, i) {
       var num = Number(d.date.slice(8));
-      var count = draftTimes(d.date, tgrid).length;
+      var ranges = draftRanges(d.date);
       var btn = el('button', {
-        type: 'button', class: 'cal-day' + (count ? ' cal-day--on' : ''), 'data-date': d.date,
-        'aria-pressed': String(datesEditing === d.date), 'aria-label': dateCellLabel(d, count)
+        type: 'button', class: 'cal-day' + (rangeTimes(ranges).length ? ' cal-day--on' : ''), 'data-date': d.date,
+        'aria-pressed': String(datesEditing === d.date), 'aria-label': dateCellLabel(d, ranges)
       }, el('span', { class: 'cal-box', 'aria-hidden': 'true' },
         el('span', { class: 'cal-month' }, i === 0 || num === 1 ? d.label.slice(-3) : ''),
         el('span', { class: 'cal-num' }, String(num))));
       btn.addEventListener('click', function () {
         datesEditing = d.date;
-        renderDates(d.date);
+        renderDates({ date: d.date });
       });
       cal.appendChild(btn);
     });
@@ -1712,7 +1742,7 @@
           days.forEach(function (d) { datesDraft[d.date] = null; });
           renderDates();
         }
-      }, 'Every date, all times'),
+      }, 'Every date, usual times'),
       el('button', {
         type: 'button', class: 'btn btn-quiet btn-small', onclick: function () {
           datesDraft = {};
@@ -1721,74 +1751,104 @@
       }, 'Clear all')));
 
     var day = days.filter(function (d) { return d.date === datesEditing; })[0];
-    if (!day) {
-      body.appendChild(el('p', { class: 'hint' }, 'Tap a date to choose its times.'));
-    } else {
-      body.appendChild(timesEditor(day, days, tgrid));
-    }
-    if (focusDate) {
-      var again = body.querySelector('[data-date="' + focusDate + '"]');
-      if (again) again.focus();
-    }
+    if (day) body.appendChild(timesEditor(day, days));
+    else body.appendChild(el('p', { class: 'hint' }, 'Tap a date to set its times.'));
+
+    var target = focus && (focus.date ? body.querySelector('[data-date="' + focus.date + '"]') : $(focus.id));
+    if (target) target.focus();
   }
 
-  function timesEditor(day, days, tgrid) {
-    var chosen = draftTimes(day.date, tgrid);
-    var box = el('div', { class: 'times-editor', id: 'times-editor' });
+  // The From-To rows of one date. Typing only updates the date's square and the times line,
+  // so the cursor stays where it is. Adding or removing a row redraws.
+  function timesEditor(day, days) {
+    var ranges = draftRanges(day.date);
+    var usual = datesDraft[day.date] === null;
+    var box = el('div', { class: 'times-editor stack', id: 'times-editor' });
     box.appendChild(el('p', { class: 'label', id: 'times-title', tabindex: '-1' }, 'Times on ' + day.label));
-    if (!tgrid.length) {
-      box.appendChild(el('p', { class: 'hint' }, 'Set the earliest and latest times above first.'));
-      return box;
-    }
-    var chips = el('div', { class: 'time-chips', role: 'group', 'aria-labelledby': 'times-title' });
-    tgrid.forEach(function (t) {
-      var input = el('input', { type: 'checkbox', class: 'sr-only', id: 'time-' + t.replace(':', ''), value: t });
-      input.checked = chosen.indexOf(t) !== -1;
-      input.addEventListener('change', function () {
-        var now = draftTimes(day.date, tgrid).filter(function (x) { return x !== t; });
-        if (input.checked) now.push(t);
-        datesDraft[day.date] = now.sort();
-        syncDateCell(day, tgrid);
-      });
-      chips.appendChild(el('label', { class: 'time-chip' }, input, el('span', { class: 'time-box' }, t)));
-    });
-    box.appendChild(chips);
+    if (usual) box.appendChild(el('p', { class: 'hint' }, 'Your usual times. Change them here for this date only.'));
 
-    function setThisDate(list) {
-      datesDraft[day.date] = list;
-      renderDates();
-      $('times-title').focus();
+    var preview = el('p', { class: 'hint', id: 'times-preview', 'aria-live': 'polite' });
+    function rowsNow() {
+      return Array.prototype.map.call(box.querySelectorAll('.range-row'), function (row) {
+        return { from: row.querySelector('.range-from').value.slice(0, 5), to: row.querySelector('.range-to').value.slice(0, 5) };
+      });
     }
+    function update() {
+      var list = rangeTimes(rowsNow());
+      preview.textContent = list.length ? 'Customers can pick ' + list.join(', ') + '.' : 'No times customers can pick on this date.';
+      var cell = document.querySelector('.cal-day[data-date="' + day.date + '"]');
+      if (cell) {
+        cell.classList.toggle('cal-day--on', list.length > 0);
+        cell.setAttribute('aria-label', dateCellLabel(day, rowsNow()));
+      }
+    }
+
+    var step = String(slotStep() * 60);
+    ranges.forEach(function (r, i) {
+      var from = el('input', { type: 'time', class: 'range-from', id: 'range-from-' + i, step: step });
+      var to = el('input', { type: 'time', class: 'range-to', id: 'range-to-' + i, step: step });
+      from.value = r.from || '';
+      to.value = r.to || '';
+      [from, to].forEach(function (input) {
+        input.addEventListener('input', function () {
+          datesDraft[day.date] = rowsNow();
+          update();
+        });
+      });
+      box.appendChild(el('div', { class: 'range-row' },
+        el('div', { class: 'slot-pickers' },
+          el('div', { class: 'field' }, el('label', { for: from.id }, 'From'), from),
+          el('div', { class: 'field' }, el('label', { for: to.id }, 'To'), to)),
+        el('button', {
+          type: 'button', class: 'btn btn-quiet btn-small', 'data-role': 'range-remove',
+          'aria-label': 'Remove ' + (r.from && r.to ? r.from + ' to ' + r.to : 'this time'),
+          onclick: function () {
+            datesDraft[day.date] = rowsNow().filter(function (x, j) { return j !== i; });
+            renderDates({ id: 'range-add' });
+          }
+        }, 'Remove')));
+    });
+    box.appendChild(preview);
+
     box.appendChild(el('div', { class: 'cal-tools' },
-      el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: function () { setThisDate(tgrid.slice()); } }, 'All times'),
-      el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: function () { setThisDate([]); } }, 'No times'),
       el('button', {
+        type: 'button', class: 'btn btn-quiet btn-small', id: 'range-add', onclick: function () {
+          var rows = rowsNow();
+          var last = rows[rows.length - 1];
+          // The next time starts where the last one ends, an hour long. Otherwise the usual times.
+          var start = last ? toMinutes(last.to) : null;
+          var next = start !== null && start + 60 < 24 * 60 ? { from: clockText(start), to: clockText(start + 60) } : (usualRange() || { from: '', to: '' });
+          datesDraft[day.date] = rows.concat([next]);
+          renderDates({ id: 'range-from-' + rows.length });
+        }
+      }, '+ Add ' + (ranges.length ? 'another time' : 'a time')),
+      ranges.length ? el('button', {
         type: 'button', class: 'btn btn-quiet btn-small', onclick: function () {
-          var list = draftTimes(day.date, tgrid);
-          days.forEach(function (d) { if (draftTimes(d.date, tgrid).length) datesDraft[d.date] = list.slice(); });
-          renderDates();
+          var rows = rowsNow();
+          days.forEach(function (d) {
+            if (d.date !== day.date && rangeTimes(draftRanges(d.date)).length) datesDraft[d.date] = rows.map(function (r) { return { from: r.from, to: r.to }; });
+          });
+          renderDates({ id: 'times-title' });
           SJ.toast('These times are now set on every date that has times.');
         }
-      }, 'Use on all dates with times')));
+      }, 'Use on all dates with times') : null));
+    update();
     return box;
   }
 
-  // After a time is ticked: only the date's square changes, so focus stays on the time.
-  function syncDateCell(day, tgrid) {
-    var cell = document.querySelector('.cal-day[data-date="' + day.date + '"]');
-    if (!cell) return;
-    var count = draftTimes(day.date, tgrid).length;
-    cell.classList.toggle('cal-day--on', count > 0);
-    cell.setAttribute('aria-label', dateCellLabel(day, count));
-  }
-
-  // "2026-11-03 17:00 17:30,2026-11-04" -> datesDraft. A date on its own means every time.
+  // "2026-11-03 07:00-08:00 17:00-19:00,2026-11-04" -> datesDraft. A date on its own means the usual times.
+  // A single time from an earlier version becomes one collection time long.
   function readDatesDraft(value) {
     datesDraft = {};
     String(value || '').split(',').forEach(function (entry) {
       var parts = entry.trim().split(/\s+/).filter(String);
       if (!parts.length) return;
-      datesDraft[parts[0]] = parts.length > 1 ? parts.slice(1) : null;
+      datesDraft[parts[0]] = parts.length > 1 ? parts.slice(1).map(function (token) {
+        var pair = token.split('-');
+        if (pair.length === 2) return { from: pair[0], to: pair[1] };
+        var start = toMinutes(token);
+        return { from: token, to: start === null ? '' : clockText(Math.min(start + slotStep(), 23 * 60 + 59)) };
+      }) : null;
     });
     var days = (state.config && state.config.collectWindow) || [];
     var stillShown = days.some(function (d) { return d.date === datesEditing; });
@@ -1802,11 +1862,15 @@
     var node = $('s-' + f.key);
     if (f.type === 'checkbox') return node.checked ? 'yes' : 'no';
     if (f.type === 'dates') {
-      var tgrid = timeGrid();
+      // Dates on the usual times are saved on their own, so they follow later changes to the usual times.
       var days = (state.config && state.config.collectWindow) || [];
-      return days.map(function (d) { return [d.date].concat(draftTimes(d.date, tgrid)); })
-        .filter(function (entry) { return entry.length > 1; })
-        .map(function (entry) { return entry.join(' '); }).join(',');
+      return days.map(function (d) {
+        var own = datesDraft[d.date];
+        if (own === undefined) return '';
+        if (own === null) return d.date;
+        var ranges = own.filter(function (r) { return r.from && r.to; });
+        return ranges.length ? d.date + ' ' + ranges.map(function (r) { return r.from + '-' + r.to; }).join(' ') : '';
+      }).filter(String).join(',');
     }
     if (f.type === 'hours') return $('s-' + f.key + '-from').value + '-' + $('s-' + f.key + '-until').value;
     return node.value;

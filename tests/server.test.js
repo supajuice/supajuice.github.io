@@ -1189,33 +1189,45 @@ test('customers see only the dates Greg ticks, and ticked dates run out as days 
   assert.equal(list.config.collectDatesLeft, 0);
 });
 
-test('each date can have its own times, within the earliest and latest times', () => {
+test('each date can have its own From-To times, split into collection times', () => {
   const { gas, key } = ready();
   const r = gas.call({ action: 'saveSettings', key, values: {
-    collection_hours: '07:00-19:00',
-    collection_dates: '2026-11-01 09:00, 2026-10-30 18:30 07:00 18:30,2026-11-03 17:15'
+    collection_dates: '2026-11-01 09:00-10:00, 2026-10-30 17:00-18:15 07:00-08:00 17:00-18:15,2026-11-03'
   } });
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.equal(r.values.collection_dates, '2026-10-30 07:00 18:30,2026-11-01 09:00,2026-11-03 17:15', 'in order, without repeats');
-  // 17:15 is not one of the 30-minute times, so 3 Nov has nothing to offer.
+  assert.equal(r.values.collection_dates, '2026-10-30 07:00-08:00 17:00-18:15,2026-11-01 09:00-10:00,2026-11-03',
+    'in order, without repeats');
+  // 30 minutes each, ending by To. 3 Nov on its own uses the usual times, 17:00 to 19:00.
   assert.deepEqual(slotsOf(gas), [
-    { date: '2026-10-30', label: 'Fri 30 Oct', times: ['07:00', '18:30'] },
-    { date: '2026-11-01', label: 'Sun 1 Nov', times: ['09:00'] }
+    { date: '2026-10-30', label: 'Fri 30 Oct', times: ['07:00', '07:30', '17:00', '17:30'] },
+    { date: '2026-11-01', label: 'Sun 1 Nov', times: ['09:00', '09:30'] },
+    { date: '2026-11-03', label: 'Tue 3 Nov', times: ['17:00', '17:30', '18:00', '18:30'] }
   ]);
-  assert.equal(r.config.collectDatesLeft, 2);
+  assert.equal(r.config.collectDatesLeft, 3);
 
-  // Booking 07:00 fills it; the other time on that date stays.
+  // Booking 07:00 fills it; the other times on that date stay.
   assert.equal(gas.call(pickup({ collectAt: '2026-10-30 07:00' })).ok, true);
-  assert.deepEqual(timesOn(gas, '2026-10-30'), ['18:30']);
-  assert.equal(gas.call(pickup({ name: 'Bob', collectAt: '2026-10-30 08:00' })).error, 'slot_taken', 'a time not offered that day');
+  assert.deepEqual(timesOn(gas, '2026-10-30'), ['07:30', '17:00', '17:30']);
+  assert.equal(gas.call(pickup({ name: 'Bob', collectAt: '2026-10-30 12:00' })).error, 'slot_taken', 'a time not offered that day');
 
-  // A date on its own still offers every time.
-  gas.call({ action: 'saveSettings', key, values: { collection_hours: '17:00-18:00', collection_dates: '2026-11-02' } });
-  assert.deepEqual(slotsOf(gas), [{ date: '2026-11-02', label: 'Mon 2 Nov', times: ['17:00', '17:30'] }]);
+  // Changing the usual times moves the dates that use them, and only those.
+  gas.call({ action: 'saveSettings', key, values: { collection_hours: '08:00-09:00' } });
+  assert.deepEqual(timesOn(gas, '2026-11-03'), ['08:00', '08:30']);
+  assert.deepEqual(timesOn(gas, '2026-11-01'), ['09:00', '09:30']);
 
-  for (const bad of ['2026-11-02 25:00', '2026-11-02 5pm', '2026-11-02 17:00 x']) {
+  // Overlapping times on one date do not repeat a time; times from an earlier version still work.
+  gas.call({ action: 'saveSettings', key, values: { collection_dates: '2026-11-02 17:00-18:00 17:30-18:30,2026-11-04 17:30' } });
+  assert.deepEqual(timesOn(gas, '2026-11-02'), ['17:00', '17:30', '18:00']);
+  assert.deepEqual(timesOn(gas, '2026-11-04'), ['17:30']);
+
+  for (const bad of ['2026-11-02 25:00-26:00', '2026-11-02 5pm', '2026-11-02 19:00-17:00', '2026-11-02 17:00-x']) {
     assert.equal(gas.call({ action: 'saveSettings', key, values: { collection_dates: bad } }).error, 'invalid', bad);
   }
+  const short = gas.call({ action: 'saveSettings', key, values: { collection_dates: '2026-11-02 17:00-17:15' } });
+  assert.equal(short.message, '17:00-17:15 on Mon 2 Nov is shorter than one collection time.');
+  // The old single time 17:30 was saved as 17:30-18:00, which an hour no longer fits.
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { collection_slot_minutes: '60' } }).message,
+    '17:30-18:00 on Wed 4 Nov is shorter than one collection time.');
 });
 
 test('Greg\'s old collection weekdays become the first ticked dates', () => {

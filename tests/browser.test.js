@@ -1404,11 +1404,9 @@ test('admin: the edit form changes the collection time, and Greg can pick any ti
 
 // Dates are tapped on the calendar: the tick box itself is hidden inside its square.
 const dateBox = (page, date) => page.locator('button.cal-day[data-date="' + date + '"]');
-const timeChip = (page, time) => page.locator('label.time-chip:has(#time-' + time.replace(':', '') + ')');
 const datesOn = (page) => page.locator('.cal-day--on').evaluateAll((ns) => ns.map((n) => n.getAttribute('data-date')));
-const chipsOn = (page) => page.locator('.time-chip input:checked').evaluateAll((ns) => ns.map((n) => n.value));
 
-test('admin: each collection date gets its own times in Settings, and the order page follows them', async (t) => {
+test('admin: each collection date gets its own From-To times in Settings, and the order page follows them', async (t) => {
   const { dev, page, errors } = await openAdmin(t);
   await page.waitForSelector('.order');
   await openSettings(page);
@@ -1419,12 +1417,15 @@ test('admin: each collection date gets its own times in Settings, and the order 
   assert.equal(await dateBox(page, '2026-10-29').innerText(), 'Oct\n29');
   assert.equal(await dateBox(page, '2026-11-01').innerText(), 'Nov\n1');
   assert.equal((await datesOn(page)).length, 26, 'Monday to Saturday until Greg picks');
-  assert.equal(await dateBox(page, '2026-10-29').getAttribute('aria-label'), 'Thu 29 Oct, 4 times');
+  assert.equal(await dateBox(page, '2026-10-29').getAttribute('aria-label'), 'Thu 29 Oct, 17:00 to 19:00');
   assert.equal(await dateBox(page, '2026-11-01').getAttribute('aria-label'), 'Sun 1 Nov, no times');
 
-  // The first date's times are open below the calendar.
+  // The first date's times are open below the calendar: the usual times.
   assert.equal(await text(page, '#times-title'), 'Times on Thu 29 Oct');
-  assert.deepEqual(await chipsOn(page), ['17:00', '17:30', '18:00', '18:30']);
+  assert.match(await text(page, '#times-editor'), /Your usual times/);
+  assert.equal(await page.inputValue('#range-from-0'), '17:00');
+  assert.equal(await page.inputValue('#range-to-0'), '19:00');
+  assert.equal(await text(page, '#times-preview'), 'Customers can pick 17:00, 17:30, 18:00, 18:30.');
 
   // Nothing at all is refused: collection is always on.
   await page.getByRole('button', { name: 'Clear all' }).click();
@@ -1433,43 +1434,60 @@ test('admin: each collection date gets its own times in Settings, and the order 
   await page.waitForSelector('#settings-error:not([hidden])');
   assert.equal(await text(page, '#settings-error'), 'Pick at least one collection date and time.');
 
-  // Wider times to choose from, an hour each.
-  await page.fill('#s-collection_hours-from', '07:00');
-  await page.fill('#s-collection_hours-until', '19:00');
+  // Sunday 1 Nov: a morning time and an evening time, an hour each.
   await page.selectOption('#s-collection_slot_minutes', '60');
   await page.fill('#s-collection_per_slot', '2');
-
-  // Sunday 1 Nov: a morning time and an evening time.
   await dateBox(page, '2026-11-01').click();
   assert.equal(await dateBox(page, '2026-11-01').getAttribute('aria-pressed'), 'true');
   assert.equal(await text(page, '#times-title'), 'Times on Sun 1 Nov');
-  assert.equal(await page.locator('.time-chip').count(), 12, '07:00 to 18:00');
-  await timeChip(page, '07:00').click();
-  await timeChip(page, '17:00').click();
-  assert.equal(await dateBox(page, '2026-11-01').getAttribute('aria-label'), 'Sun 1 Nov, 2 times');
+  await page.click('#range-add');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'range-from-0', 'the new time is ready to change');
+  await page.fill('#range-from-0', '07:00');
+  await page.fill('#range-to-0', '09:00');
+  await page.click('#range-add');
+  assert.equal(await page.inputValue('#range-from-1'), '09:00', 'the next time starts where the last ends');
+  await page.fill('#range-from-1', '17:00');
+  await page.fill('#range-to-1', '18:00');
+  assert.equal(await text(page, '#times-preview'), 'Customers can pick 07:00, 08:00, 17:00.');
+  assert.equal(await dateBox(page, '2026-11-01').getAttribute('aria-label'), 'Sun 1 Nov, 07:00 to 09:00, 17:00 to 18:00');
   assert.deepEqual(await datesOn(page), ['2026-11-01']);
 
-  // Use the same times on Sunday 8 Nov, then add one more there.
+  // Use the same times on Sunday 8 Nov, then make 8 Nov different.
   await dateBox(page, '2026-11-08').click();
-  await page.getByRole('button', { name: 'All times', exact: true }).click();
-  assert.equal((await chipsOn(page)).length, 12);
+  await page.click('#range-add');
   await page.getByRole('button', { name: 'Use on all dates with times' }).click();
-  assert.equal(await dateBox(page, '2026-11-01').getAttribute('aria-label'), 'Sun 1 Nov, 12 times');
   await dateBox(page, '2026-11-01').click();
-  await page.getByRole('button', { name: 'No times', exact: true }).click();
-  await timeChip(page, '07:00').click();
-  await timeChip(page, '17:00').click();
+  assert.equal(await page.locator('.range-row').count(), 1, 'copied from 8 Nov');
+  await page.fill('#range-from-0', '07:00');
+  await page.fill('#range-to-0', '09:00');
+  await page.click('#range-add');
+  await page.fill('#range-from-1', '17:00');
+  await page.fill('#range-to-1', '18:00');
   await dateBox(page, '2026-11-08').click();
-  await page.getByRole('button', { name: 'No times', exact: true }).click();
-  await timeChip(page, '09:00').click();
+  await page.fill('#range-from-0', '09:00');
+  await page.fill('#range-to-0', '10:00');
+  await page.click('#range-add');
+  await page.locator('[data-role="range-remove"]').nth(1).click();
+  assert.equal(await page.locator('.range-row').count(), 1, 'removed again');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'range-add');
 
   await page.click('#settings-save');
   await toast(page, 'Settings saved.');
   const saved = dev.gas.call({ action: 'getSettings', key: dev.key }).values;
   assert.deepEqual(
     [saved.collection_dates, saved.collection_hours, saved.collection_slot_minutes, saved.collection_per_slot],
-    ['2026-11-01 07:00 17:00,2026-11-08 09:00', '07:00-19:00', '60', '2']);
+    ['2026-11-01 07:00-09:00 17:00-18:00,2026-11-08 09:00-10:00', '17:00-19:00', '60', '2']);
   assert.deepEqual(await datesOn(page), ['2026-11-01', '2026-11-08'], 'shown the way it was saved');
+
+  // A time that ends before it starts is explained.
+  await dateBox(page, '2026-11-08').click();
+  await page.fill('#range-to-0', '08:00');
+  await page.click('#settings-save');
+  await page.waitForSelector('#settings-error:not([hidden])');
+  assert.match(await text(page, '#settings-error'), /each ending after it starts/);
+  await page.fill('#range-to-0', '10:00');
+  await page.click('#settings-save');
+  await toast(page, 'Settings saved.');
 
   // With only two dates left, the Orders tab says when they run out.
   await page.click('.tab[data-tab="orders"]');
@@ -1480,7 +1498,7 @@ test('admin: each collection date gets its own times in Settings, and the order 
   await choose(customer, 'collect');
   assert.deepEqual(await customer.locator('#collect-day option').allInnerTexts(), ['Choose a day', 'Sun 1 Nov', 'Sun 8 Nov']);
   await customer.selectOption('#collect-day', '2026-11-01');
-  assert.deepEqual(await customer.locator('#collect-hour option').allInnerTexts(), ['Choose a time', '07:00', '17:00']);
+  assert.deepEqual(await customer.locator('#collect-hour option').allInnerTexts(), ['Choose a time', '07:00', '08:00', '17:00']);
   await customer.selectOption('#collect-day', '2026-11-08');
   assert.deepEqual(await customer.locator('#collect-hour option').allInnerTexts(), ['Choose a time', '09:00']);
   noErrors(errors);
