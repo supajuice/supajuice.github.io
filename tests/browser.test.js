@@ -1670,7 +1670,9 @@ test('admin: the photo preview loads when the section opens, and says so when it
 
   // The photo cannot be fetched at first. Once the connection is back, Try again works.
   let fail = true;
+  let fetches = 0;
   await page.route('**/exec', async (route) => {
+    if (route.request().method() === 'POST' && route.request().postData().includes('"action":"photo"')) fetches++;
     if (fail && route.request().method() === 'POST' && route.request().postData().includes('"action":"photo"')) {
       await route.abort('failed');
       return;
@@ -1679,10 +1681,10 @@ test('admin: the photo preview loads when the section opens, and says so when it
   });
   await page.click('.tab[data-tab="settings"]');
   await page.waitForSelector('#settings-form');
+  assert.equal(fetches, 0, 'nothing is downloaded while the photo section is folded');
   await page.click('#group-photo > summary');
-  // Opening the section tries again by itself, so wait for that try to fail as well.
   await page.waitForFunction(() => /The preview could not load/.test((document.querySelector('#photo-section .photo-note') || {}).textContent || ''));
-  await page.waitForSelector('[data-role="photo-retry"]');
+  assert.equal(fetches, 1, 'one fetch when the section opens');
   assert.equal(await page.locator('#photo-section figure').getAttribute('style'), 'aspect-ratio: 300 / 200', 'the space is kept');
   fail = false;
   await page.click('[data-role="photo-retry"]');

@@ -1849,7 +1849,9 @@
       $(id).addEventListener('input', function () { renderDates(); });
     });
     renderPhotoSection();
-    loadPhotoPreview();
+    // The photo is only fetched once its section is open (see settingsGroup), so a folded
+    // section costs no download and there is never more than one fetch at a time.
+    if (state.openGroups.photo) loadPhotoPreview();
   }
 
   // ---------- Settings: order page photo ----------
