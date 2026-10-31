@@ -111,6 +111,18 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Changing an order.** Tap **Edit** on an order under **Awaiting payment**. Everything can be changed: name, email, contact, quantity, collection, address, notes, and the price and delivery fee for that order (for example a discount). The invoice number stays the same and the total is worked out again. Leave **Email the updated invoice** ticked to send the customer the new PDF. Paid orders cannot be edited: tap **More > Undo paid** first.
 
+**Several orders at once.** Tick the box next to each order, or **Select all**, and a bar appears at the bottom with what suits that list: **Mark paid**, **Mark delivered** or **collected**, **Email invoices**, **Send a message**, **Cancel**, **Decline** or **Reopen**. It always asks first and shows how many orders and the total. Orders that could not be changed (for example, paid on another phone) stay ticked with the reason. Up to 50 at a time.
+
+**Hand-over list.** Under **Paid**, tick the orders and tap **Copy hand-over list**: names, quantities, addresses or collection times, contacts and notes, ready to paste into WhatsApp for a driver.
+
+**Send a message.** Tick orders and tap **Send a message** to email your own note, for example "Collections move to 18:00 today". Each email starts with "Hi" and the customer's name, and replies come to you. Orders without an email address are left out.
+
+**Collections.** The **Collections** list shows every collection still to hand over, by day and time, with Today and Tomorrow marked. Ones from earlier days that were not marked collected are listed first.
+
+**Search.** Type a name, invoice number, phone number or email in the box above the lists. It searches every list.
+
+**Emails per day.** Google lets the shop send about 100 emails a day. The Orders tab warns you when fewer than 10 are left, and a bulk action that would need more than are left is held back.
+
 **Mistakes.** Tap **More** on an order: **Undo paid**, **Undo delivered**, **Cancel order**. A cancelled order can be reopened.
 
 **Underpaid.** Partial payments are not tracked. Leave the order under **Awaiting payment** until the full amount arrives.

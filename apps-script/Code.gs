@@ -12,7 +12,7 @@
  *
  * Public actions   config, order, photo
  * Admin actions    list, create, editOrder, acceptOrder, declineOrder, setStatus, sendInvoice,
- *                  setCollectTime, getSettings, saveSettings,
+ *                  setCollectTime, bulk, getSettings, saveSettings,
  *                  setPhoto, removePhoto
  *                  (all need the admin key kept in Script properties)
  *
@@ -153,6 +153,7 @@ function handle_(body) {
       case 'setStatus': return setStatus_(body);
       case 'sendInvoice': return sendInvoice_(body);
       case 'setCollectTime': return setCollectTime_(body);
+      case 'bulk': return bulk_(body);
       case 'getSettings': return { ok: true, values: readSettings_() };
       case 'saveSettings': return saveSettings_(body);
       case 'setPhoto': return setPhoto_(body);
@@ -310,7 +311,7 @@ function listOrders_() {
       .filter(function (r) { return str_(r[COL.INVOICE]) !== ''; })
       .map(rowToOrder_);
   }
-  return { ok: true, orders: orders, config: adminConfig_(readTypedSettings_()) };
+  return { ok: true, orders: orders, config: adminConfig_(readTypedSettings_()), emailsLeft: MailApp.getRemainingDailyQuota() };
 }
 
 function setStatus_(body) {
@@ -459,6 +460,100 @@ function editOrder_(body) {
   const out = { ok: true, order: order };
   if (body.sendInvoice === true && order.email && order.status === STATUS.AWAITING) out.emailed = emailInvoice_(order, settings);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Several orders at once
+// ---------------------------------------------------------------------------
+
+const BULK_MAX = 50;
+const BULK_OPS = ['paid', 'delivered', 'cancel', 'reopen', 'decline', 'email', 'message'];
+
+// Greg ticks orders and picks one action for all of them. Each order is done on its own, like
+// the single actions, so one that cannot be changed does not stop the rest. Before anything
+// changes, the emails it would send are checked against what Google still allows today.
+function bulk_(body) {
+  const op = String(body.op || '');
+  if (BULK_OPS.indexOf(op) === -1) throw fail_('bad_request', 'Unknown action.');
+  const invoices = (Array.isArray(body.invoices) ? body.invoices : [])
+    .map(function (v) { return clean_(v, 32); })
+    .filter(function (v, i, all) { return v && all.indexOf(v) === i; });
+  if (!invoices.length) throw fail_('invalid', 'Pick at least one order.');
+  if (invoices.length > BULK_MAX) throw fail_('invalid', 'Pick at most ' + BULK_MAX + ' orders at a time.');
+  const reason = clean_(body.reason, 300);
+  const subject = clean_(body.subject, 120);
+  const message = cleanMessage_(body.message, 2000);
+  if (op === 'message' && !message) throw fail_('invalid', 'Write the message to send.');
+
+  const sheet = ordersSheet_();
+  const needed = invoices.filter(function (invoice) {
+    const rowNum = findRow_(sheet, invoice);
+    return rowNum && emailsFor_(op, rowToOrder_(sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0]));
+  }).length;
+  const left = MailApp.getRemainingDailyQuota();
+  if (needed > left) {
+    throw fail_('quota', 'This would send ' + needed + ' emails, but only ' + left + ' can be sent today. Pick fewer orders, or try again tomorrow.', { emailsLeft: left });
+  }
+
+  const results = invoices.map(function (invoice) {
+    try {
+      let out;
+      if (op === 'paid') out = setStatus_({ invoice: invoice, status: STATUS.PAID });
+      else if (op === 'delivered') out = setStatus_({ invoice: invoice, status: STATUS.DELIVERED });
+      else if (op === 'cancel') out = setStatus_({ invoice: invoice, status: STATUS.CANCELLED });
+      else if (op === 'reopen') out = setStatus_({ invoice: invoice, status: STATUS.AWAITING });
+      else if (op === 'decline') out = declineOrder_({ invoice: invoice, reason: reason });
+      else if (op === 'email') out = sendInvoice_({ invoice: invoice });
+      else out = messageOrder_(invoice, subject, message);
+      return { invoice: invoice, ok: true, order: out.order, emailed: out.emailed };
+    } catch (err) {
+      if (!err.code) console.error(err && err.stack ? err.stack : String(err));
+      return { invoice: invoice, ok: false, message: err.code ? err.publicMessage : 'Something went wrong with this order.' };
+    }
+  });
+  return { ok: true, results: results, emailsLeft: MailApp.getRemainingDailyQuota() };
+}
+
+// Whether an action sends this customer an email. The same rules as the single actions.
+function emailsFor_(op, o) {
+  if (!EMAIL_PATTERN.test(o.email)) return false;
+  if (op === 'paid') return o.status === STATUS.AWAITING;
+  if (op === 'decline') return o.status === STATUS.REQUESTED;
+  if (op === 'cancel') return o.status === STATUS.PAID && hasInvite_(o);
+  if (op === 'email') return o.status !== STATUS.CANCELLED && o.status !== STATUS.REQUESTED;
+  return op === 'message';
+}
+
+// Greg's own message to the customer of one order, for example "Collection moves to 18:00 today".
+function messageOrder_(invoice, subject, message) {
+  const sheet = ordersSheet_();
+  const rowNum = findRow_(sheet, invoice);
+  if (!rowNum) throw fail_('not_found', 'Order ' + invoice + ' was not found.');
+  const order = rowToOrder_(sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0]);
+  if (!EMAIL_PATTERN.test(order.email)) throw fail_('invalid', 'Order ' + order.invoice + ' has no email address.');
+  if (!emailMessage_(order, subject, message, readTypedSettings_())) {
+    throw fail_('email_failed', 'The email to ' + order.email + ' could not be sent. Please try again later.');
+  }
+  return { order: order, emailed: true };
+}
+
+// Returns true when sent. Never throws.
+function emailMessage_(order, subject, message, s) {
+  try {
+    if (MailApp.getRemainingDailyQuota() < 1) throw new Error('the daily email quota is used up');
+    const mail = {
+      to: order.email,
+      subject: subject || s.brand + ' order ' + order.invoice,
+      body: 'Hi ' + order.name + ',\n\n' + message + '\n\n' + s.brand + '\nOrder ' + order.invoice,
+      name: s.brand
+    };
+    if (EMAIL_PATTERN.test(s.alertEmail)) mail.replyTo = s.alertEmail;
+    MailApp.sendEmail(mail);
+    return true;
+  } catch (err) {
+    console.error('Message email failed for ' + order.invoice + ': ' + err);
+    return false;
+  }
 }
 
 // Greg moves the collection to another time. Once paid, the customer is emailed an
@@ -1601,6 +1696,14 @@ function clean_(v, max) {
   s = s.replace(/\s*[\r\n]+\s*/g, ', ');
   s = s.replace(/[\u0000-\u001F\u007F\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
   return s.slice(0, max);
+}
+
+// Longer text that keeps its line breaks, such as a message to customers.
+function cleanMessage_(v, max) {
+  let s = v === null || v === undefined ? '' : String(v);
+  s = s.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000B-\u001F\u007F\u2028\u2029]+/g, ' ');
+  s = s.split('\n').map(function (line) { return line.replace(/\s+/g, ' ').trim(); }).join('\n');
+  return s.replace(/\n{3,}/g, '\n\n').trim().slice(0, max);
 }
 
 // Text that starts with = + - or @ could be read as a formula. A leading space prevents that.

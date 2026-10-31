@@ -21,8 +21,12 @@
     { id: 'awaiting', status: AWAITING, label: 'Awaiting payment' },
     { id: 'paid', status: PAID, label: 'Paid' },
     { id: 'delivered', status: DELIVERED, label: 'Delivered' },
-    { id: 'cancelled', status: CANCELLED, label: 'Cancelled' }
+    { id: 'cancelled', status: CANCELLED, label: 'Cancelled' },
+    // Not a status: every collection still to hand over, by date and time.
+    { id: 'collections', status: null, label: 'Collections' }
   ];
+  var BULK_MAX = 50; // the most orders the service changes at once
+  var LOW_EMAILS = 10; // warn when fewer emails than this can still be sent today
 
   var STATUS_CLASS = {};
   STATUS_CLASS[REQUESTED] = 'awaiting';
@@ -106,6 +110,12 @@
     preview: null,      // invoice whose text is shown because copying failed
     acceptFees: {},     // delivery fee typed for each new request, by invoice
     declineReason: '',
+    query: '',          // the search box
+    selected: {},       // ticked orders in the list shown, by invoice
+    bulk: null,         // { op, reason, subject, message, error } while a bulk action is being confirmed
+    bulkFailures: [],   // orders the last bulk action could not change, with the reason
+    bulkPreview: null,  // the hand-over list, shown when copying it failed
+    emailsLeft: null,   // emails Google still allows today
     moveDraft: null,    // { date, time } typed for a new collection time
     moveError: null,
     editing: null,      // invoice being edited
@@ -306,6 +316,10 @@
   function accept(res) {
     state.orders = res.orders || [];
     state.config = res.config;
+    if (typeof res.emailsLeft === 'number') state.emailsLeft = res.emailsLeft;
+    // Ticks stay only on orders that are still in the list shown.
+    var shown = visibleOrders(currentFilter()).map(function (o) { return o.invoice; });
+    Object.keys(state.selected).forEach(function (inv) { if (shown.indexOf(inv) === -1) delete state.selected[inv]; });
     state.loadedAt = Date.now();
     SJ.store.set(KEY_STORE, state.key);
     if (!state.shown) {
@@ -341,6 +355,9 @@
 
   function renderOrders() {
     var panel = $('panel-orders');
+    // Typing in the search box redraws the list: the cursor goes back where it was.
+    var active = document.activeElement;
+    var caret = active && active.id === 'order-search' ? active.selectionStart : null;
     SJ.clear(panel);
     cards = {};
     refreshBtn = null;
@@ -350,14 +367,29 @@
     if (!c.ready) panel.appendChild(setupBanner('Your order page is closed until you add the price and your bank details.'));
     else if (c.collectDatesLeft === 0) panel.appendChild(setupBanner('No collection dates are left, so customers cannot collect. Tick more dates in Settings.'));
     else if (c.collectDatesLeft < 4) panel.appendChild(setupBanner('Collection dates run out after ' + SJ.formatDay(c.collectLastDate) + '. Tick more dates in Settings.'));
+    if (typeof state.emailsLeft === 'number' && state.emailsLeft < LOW_EMAILS) {
+      panel.appendChild(el('div', { class: 'alert alert-wait', role: 'status' }, el('p', null,
+        state.emailsLeft === 0
+          ? 'No more emails can be sent today. Invoices and calendar invites go out again tomorrow. Copy invoices into DMs until then.'
+          : 'Only ' + plural(state.emailsLeft, 'email') + ' can be sent today. Google allows about 100 a day.')));
+    }
+    panel.appendChild(searchBox());
     panel.appendChild(chipsRow());
 
     var f = currentFilter();
-    var list = state.orders.filter(function (o) { return o.status === f.status; }).sort(newestFirst);
+    var list = visibleOrders(f);
+    pickable = canSelect(f) && list.length > 0;
     panel.appendChild(listHead(f, list));
 
     if (!list.length) {
-      panel.appendChild(emptyState(f));
+      panel.appendChild(searching() ? el('div', { class: 'empty' }, el('p', null, 'No orders match.')) : emptyState(f));
+    } else if (f.id === 'collections' && !searching()) {
+      collectionGroups(list).forEach(function (g) {
+        panel.appendChild(el('h3', { class: 'collect-day' }, g.title));
+        var ul = el('ul', { class: 'orders' });
+        g.orders.forEach(function (o) { ul.appendChild(el('li', null, orderCard(o))); });
+        panel.appendChild(ul);
+      });
     } else {
       var ul = el('ul', { class: 'orders' });
       list.forEach(function (o) { ul.appendChild(el('li', null, orderCard(o))); });
@@ -366,7 +398,98 @@
     if (state.orders.length >= LIST_LIMIT) {
       panel.appendChild(el('p', { class: 'fine' }, 'Showing the latest ' + LIST_LIMIT + ' orders. Older ones are still in your sheet.'));
     }
+    var bar = pickable ? bulkBar(f, list) : null;
+    if (bar) panel.appendChild(bar);
+    if (caret !== null) {
+      var box = $('order-search');
+      box.focus({ preventScroll: true });
+      box.setSelectionRange(caret, caret);
+    }
     restoreFocus();
+  }
+
+  // ---------- Search, collections and the lists ----------
+
+  function searching() {
+    return !!state.query.trim();
+  }
+
+  // Ticking several orders only makes sense where they are all at the same step.
+  function canSelect(f) {
+    return !searching() && f.id !== 'collections';
+  }
+
+  // A collection still to hand over: placed or paid, not yet collected or cancelled.
+  function upcomingCollection(o) {
+    return o.collect && (o.status === AWAITING || o.status === PAID);
+  }
+
+  function filterCount(f) {
+    return f.id === 'collections' ? state.orders.filter(upcomingCollection).length : countOf(f.status);
+  }
+
+  // Name, invoice number, email, contact or address. Phone numbers match with or without spaces.
+  function matches(o, query) {
+    var q = query.trim().toLowerCase();
+    var text = [o.invoice, o.name, o.email, o.contact, o.address].join(' ').toLowerCase();
+    if (text.indexOf(q) !== -1) return true;
+    var digits = q.replace(/\D/g, '');
+    return digits.length >= 4 && String(o.contact || '').replace(/\D/g, '').indexOf(digits) !== -1;
+  }
+
+  function byCollectTime(a, b) {
+    if (!a.collectAt !== !b.collectAt) return a.collectAt ? -1 : 1;
+    return a.collectAt < b.collectAt ? -1 : a.collectAt > b.collectAt ? 1 : newestFirst(a, b);
+  }
+
+  function visibleOrders(f) {
+    if (searching()) return state.orders.filter(function (o) { return matches(o, state.query); }).sort(newestFirst);
+    if (f.id === 'collections') return state.orders.filter(upcomingCollection).sort(byCollectTime);
+    return state.orders.filter(function (o) { return o.status === f.status; }).sort(newestFirst);
+  }
+
+  // A date on this phone as 2026-10-29.
+  function dateText(d) {
+    return d.getFullYear() + '-' + (d.getMonth() < 9 ? '0' : '') + (d.getMonth() + 1) + '-' + (d.getDate() < 10 ? '0' : '') + d.getDate();
+  }
+
+  // [{ title, orders }]: collections before today that were not marked collected, then each day, then no time.
+  function collectionGroups(list) {
+    var now = new Date();
+    var today = dateText(now);
+    var tomorrow = dateText(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+    var groups = [];
+    function group(title) {
+      var g = groups.filter(function (x) { return x.title === title; })[0];
+      if (!g) groups.push(g = { title: title, orders: [] });
+      return g;
+    }
+    list.forEach(function (o) {
+      var day = SJ.dayOf(o.collectAt);
+      var title;
+      if (!o.collectAt) title = 'No time yet';
+      else if (day < today) title = 'Earlier, not yet collected';
+      else title = (day === today ? 'Today, ' : day === tomorrow ? 'Tomorrow, ' : '') + SJ.formatWhen(day + ' 00:00').split(',')[0];
+      group(title).orders.push(o);
+    });
+    return groups;
+  }
+
+  function searchBox() {
+    var input = el('input', {
+      type: 'search', id: 'order-search', 'aria-label': 'Search orders', autocomplete: 'off', spellcheck: 'false',
+      placeholder: 'Search name, invoice, phone or email', 'data-role': 'search'
+    });
+    input.value = state.query;
+    input.addEventListener('input', function () {
+      state.query = input.value;
+      state.selected = {};
+      state.bulk = null;
+      state.bulkFailures = [];
+      state.bulkPreview = null;
+      renderOrders();
+    });
+    return el('div', { class: 'field search-field' }, input);
   }
 
   function restoreFocus() {
@@ -385,9 +508,14 @@
       if (f.status === REQUESTED && !state.config.quote && countOf(REQUESTED) === 0 && state.filter !== 'requests') return;
       var btn = el('button', {
         type: 'button', class: 'chip', 'aria-pressed': state.filter === f.id ? 'true' : 'false', 'data-role': 'chip-' + f.id
-      }, f.label, el('span', { class: 'chip-count' }, String(countOf(f.status))));
+      }, f.label, el('span', { class: 'chip-count' }, String(filterCount(f))));
       btn.addEventListener('click', function () {
         state.filter = f.id;
+        state.query = '';
+        state.selected = {};
+        state.bulk = null;
+        state.bulkFailures = [];
+        state.bulkPreview = null;
         state.confirm = null;
         state.preview = null;
         state.moreOpen = null;
@@ -401,8 +529,10 @@
 
   function listSummary(f, list) {
     var n = list.length;
+    if (searching()) return plural(n, 'order') + ' match \u201c' + state.query.trim() + '\u201d.';
     if (!n) return '';
     var total = SJ.money(sumOf(list), state.config.currency);
+    if (f.id === 'collections') return plural(n, 'collection') + ' to hand over.';
     if (f.id === 'requests') return plural(n, 'new request') + ' to set a delivery fee for and accept.';
     if (f.id === 'awaiting') return plural(n, 'order') + ' waiting for payment, ' + total + ' in total.';
     if (f.id === 'paid') return plural(n, 'paid order') + ' to deliver, ' + total + ' in total.';
@@ -417,7 +547,265 @@
       refresh({});
     });
     syncRefreshButton();
-    return el('div', { class: 'list-head' }, el('p', { class: 'list-total' }, listSummary(f, list)), refreshBtn);
+    var head = el('div', { class: 'list-head' }, el('p', { class: 'list-total' }, listSummary(f, list)),
+      searching() ? actionButton('Clear search', 'btn-quiet', 'clear-search', function () {
+        state.query = '';
+        state.focus = { role: 'search' };
+        renderOrders();
+      }) : refreshBtn);
+    if (!pickable) return head;
+
+    var picked = list.filter(function (o) { return state.selected[o.invoice]; }).length;
+    var all = el('input', { type: 'checkbox', id: 'select-all', 'data-role': 'select-all' });
+    all.checked = picked === list.length;
+    all.indeterminate = picked > 0 && picked < list.length;
+    all.addEventListener('change', function () {
+      state.selected = {};
+      if (all.checked) list.slice(0, BULK_MAX).forEach(function (o) { state.selected[o.invoice] = true; });
+      state.bulk = null;
+      state.bulkFailures = [];
+      state.bulkPreview = null;
+      state.focus = { role: 'select-all' };
+      renderOrders();
+    });
+    return el('div', { class: 'stack-sm' }, head,
+      el('label', { class: 'check select-all' }, all,
+        el('span', null, list.length > BULK_MAX ? 'Select the first ' + BULK_MAX : 'Select all')));
+  }
+
+  // ---------- Several orders at once ----------
+
+  var pickable = false; // the list shown has tick boxes
+
+  // The same rules as the service: which customers an action emails.
+  function emailsFor(op, o) {
+    if (!SJ.isEmail(o.email)) return false;
+    if (op === 'paid') return o.status === AWAITING;
+    if (op === 'decline') return o.status === REQUESTED;
+    if (op === 'cancel') return o.status === PAID && o.collect && !!o.collectAt;
+    if (op === 'email') return o.status !== CANCELLED && o.status !== REQUESTED;
+    return op === 'message';
+  }
+
+  function chosenOrders(list) {
+    return list.filter(function (o) { return state.selected[o.invoice]; });
+  }
+
+  function bulkActions(f, chosen) {
+    var msg = { op: 'message', label: 'Send a message' };
+    var email = { op: 'email', label: 'Email invoices' };
+    var cancel = { op: 'cancel', label: 'Cancel', cls: 'btn-danger' };
+    var collect = chosen.every(function (o) { return o.collect; });
+    var deliver = chosen.every(function (o) { return !o.collect; });
+    if (f.id === 'requests') return [{ op: 'decline', label: 'Decline', cls: 'btn-danger' }, msg];
+    if (f.id === 'awaiting') return [{ op: 'paid', label: 'Mark paid', cls: 'btn-primary' }, email, msg, cancel];
+    if (f.id === 'paid') {
+      return [
+        { op: 'delivered', label: collect ? 'Mark collected' : deliver ? 'Mark delivered' : 'Mark delivered or collected', cls: 'btn-primary' },
+        { op: 'copy', label: 'Copy hand-over list', run: function () { copyHandOver(chosen); } },
+        email, msg, cancel];
+    }
+    if (f.id === 'delivered') return [email, msg];
+    return [{ op: 'reopen', label: 'Reopen', cls: 'btn-primary' }, msg];
+  }
+
+  function clearBulk(focusRole) {
+    state.selected = {};
+    state.bulk = null;
+    state.bulkFailures = [];
+    state.bulkPreview = null;
+    state.focus = { role: focusRole || 'select-all' };
+    renderOrders();
+  }
+
+  function bulkBar(f, list) {
+    var chosen = chosenOrders(list);
+    if (!chosen.length) return null;
+    var c = state.config;
+    var bar = el('section', { class: 'bulk-bar stack-sm', 'aria-label': 'Selected orders' });
+    bar.appendChild(el('p', { class: 'bulk-count', role: 'status' },
+      plural(chosen.length, 'order') + ' selected \u00b7 ' + SJ.money(sumOf(chosen), c.currency)));
+    if (state.bulkFailures.length) {
+      bar.appendChild(el('div', { class: 'alert alert-bad', role: 'alert' },
+        el('p', null, 'These were not changed and are still ticked:'),
+        el('ul', { class: 'bulk-failures' }, state.bulkFailures.map(function (r) { return el('li', null, r.invoice + ': ' + r.message); }))));
+    }
+    if (state.bulk) {
+      bar.appendChild(bulkConfirm(f, chosen));
+      return bar;
+    }
+    var working = !!state.working;
+    var row = el('div', { class: 'order-actions' });
+    bulkActions(f, chosen).forEach(function (a) {
+      row.appendChild(actionButton(a.label, a.cls || 'btn-quiet', 'bulk-' + a.op, a.run || function () { askBulk(a.op); }, working));
+    });
+    row.appendChild(actionButton('Clear', 'btn-quiet', 'bulk-clear', function () { clearBulk(); }, working));
+    bar.appendChild(row);
+    if (state.bulkPreview) {
+      bar.appendChild(el('p', { class: 'fine' }, 'Copying did not work here. Press and hold the list to copy it.'));
+      bar.appendChild(el('div', { class: 'preview', 'data-role': 'bulk-preview', tabindex: '-1' }, state.bulkPreview));
+    }
+    return bar;
+  }
+
+  function askBulk(op) {
+    var c = state.config;
+    state.bulk = { op: op, reason: '', subject: op === 'message' ? c.brand + ' update' : '', message: '', error: null };
+    state.bulkPreview = null;
+    state.focus = { role: op === 'message' ? 'bulk-message' : op === 'decline' ? 'bulk-reason' : 'bulk-confirm' };
+    renderOrders();
+  }
+
+  function bulkConfirm(f, chosen) {
+    var b = state.bulk;
+    var c = state.config;
+    var total = SJ.money(sumOf(chosen), c.currency);
+    var mailOnly = b.op === 'email' || b.op === 'message';
+    var targets = mailOnly ? chosen.filter(function (o) { return SJ.isEmail(o.email); }) : chosen;
+    var skipped = chosen.length - targets.length;
+    var needed = targets.filter(function (o) { return emailsFor(b.op, o); }).length;
+    var n = chosen.length;
+    var collect = chosen.every(function (o) { return o.collect; });
+    var texts = {
+      paid: 'Mark ' + plural(n, 'order') + ' paid (' + total + ')?' + (needed ? ' ' + plural(needed, 'customer') + ' with an email ' + (needed === 1 ? 'gets' : 'get') + ' the paid invoice.' : ''),
+      delivered: 'Mark ' + plural(n, 'order') + ' ' + (collect ? 'collected' : 'delivered') + '?',
+      cancel: 'Cancel ' + plural(n, 'order') + ' (' + total + ')?' + (needed ? ' ' + plural(needed, 'customer') + ' with a collection booked ' + (needed === 1 ? 'gets' : 'get') + ' a cancellation for the calendar invite.' : ''),
+      reopen: 'Reopen ' + plural(n, 'order') + '? They go back to Awaiting payment.',
+      decline: 'Decline ' + plural(n, 'request') + '? They are cancelled' + (needed ? ', and ' + plural(needed, 'customer') + ' with an email ' + (needed === 1 ? 'is' : 'are') + ' told.' : '.'),
+      email: 'Email the invoice to ' + plural(targets.length, 'customer') + '?',
+      message: 'Email your own message to ' + plural(targets.length, 'customer') + '. It starts with "Hi" and their name.'
+    };
+    var box = el('div', { class: 'stack-sm' });
+    var text = texts[b.op];
+    if (skipped) text += ' ' + plural(skipped, 'selected order') + ' with no email address ' + (skipped === 1 ? 'is' : 'are') + ' left out.';
+    box.appendChild(el('p', null, text));
+
+    if (b.op === 'decline') {
+      var reason = el('textarea', { id: 'bulk-reason', rows: '2', maxlength: '300', 'data-role': 'bulk-reason' });
+      reason.value = b.reason;
+      reason.addEventListener('input', function () { b.reason = reason.value; });
+      box.appendChild(el('div', { class: 'field' }, el('label', { for: 'bulk-reason' }, 'Reason (optional, emailed to each customer)'), reason));
+    }
+    if (b.op === 'message') {
+      var subject = el('input', { type: 'text', id: 'bulk-subject', maxlength: '120', autocomplete: 'off', 'data-role': 'bulk-subject' });
+      subject.value = b.subject;
+      subject.addEventListener('input', function () { b.subject = subject.value; });
+      var message = el('textarea', { id: 'bulk-message', rows: '5', maxlength: '2000', 'data-role': 'bulk-message' });
+      message.value = b.message;
+      message.addEventListener('input', function () { b.message = message.value; });
+      box.appendChild(el('div', { class: 'field' }, el('label', { for: 'bulk-subject' }, 'Subject'), subject));
+      box.appendChild(el('div', { class: 'field' }, el('label', { for: 'bulk-message' }, 'Message'), message));
+    }
+
+    var left = state.emailsLeft;
+    var over = needed > 0 && typeof left === 'number' && needed > left;
+    if (over) {
+      box.appendChild(el('div', { class: 'alert alert-bad', role: 'alert' },
+        'This sends ' + plural(needed, 'email') + ', but only ' + left + ' can be sent today. Pick fewer orders, or try again tomorrow.'));
+    } else if (needed > 0 && typeof left === 'number') {
+      box.appendChild(el('p', { class: 'fine' }, plural(needed, 'email') + ' to send. ' + left + ' left today.'));
+    }
+    if (b.error) box.appendChild(el('div', { class: 'alert alert-bad', role: 'alert' }, b.error));
+
+    var labels = { paid: 'Yes, mark paid', delivered: collect ? 'Yes, mark collected' : 'Yes, mark delivered', cancel: 'Yes, cancel', reopen: 'Yes, reopen', decline: 'Yes, decline', email: 'Yes, email', message: 'Send' };
+    var working = state.working === 'bulk';
+    box.appendChild(el('div', { class: 'order-actions' },
+      actionButton(working ? 'Working\u2026' : labels[b.op], b.op === 'cancel' || b.op === 'decline' ? 'btn-danger' : 'btn-primary', 'bulk-confirm',
+        function () { runBulk(); }, working || over || !targets.length),
+      actionButton('Back', 'btn-quiet', 'bulk-back', function () {
+        state.bulk = null;
+        state.focus = { role: 'bulk-' + b.op };
+        renderOrders();
+      }, working)));
+    return box;
+  }
+
+  async function runBulk() {
+    if (state.working) return;
+    var b = state.bulk;
+    var chosen = chosenOrders(visibleOrders(currentFilter()));
+    var targets = b.op === 'email' || b.op === 'message' ? chosen.filter(function (o) { return SJ.isEmail(o.email); }) : chosen;
+    if (b.op === 'message' && !b.message.trim()) {
+      b.error = 'Write the message to send.';
+      state.focus = { role: 'bulk-message' };
+      renderOrders();
+      return;
+    }
+    if (!targets.length) return;
+    state.working = 'bulk';
+    b.error = null;
+    renderOrders();
+    try {
+      var res = await SJ.api('bulk', {
+        key: state.key, op: b.op, invoices: targets.map(function (o) { return o.invoice; }),
+        reason: b.reason.trim(), subject: b.subject.trim(), message: b.message
+      });
+      state.version++;
+      res.results.forEach(function (r) { if (r.order) replaceOrder(r.order); });
+      if (typeof res.emailsLeft === 'number') state.emailsLeft = res.emailsLeft;
+      var failed = res.results.filter(function (r) { return !r.ok; });
+      var done = res.results.length - failed.length;
+      var emailed = res.results.filter(function (r) { return r.emailed === true; }).length;
+      var unsent = res.results.filter(function (r) { return r.emailed === false; }).length;
+      state.working = null;
+      state.bulk = null;
+      state.selected = {};
+      failed.forEach(function (r) { state.selected[r.invoice] = true; });
+      state.bulkFailures = failed;
+      var done1 = {
+        paid: ' marked paid.', delivered: ' marked ' + (chosen.every(function (o) { return o.collect; }) ? 'collected.' : 'delivered.'),
+        cancel: ' cancelled.', reopen: ' reopened.', decline: ' declined.', email: ' emailed the invoice.', message: ' sent your message.'
+      }[b.op];
+      var who = b.op === 'email' || b.op === 'message' ? plural(done, 'customer') : plural(done, b.op === 'decline' ? 'request' : 'order');
+      var text = who + done1;
+      if (b.op === 'paid' && emailed) text += ' ' + plural(emailed, 'paid invoice') + ' emailed.';
+      if (unsent) text += ' ' + plural(unsent, 'email') + ' did not send.';
+      if (failed.length) text += ' ' + plural(failed.length, 'order') + ' could not be changed.';
+      state.focus = { role: failed.length ? 'select-all' : 'search' };
+      renderOrders();
+      SJ.toast(text, failed.length || unsent ? 'bad' : undefined);
+    } catch (err) {
+      state.working = null;
+      if (err.code === 'unauthorized') {
+        lock(err.message);
+        return;
+      }
+      if (err.data && typeof err.data.emailsLeft === 'number') state.emailsLeft = err.data.emailsLeft;
+      b.error = err.message;
+      state.focus = { role: 'bulk-confirm' };
+      renderOrders();
+    }
+  }
+
+  // A list to hand to a driver or keep at the collection spot: deliveries first, then collections by time.
+  function handOverText(chosen) {
+    var c = state.config;
+    var deliveries = chosen.filter(function (o) { return !o.collect; });
+    var collections = chosen.filter(function (o) { return o.collect; }).sort(byCollectTime);
+    var lines = [c.brand.toUpperCase() + ': ' + plural(chosen.length, 'order') + ' to hand over'];
+    var n = 0;
+    function add(o, where) {
+      n++;
+      lines.push('', n + '. ' + o.name + ' (' + o.invoice + ')', '   ' + o.qty + ' x ' + c.product, '   ' + where);
+      if (o.contact) lines.push('   Contact: ' + o.contact);
+      if (o.notes) lines.push('   Note: ' + o.notes);
+    }
+    deliveries.forEach(function (o) { add(o, 'Deliver to: ' + (o.address || 'no address yet')); });
+    collections.forEach(function (o) { add(o, 'Collecting: ' + (o.collectAt ? SJ.formatWhen(o.collectAt) : 'no time yet')); });
+    return lines.join('\n');
+  }
+
+  async function copyHandOver(chosen) {
+    var text = handOverText(chosen);
+    var ok = await SJ.copyText(text);
+    if (ok) {
+      state.bulkPreview = null;
+      SJ.toast('Hand-over list copied: ' + plural(chosen.length, 'order') + '.');
+      return;
+    }
+    state.bulkPreview = text;
+    state.focus = { role: 'bulk-preview' };
+    renderOrders();
   }
 
   function emptyState(f) {
@@ -477,8 +865,23 @@
     });
     cards[o.invoice] = card;
 
+    var badge = el('span', { class: 'badge' + (awaiting || request ? ' badge--attention' : '') }, o.invoice);
+    if (pickable) {
+      var pick = el('input', { type: 'checkbox', 'data-role': 'pick', 'aria-label': 'Select ' + o.invoice + ', ' + o.name });
+      pick.checked = !!state.selected[o.invoice];
+      pick.addEventListener('change', function () {
+        if (pick.checked) state.selected[o.invoice] = true;
+        else delete state.selected[o.invoice];
+        state.bulk = null;
+        state.bulkPreview = null;
+        state.focus = { invoice: o.invoice, role: 'pick' };
+        renderOrders();
+      });
+      badge = el('label', { class: 'pick' }, pick, badge);
+      if (state.selected[o.invoice]) card.classList.add('order--picked');
+    }
     card.appendChild(el('div', { class: 'order-head' },
-      el('span', { class: 'badge' + (awaiting || request ? ' badge--attention' : '') }, o.invoice),
+      badge,
       el('span', { class: 'order-amount' }, SJ.money(o.total, sym))));
 
     card.appendChild(el('div', { class: 'order-who' },

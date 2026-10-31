@@ -597,9 +597,10 @@ async function toast(page, expected) {
   }, typeof expected === 'string' ? expected : { source: expected.source });
 }
 
+// The status chips. Collections is a view across statuses and has its own tests.
 const chipCounts = (page) => page.evaluate(() => {
   const out = {};
-  document.querySelectorAll('.chip').forEach((c) => {
+  document.querySelectorAll('.chip:not([data-role="chip-collections"])').forEach((c) => {
     out[c.getAttribute('data-role').replace('chip-', '')] = Number(c.querySelector('.chip-count').textContent);
   });
   return out;
@@ -1335,6 +1336,162 @@ test('admin: a DM order can be a collection, with no delivery fee', async (t) =>
   noErrors(errors);
 });
 
+// --- Several orders at once ---
+
+const pick = (page, invoice) => card(page, invoice).locator('[data-role="pick"]').check();
+
+test('admin: Greg ticks orders and marks them paid together, after a check', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  // Awaiting payment: SJ-0005 (R230, has an email) and SJ-0004 (R110, a DM order without one).
+  assert.equal(await page.locator('.bulk-bar').count(), 0, 'no bar until something is ticked');
+  await pick(page, 'SJ-0005');
+  assert.equal(await text(page, '.bulk-count'), '1 order selected · R230');
+  await page.check('#select-all');
+  assert.equal(await text(page, '.bulk-count'), '2 orders selected · R340');
+  assert.equal(await page.isChecked('[data-role="pick"] >> nth=1'), true);
+
+  dev.gas.mail.length = 0;
+  await page.click('[data-role="bulk-paid"]');
+  assert.match(await text(page, '.bulk-bar'), /Mark 2 orders paid \(R340\)\? 1 customer with an email gets the paid invoice\./);
+  assert.match(await text(page, '.bulk-bar'), /1 email to send\. \d+ left today\./);
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('data-role')), 'bulk-confirm');
+
+  // Back changes nothing.
+  await page.click('[data-role="bulk-back"]');
+  assert.equal(serverStatus(dev, 'SJ-0005').Status, 'Awaiting payment');
+  await page.click('[data-role="bulk-paid"]');
+  await page.click('[data-role="bulk-confirm"]');
+  await toast(page, '2 orders marked paid. 1 paid invoice emailed.');
+  assert.equal(serverStatus(dev, 'SJ-0004').Status, 'Paid');
+  assert.equal(serverStatus(dev, 'SJ-0005').Status, 'Paid');
+  assert.equal(dev.gas.mail.filter((m) => /\(paid\)/.test(m.subject)).length, 1);
+  assert.equal(await page.locator('.bulk-bar').count(), 0, 'the ticks are cleared');
+  assert.match(await text(page, '.empty'), /Nothing is waiting for payment/);
+  noErrors(errors);
+});
+
+test('admin: orders a bulk action cannot change stay ticked with the reason', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await page.check('#select-all');
+  await page.click('[data-role="bulk-cancel"]');
+  assert.match(await text(page, '.bulk-bar'), /Cancel 2 orders \(R340\)\?/);
+  // Meanwhile SJ-0005 is cancelled on another phone and reopened... then delivered is impossible:
+  // simplest real case: it was already marked paid and then delivered elsewhere.
+  dev.gas.call({ action: 'setStatus', key: dev.key, invoice: 'SJ-0005', status: 'Paid' });
+  dev.gas.call({ action: 'setStatus', key: dev.key, invoice: 'SJ-0005', status: 'Delivered' });
+  await page.click('[data-role="bulk-confirm"]');
+  await toast(page, '1 order cancelled. 1 order could not be changed.');
+  assert.equal(serverStatus(dev, 'SJ-0004').Status, 'Cancelled');
+  assert.match(await text(page, '.bulk-bar'), /These were not changed and are still ticked:\s*SJ-0005: An order that is Delivered cannot be changed to Cancelled\./);
+  await page.click('[data-role="bulk-clear"]');
+  assert.equal(await page.locator('.bulk-bar').count(), 0);
+  noErrors(errors);
+});
+
+test('admin: Greg emails his own message to ticked customers', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await page.check('#select-all');
+  await page.click('[data-role="bulk-message"]');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'bulk-message');
+  assert.match(await text(page, '.bulk-bar'), /Email your own message to 1 customer\. .* 1 selected order with no email address is left out\./);
+  assert.equal(await page.inputValue('#bulk-subject'), 'Supa Juice update');
+  await page.click('[data-role="bulk-confirm"]');
+  assert.match(await text(page, '.bulk-bar'), /Write the message to send\./);
+  await page.fill('#bulk-subject', 'Deliveries tomorrow');
+  await page.fill('#bulk-message', 'Deliveries are a day late this week.\nSorry!');
+  dev.gas.mail.length = 0;
+  await page.click('[data-role="bulk-confirm"]');
+  await toast(page, '1 customer sent your message.');
+  assert.equal(dev.gas.mail.length, 1);
+  assert.equal(dev.gas.mail[0].to, 'pieter@example.com');
+  assert.equal(dev.gas.mail[0].subject, 'Deliveries tomorrow');
+  assert.match(dev.gas.mail[0].body, /^Hi Pieter van der Merwe,\n\nDeliveries are a day late this week\.\nSorry!/);
+  assert.equal(serverStatus(dev, 'SJ-0005').Status, 'Awaiting payment', 'a message changes nothing');
+  noErrors(errors);
+});
+
+test('admin: with few emails left Greg is warned, and a bulk action that needs more is held back', async (t) => {
+  const { dev, page } = await open(t);
+  dev.gas.call({ action: 'order', name: 'Extra', email: 'extra@example.com', address: '1 Long St', qty: 1, notes: '', website: '', requestId: 'extra_0000001', expectedTotal: 70 });
+  dev.gas.mailQuota.left = 1;
+  await page.goto(dev.adminUrl());
+  await page.waitForSelector('.order');
+  assert.match(await text(page, '#panel-orders .alert-wait'), /Only 1 email can be sent today/);
+  await page.check('#select-all');
+  await page.click('[data-role="bulk-paid"]');
+  assert.match(await text(page, '.bulk-bar'), /This sends 2 emails, but only 1 can be sent today\./);
+  assert.equal(await page.locator('[data-role="bulk-confirm"]').isDisabled(), true);
+});
+
+test('admin: a hand-over list of ticked paid orders is copied for a driver', async (t) => {
+  const { page, errors } = await openAdmin(t, { collections: true });
+  await page.waitForSelector('.order');
+  await chip(page, 'paid');
+  await page.check('#select-all');
+  assert.equal(await text(page, '[data-role="bulk-delivered"]'), 'Mark delivered or collected');
+  await page.click('[data-role="bulk-copy"]');
+  await toast(page, 'Hand-over list copied: 2 orders.');
+  assert.equal(await clipboard(page), [
+    'SUPA JUICE: 2 orders to hand over',
+    '',
+    '1. Liam Peters (SJ-0003)',
+    '   1 x Running gel sachet',
+    '   Deliver to: 3 Kloof Nek Rd, Tamboerskloof',
+    '   Contact: 082 555 0147',
+    '   Note: Leave with the guard',
+    '',
+    '2. Jess Adams (SJ-0007)',
+    '   2 x Running gel sachet',
+    '   Collecting: Thu 29 Oct, 18:00',
+    '   Contact: @jessruns'
+  ].join('\n'));
+  noErrors(errors);
+});
+
+test('admin: search finds orders by name, invoice, phone or email across every section', async (t) => {
+  const { page, errors } = await openAdmin(t);
+  await page.waitForSelector('.order');
+  await page.fill('#order-search', 'thandi');
+  assert.equal(await text(page, '.list-total'), '1 order matches “thandi”.'.replace('matches', 'match'));
+  assert.equal(await page.locator('article.order').count(), 1);
+  assert.equal(await page.locator('[data-role="pick"]').count(), 0, 'no ticking across sections');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'order-search', 'typing carries on');
+  await page.fill('#order-search', '071 987');
+  assert.equal(await page.locator('article.order[aria-label="Order SJ-0005"]').count(), 1, 'phone digits match with spaces');
+  await page.fill('#order-search', 'sj-0002');
+  assert.equal(await page.locator('article.order[aria-label="Order SJ-0002"]').count(), 1, 'a cancelled order is found too');
+  await page.fill('#order-search', 'nobody here');
+  assert.match(await text(page, '.empty'), /No orders match/);
+  await page.click('[data-role="clear-search"]');
+  assert.equal(await page.inputValue('#order-search'), '');
+  assert.equal(await page.locator('article.order').count(), 2, 'back to Awaiting payment');
+  noErrors(errors);
+});
+
+test('admin: the Collections view lists collections still to hand over, by day and time', async (t) => {
+  const { dev, page, errors } = await open(t, { collections: true });
+  await page.clock.setFixedTime(new Date('2026-10-28T15:41:00+02:00'));
+  dev.gas.call({ action: 'create', key: dev.key, name: 'Later Pal', qty: 1, collect: true, collectAt: '2026-10-30 09:00', requestId: 'later_000001' });
+  dev.gas.call({ action: 'create', key: dev.key, name: 'Open Time', qty: 1, collect: true, requestId: 'open_0000001' });
+  await page.goto(dev.adminUrl());
+  await page.waitForSelector('.order');
+  assert.equal(await text(page, '[data-role="chip-collections"] .chip-count'), '4');
+  await chip(page, 'collections');
+  assert.equal(await text(page, '.list-total'), '4 collections to hand over.');
+  assert.deepEqual(await page.locator('.collect-day').allInnerTexts(), ['Tomorrow, Thu 29 Oct', 'Fri 30 Oct', 'No time yet']);
+  assert.deepEqual(await page.locator('article.order').evaluateAll((ns) => ns.map((n) => n.getAttribute('aria-label'))),
+    ['Order SJ-0006', 'Order SJ-0007', 'Order SJ-0008', 'Order SJ-0009'], 'by time, the open one last');
+  assert.equal(await page.locator('[data-role="pick"]').count(), 0);
+  // Marked collected, it leaves the list.
+  await card(page, 'SJ-0007').locator('[data-role="mark-delivered"]').click();
+  await toast(page, 'SJ-0007 marked collected.');
+  assert.equal(await page.locator('article.order').count(), 3);
+  noErrors(errors);
+});
+
 // --- Collection times ---
 
 test('admin: collection orders show their time, and a paid one can be moved with a new invite emailed', async (t) => {
@@ -1523,8 +1680,9 @@ test('admin: the photo preview loads when the section opens, and says so when it
   await page.click('.tab[data-tab="settings"]');
   await page.waitForSelector('#settings-form');
   await page.click('#group-photo > summary');
+  // Opening the section tries again by itself, so wait for that try to fail as well.
+  await page.waitForFunction(() => /The preview could not load/.test((document.querySelector('#photo-section .photo-note') || {}).textContent || ''));
   await page.waitForSelector('[data-role="photo-retry"]');
-  assert.match(await text(page, '#photo-section .photo-note'), /The preview could not load/);
   assert.equal(await page.locator('#photo-section figure').getAttribute('style'), 'aspect-ratio: 300 / 200', 'the space is kept');
   fail = false;
   await page.click('[data-role="photo-retry"]');

@@ -1482,3 +1482,114 @@ test('Greg sees every collection time for DM orders, with full ones marked; the 
   assert.ok(!('area' in c));
   assert.ok(!('delivery_area' in gas.call({ action: 'getSettings', key }).values));
 });
+
+// ---------------------------------------------------------------------------
+// Several orders at once
+// ---------------------------------------------------------------------------
+
+const bulk = (gas, key, op, invoices, over) => gas.call(Object.assign({ action: 'bulk', key, op, invoices }, over));
+
+test('several orders can be marked paid at once; each customer gets the paid invoice', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call(order({ name: 'Bob', email: 'bob@example.com' }));
+  gas.call(dm(key, { name: 'No Email' }));
+  gas.mail.length = 0;
+  const r = bulk(gas, key, 'paid', ['SJ-0001', 'SJ-0002', 'SJ-0003', 'SJ-0001']);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.results.map((x) => [x.invoice, x.ok, x.order.status, x.emailed]), [
+    ['SJ-0001', true, 'Paid', true], ['SJ-0002', true, 'Paid', true], ['SJ-0003', true, 'Paid', undefined]
+  ], 'each order once, in the order picked');
+  assert.deepEqual(gas.mail.map((m) => m.subject), ['Supa Juice invoice SJ-0001 (paid)', 'Supa Juice invoice SJ-0002 (paid)']);
+  assert.equal(r.emailsLeft, gas.mailQuota.left);
+  assert.equal(typeof gas.call({ action: 'list', key }).emailsLeft, 'number', 'the admin page sees how many emails are left');
+});
+
+test('an order that cannot change does not stop the others', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call(order({ name: 'Bob' }));
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0002', status: 'Paid' });
+  const r = bulk(gas, key, 'reopen', ['SJ-0001', 'SJ-0002', 'SJ-0099']);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.results.map((x) => [x.invoice, x.ok]), [['SJ-0001', true], ['SJ-0002', true], ['SJ-0099', false]]);
+  assert.match(r.results[2].message, /not found/);
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0002', status: 'Paid' });
+  const c = bulk(gas, key, 'delivered', ['SJ-0001', 'SJ-0002']);
+  assert.deepEqual(c.results.map((x) => x.ok), [false, true]);
+  assert.match(c.results[0].message, /Awaiting payment cannot be changed to Delivered/);
+});
+
+test('bulk cancel, decline, email and reopen follow the single-order rules', () => {
+  const { gas, key } = readyQuote();
+  gas.call(request());
+  gas.call(request({ name: 'Bob', email: 'bob@example.com' }));
+  gas.call(pickup({ collectAt: '2026-10-29 17:00' }));
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0003', status: 'Paid' });
+  gas.mail.length = 0;
+
+  const d = bulk(gas, key, 'decline', ['SJ-0001', 'SJ-0002'], { reason: 'Too far for now.' });
+  assert.deepEqual(d.results.map((x) => x.order.status), ['Cancelled', 'Cancelled']);
+  assert.equal(gas.mail.length, 2);
+  assert.match(gas.mail[1].body, /Too far for now\./);
+
+  gas.mail.length = 0;
+  const c = bulk(gas, key, 'cancel', ['SJ-0003']);
+  assert.equal(c.results[0].order.status, 'Cancelled');
+  assert.equal(gas.mail[0].subject, 'Supa Juice collection cancelled: SJ-0003', 'the calendar invite is cancelled');
+
+  gas.mail.length = 0;
+  const e = bulk(gas, key, 'email', ['SJ-0003']);
+  assert.equal(e.results[0].ok, false, 'a cancelled order is not emailed an invoice');
+  assert.equal(gas.mail.length, 0);
+  assert.deepEqual(bulk(gas, key, 'reopen', ['SJ-0003']).results.map((x) => x.order.status), ['Awaiting payment']);
+});
+
+test('Greg can email his own message to several customers, line breaks kept', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call(order({ name: 'Bob', email: 'bob@example.com' }));
+  gas.call(dm(key, { name: 'No Email' }));
+  gas.mail.length = 0;
+  assert.equal(bulk(gas, key, 'message', ['SJ-0001'], { message: '   ' }).error, 'invalid');
+  const r = bulk(gas, key, 'message', ['SJ-0001', 'SJ-0002', 'SJ-0003'], {
+    subject: 'Collections tomorrow', message: 'Collections move to 18:00 tomorrow.\r\n\r\n\r\n\r\nSee you then!\u0007'
+  });
+  assert.deepEqual(r.results.map((x) => x.ok), [true, true, false]);
+  assert.match(r.results[2].message, /has no email address/);
+  assert.equal(gas.mail.length, 2);
+  assert.equal(gas.mail[0].subject, 'Collections tomorrow');
+  assert.equal(gas.mail[0].replyTo, 'greg@example.com');
+  assert.equal(gas.mail[1].body, 'Hi Bob,\n\nCollections move to 18:00 tomorrow.\n\nSee you then!\n\nSupa Juice\nOrder SJ-0002');
+  const plain = bulk(gas, key, 'message', ['SJ-0001'], { message: 'Thanks!' });
+  assert.equal(plain.ok, true);
+  assert.equal(gas.mail[2].subject, 'Supa Juice order SJ-0001', 'a subject is made up when left out');
+  // Nothing changes on the orders.
+  assert.deepEqual(gas.rows('Orders').map((row) => row.Status), ['Awaiting payment', 'Awaiting payment', 'Awaiting payment']);
+});
+
+test('a bulk action that would go over today\'s email limit is refused before anything changes', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call(order({ name: 'Bob' }));
+  gas.call(order({ name: 'Cat' }));
+  gas.mailQuota.left = 2;
+  const r = bulk(gas, key, 'paid', ['SJ-0001', 'SJ-0002', 'SJ-0003']);
+  assert.equal(r.error, 'quota');
+  assert.equal(r.message, 'This would send 3 emails, but only 2 can be sent today. Pick fewer orders, or try again tomorrow.');
+  assert.equal(r.emailsLeft, 2);
+  assert.ok(gas.rows('Orders').every((row) => row.Status === 'Awaiting payment'), 'nothing was marked paid');
+  // Actions that send nothing are not limited.
+  assert.equal(bulk(gas, key, 'cancel', ['SJ-0001', 'SJ-0002', 'SJ-0003']).ok, true);
+});
+
+test('bulk actions need the key, a known action and 1 to 50 orders', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  assert.equal(bulk(gas, 'wrong', 'paid', ['SJ-0001']).error, 'unauthorized');
+  assert.equal(bulk(gas, key, 'delete', ['SJ-0001']).error, 'bad_request');
+  assert.equal(bulk(gas, key, 'paid', []).error, 'invalid');
+  assert.equal(bulk(gas, key, 'paid', 'SJ-0001').error, 'invalid');
+  const many = Array.from({ length: 51 }, (_, i) => 'SJ-' + String(i + 1).padStart(4, '0'));
+  assert.match(bulk(gas, key, 'paid', many).message, /at most 50/);
+});

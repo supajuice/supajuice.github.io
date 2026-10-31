@@ -211,6 +211,9 @@ Put your **order page address** in your Instagram bio. That's it, you're open.
 | --- | --- |
 | **A delivery request comes in** | You get an email alert. It shows under **New requests**. Type the delivery fee for that address and tap **Accept and email invoice**. The customer then gets the invoice with the bank details. Or **More** → **Decline**. |
 | **A collection order comes in** | It shows under **Awaiting payment** with the day and time the customer picked. The customer already has the bank details and their invoice PDF. When you mark it paid, they also get a calendar invite. |
+| **Several orders at once** | Tick the boxes on the orders (or **Select all**), then pick an action in the bar at the bottom: mark paid, delivered or collected, email invoices, send a message, cancel, decline or reopen. |
+| **List for a driver** | Under **Paid**, tick the orders and tap **Copy hand-over list**, then paste it into WhatsApp. |
+| **Find an order** | Type a name, invoice number, phone or email into the search box on the Orders tab. |
 | **Move a paid collection** | On the order, tap **More** → **Change collection time**. The customer is emailed an updated calendar invite. |
 | **Someone orders by DM** | Admin page → **New order**. Enter the quantity and their name (email optional), then tap **Create order**. Tap **Copy invoice** and paste it into the DM. |
 | **Money arrives** | Find the invoice number (e.g. SJ-0004) in your bank statement reference. Tap **Mark paid** on that order. The customer is emailed the paid invoice. |

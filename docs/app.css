@@ -128,6 +128,9 @@ a {
   max-width: 46rem;
 }
 
+.stack-sm > * + * {
+  margin-top: var(--s3);
+}
 .stack > * + * {
   margin-top: var(--s4);
 }
@@ -202,6 +205,7 @@ a {
 .input,
 .field input[type='text'],
 .field input[type='email'],
+.field input[type='search'],
 .field input[type='password'],
 .field input[type='number'],
 .field input[type='date'],
@@ -881,6 +885,59 @@ a {
   justify-content: space-between;
   gap: var(--s3);
 }
+/* ---------- Admin: search, tick boxes, several orders at once ---------- */
+
+.search-field input {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.select-all {
+  min-height: 44px;
+  padding: 0;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 44px;
+  margin: -10px 0;
+  cursor: pointer;
+}
+.pick input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.order--picked {
+  box-shadow: inset 4px 0 0 var(--ink);
+  padding-left: var(--s4);
+}
+.bulk-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  margin: var(--s4) calc(-1 * var(--s4)) 0;
+  padding: var(--s4) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom));
+  border-top: 2px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 0 -10px 24px -16px rgba(0, 0, 0, 0.45);
+}
+.bulk-count {
+  font-weight: 700;
+}
+.bulk-failures {
+  margin: var(--s2) 0 0;
+  padding-left: 1.2em;
+}
+.collect-day {
+  margin-top: var(--s6);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
 .list-total {
   min-width: 0;
   color: var(--ink-soft);
