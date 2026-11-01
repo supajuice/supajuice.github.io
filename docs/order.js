@@ -18,7 +18,7 @@
   var busy = false;
   var current = null;    // the order response being shown on the done view
   var photo = null;      // { version, alt, width, height } from the config, or null
-  var choice = null;     // 'collect' or 'deliver', null until the customer picks one
+  var choice = null;     // 'collect', 'deliver' (to the door) or 'locker', null until the customer picks one
   var paying = false;    // waiting for Paystack's payment page
 
   function showView(id) {
@@ -77,12 +77,13 @@
     $('order-form').addEventListener('submit', onSubmit);
     $('choose-collect').addEventListener('click', function () { choose('collect'); });
     $('choose-deliver').addEventListener('click', function () { choose('deliver'); });
+    $('choose-locker').addEventListener('click', function () { choose('locker'); });
     $('choose-change').addEventListener('click', function () {
       var was = choice;
       choice = null;
       hideError();
       syncFulfil();
-      $(was === 'collect' ? 'choose-collect' : 'choose-deliver').focus();
+      $('choose-' + (was || 'deliver')).focus();
     });
     $('collect-day').addEventListener('change', function () { fillTimes(''); });
   }
@@ -106,6 +107,36 @@
     return !!(config && config.quote) && !collecting();
   }
 
+  // ---------- Pudo fees ----------
+
+  // The fee comes from the box and Pudo size for the number of sachets.
+  function pudoOn() {
+    return !!(config && config.ship && config.ship.tiers && config.ship.tiers.length);
+  }
+
+  function pudoTier(qty) {
+    var tiers = config.ship.tiers;
+    for (var i = 0; i < tiers.length; i++) if (qty <= tiers[i].upTo) return tiers[i];
+    return null;
+  }
+
+  function pudoMax() {
+    var tiers = config.ship.tiers;
+    return tiers[tiers.length - 1].upTo;
+  }
+
+  // The fee for the current choice and quantity, or null when it is too many to send.
+  function pudoFee() {
+    var t = pudoTier(stepper.get());
+    if (!t) return null;
+    return choice === 'collect' ? t.collect : choice === 'locker' ? t.locker : t.door;
+  }
+
+  // The cheapest fee for a choice, for the buttons: "From R55".
+  function pudoFrom(kind) {
+    return config.ship.tiers.reduce(function (min, t) { return Math.min(min, t[kind]); }, Infinity);
+  }
+
   // An older order service sends no collection times. Collection then works without one.
   function slotsOn() {
     return !!(config && Array.isArray(config.collectSlots));
@@ -122,14 +153,25 @@
     $('choose').hidden = !!choice;
     $('chosen').hidden = !choice;
     $('order-rest').hidden = !choice;
+    var pudo = pudoOn();
     $('choose-collect').setAttribute('aria-pressed', String(collect));
     $('choose-deliver').setAttribute('aria-pressed', String(choice === 'deliver'));
+    $('choose-locker').setAttribute('aria-pressed', String(choice === 'locker'));
+    $('choose-locker').hidden = !pudo;
+    $('choose').querySelector('.choose-row').classList.toggle('choose-row--three', pudo);
+    $('choose-deliver-title').textContent = pudo ? 'To your door' : 'Get delivered';
     if (config) {
-      $('choose-collect-sub').textContent = 'Free' + (place ? ' · ' + place : '');
-      $('choose-deliver-sub').textContent = deliveryText(config);
+      var collectFree = !pudo || pudoFrom('collect') === 0;
+      $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? ' · ' + place : '') : (place || 'Collect');
+      $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : deliveryText(config);
+      if (pudo) $('choose-locker-sub').textContent = 'From ' + SJ.money(pudoFrom('locker'), config.currency);
     }
-    $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '') : 'Get delivered';
-    $('address-field').hidden = collect;
+    if (choice === 'locker' && !pudo) choice = 'deliver';
+    $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '')
+      : choice === 'locker' ? 'Send to a Pudo locker'
+      : pudo ? 'Deliver to your door' : 'Get delivered';
+    $('address-field').hidden = collect || choice === 'locker';
+    $('locker-field').hidden = choice !== 'locker';
     $('collect-time').hidden = !collect || !slotsOn();
     renderTotals();
   }
@@ -170,7 +212,15 @@
   function renderTotals() {
     if (!config) return;
     var quote = quoting();
-    var total = SJ.renderSummary($('summary'), config, stepper.get(), { collect: collecting(), quote: quote });
+    var opts = { collect: collecting(), quote: quote };
+    if (pudoOn() && choice) {
+      var fee = pudoFee();
+      opts.fee = fee === null ? 0 : fee;
+      opts.collectFee = opts.fee;
+      if (fee === null) opts.feeText = 'DM us for over ' + pudoMax();
+      if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
+    }
+    var total = SJ.renderSummary($('summary'), config, stepper.get(), opts);
     if (!busy) $('submit').textContent = (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
     $('next-note').textContent = quote
       ? 'Next we work out the delivery fee for your address and email your invoice with the bank details. There is nothing to pay yet.'
@@ -183,6 +233,8 @@
       email: $('email').value.trim(),
       contact: $('contact').value.trim(),
       address: $('address').value.trim(),
+      ship: choice === 'locker' ? 'locker' : 'door',
+      locker: $('locker').value.trim(),
       notes: $('notes').value.trim(),
       qty: stepper.get(),
       collect: collecting(),
@@ -209,7 +261,11 @@
     if (!SJ.isEmail(d.email)) return { id: 'email', message: 'Check your email address. It should look like name@example.com.' };
     if (!d.contact) return { id: 'contact', message: 'Enter your phone number.' };
     if (!isPhone(d.contact)) return { id: 'contact', message: 'Check your phone number. It should look like 082 123 4567.' };
+    if (pudoOn() && pudoFee() === null) {
+      return { id: 'qty', message: 'For more than ' + pudoMax() + ' sachets, please send us a DM and we will arrange delivery.' };
+    }
     if (d.collect) return null;
+    if (d.ship === 'locker') return d.locker ? null : { id: 'locker', message: 'Enter the Pudo locker you want it sent to.' };
     if (!d.address) return { id: 'address', message: 'Enter your delivery address.' };
     return null;
   }
@@ -259,8 +315,9 @@
     }
 
     // A collection order does not send the address that is hidden on the form.
-    if (data.collect) data.address = '';
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect, data.collectAt]);
+    if (data.collect || data.ship === 'locker') data.address = '';
+    if (data.ship !== 'locker') data.locker = '';
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.locker, data.ship, data.notes, data.qty, data.collect, data.collectAt]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 
     setSubmitting(true);
@@ -268,7 +325,8 @@
       var res = await SJ.api('order', Object.assign({}, data, {
         requestId: pending.id,
         // The total the customer was shown: without a fee for collection, or for a request.
-        expectedTotal: SJ.totalFor(data.qty, config.price, data.collect || config.quote ? 0 : config.fee),
+        expectedTotal: SJ.totalFor(data.qty, config.price,
+          pudoOn() ? pudoFee() : data.collect || config.quote ? 0 : config.fee),
         website: $('website').value
       }));
       pending = null;

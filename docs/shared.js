@@ -364,15 +364,18 @@
     opts = opts || {};
     var sym = c.currency;
     var quote = !!opts.quote && !opts.collect;
-    var fee = opts.collect || quote ? 0 : (typeof opts.fee === 'number' ? opts.fee : c.fee);
+    // A collection is free unless a collection fee is given (the box, with Pudo fees on).
+    var fee = quote ? 0
+      : opts.collect ? (typeof opts.collectFee === 'number' ? opts.collectFee : 0)
+      : typeof opts.fee === 'number' ? opts.fee : c.fee;
     var total = totalFor(qty, c.price, fee);
-    var feeText = quote ? (c.fee > 0 ? 'From ' + money(c.fee, sym) : 'Confirmed later') : (fee > 0 ? money(fee, sym) : 'Free');
+    var feeText = opts.feeText || (quote ? (c.fee > 0 ? 'From ' + money(c.fee, sym) : 'Confirmed later') : (fee > 0 ? money(fee, sym) : 'Free'));
     clear(dl);
     dl.appendChild(el('div', { class: 'summary-row' },
       el('dt', null, qty + ' x ' + c.product),
       el('dd', null, money(totalFor(qty, c.price, 0), sym))));
     dl.appendChild(el('div', { class: 'summary-row' },
-      el('dt', null, opts.collect ? 'Collection' : 'Delivery'),
+      el('dt', null, opts.label || (opts.collect ? 'Collection' : 'Delivery')),
       el('dd', null, feeText)));
     dl.appendChild(el('div', { class: 'summary-row summary-total' },
       el('dt', null, quote ? 'Total before delivery' : 'Total'),

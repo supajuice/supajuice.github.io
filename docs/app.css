@@ -205,6 +205,7 @@ a {
 .input,
 .field input[type='text'],
 .field input[type='email'],
+.field input[type='tel'],
 .field input[type='search'],
 .field input[type='password'],
 .field input[type='number'],
@@ -275,6 +276,10 @@ a {
   grid-template-columns: 1fr 1fr;
   gap: var(--s3);
 }
+.choose-row.choose-row--three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
 .choose-btn {
   display: flex;
   flex-direction: column;

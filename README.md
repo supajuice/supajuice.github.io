@@ -143,6 +143,19 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 - **If the admin key leaks or Greg loses his phone:** run `rotateAdminKey` in the script editor. The old link stops working. Give Greg the new key and link.
 - **Invoice prefix:** `SJ` by default, changeable in Settings. Numbers always continue; a number is never reused, even if you delete rows.
 
+## Delivery fees with Pudo
+
+Customers choose **Collect**, **To your door** or **To a Pudo locker**. The fee is worked out on the spot, so delivery orders no longer wait for Greg to set a fee.
+
+How the fee is worked out:
+1. The sachets go in the smallest box that holds them: Extra Small (60x17x8 cm) up to 12, Small (60x41x8 cm) up to 24, Medium (60x41x19 cm) up to 72. A box is never filled past Pudo's weight limit (2, 5 and 10 kg, less 250 g for the box), using the sachet weight in Settings (130 g).
+2. Pudo charges by box size, the same anywhere in South Africa. Greg drops the box at a Pudo locker and it goes **locker to door** or **locker to locker**.
+3. Fee = box cost + Pudo price, rounded up to the next rand. Customers see one "Delivery" amount. Collection orders pay the box cost as the collection fee (untick **Collection orders pay for their box** to keep collection free).
+
+Starting prices (The Courier Guy, August 2026): boxes R6 / R15 / R18; locker to locker R49 / R59 / R69; locker to door R83.94 (Small) and R115.81 (Medium). Pudo did not publish an Extra Small locker-to-door price, so it starts at the Small price. **Check these in the Pudo / The Courier Guy app and correct them under Settings > Delivery with Pudo.**
+
+Greg's new-order email says which box to pack and how to send it. Orders bigger than the Medium box are turned away with "send us a DM". Untick **Work out delivery fees from the box and Pudo price** to go back to the single delivery fee.
+
 ## Card payments for collections (Paystack)
 
 Customers who collect can pay by card, Apple Pay or instant EFT on Paystack's secure page. When they come back, the order turns **Paid** by itself and they get the paid invoice and calendar invite. Bank transfer stays on the page as the other option. Delivery orders are still paid by bank transfer.

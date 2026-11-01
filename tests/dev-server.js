@@ -117,10 +117,12 @@ function build(mode, opts) {
         delivery_fee: String(opts.fee === undefined ? 30 : opts.fee),
         alert_email: 'greg@example.com',
         collection_note: 'Sea Point',
-        delivery_quote: 'no' // the sample orders below were placed with a fixed fee
+        delivery_quote: 'no', // the sample orders below were placed with a fixed fee
+        pudo_shipping: 'no'
       }, BANK)
     }));
   }
+  if (opts.pudo && mode !== 'empty') expectOk(gas.call({ action: 'saveSettings', key, values: { pudo_shipping: 'yes' } }));
   if (opts.cardPay) gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
   if (mode === 'seeded') seed(gas, key);
   if (mode === 'seeded' && opts.collections) seedCollections(gas, key);
@@ -284,6 +286,7 @@ if (require.main === module) {
     latency: Number(args.latency || 0),
     fee: args.fee === undefined ? undefined : Number(args.fee),
     quote: args.quote !== 'false', // --quote=false for a fixed delivery fee
+    pudo: args.pudo === 'true', // --pudo=true for fees worked out from the box and Pudo size
     collections: args.collections !== 'false', // sample collection orders, --collections=false for none
     sitePort: Number(args['site-port'] || 5173),
     apiPort: Number(args['api-port'] || 5174)

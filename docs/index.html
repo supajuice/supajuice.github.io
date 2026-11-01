@@ -32,8 +32,12 @@
             <span class="choose-sub" id="choose-collect-sub">Free</span>
           </button>
           <button type="button" class="choose-btn" id="choose-deliver" aria-pressed="false">
-            <span class="choose-title">Get delivered</span>
+            <span class="choose-title" id="choose-deliver-title">Get delivered</span>
             <span class="choose-sub" id="choose-deliver-sub"></span>
+          </button>
+          <button type="button" class="choose-btn" id="choose-locker" aria-pressed="false" hidden>
+            <span class="choose-title">To a Pudo locker</span>
+            <span class="choose-sub" id="choose-locker-sub"></span>
           </button>
         </div>
       </fieldset>
@@ -81,6 +85,12 @@
         <div class="field" id="address-field">
           <label for="address">Delivery address</label>
           <textarea id="address" autocomplete="street-address" rows="3" maxlength="300"></textarea>
+        </div>
+
+        <div class="field" id="locker-field" hidden>
+          <label for="locker">Pudo locker to send it to</label>
+          <input id="locker" type="text" autocomplete="off" maxlength="120" aria-describedby="locker-hint">
+          <p class="hint" id="locker-hint">The locker's name or address, for example "Engen Sea Point". Find one near you on <a href="https://thecourierguy.co.za/" target="_blank" rel="noopener">The Courier Guy's site</a>. You get an SMS with a code to open it.</p>
         </div>
 
         <div class="field">

@@ -13,7 +13,7 @@ test.after(async () => { if (browser) await browser.close(); });
 // A fresh fake service, browser context and page for one test. Everything is closed afterwards.
 async function open(t, opts) {
   opts = opts || {};
-  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote, collections: opts.collections, cardPay: opts.cardPay });
+  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote, collections: opts.collections, cardPay: opts.cardPay, pudo: opts.pudo });
   const ctx = await browser.newContext({
     viewport: { width: opts.width || 390, height: opts.height || 844 },
     deviceScaleFactor: 1,
@@ -445,6 +445,50 @@ test('order page: a collection also needs a phone number', async (t) => {
   await page.click('#submit');
   assert.match(await text(page, '#form-error'), /Enter your phone number/);
   assert.equal(dev.calls.length, before, 'nothing was sent');
+});
+
+test('order page: with Pudo on, door and locker fees follow the number of sachets', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready', pudo: true });
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await page.locator('#choose-locker').isVisible(), true);
+  assert.equal(await text(page, '#choose-deliver-sub'), 'From R90');
+  assert.equal(await text(page, '#choose-locker-sub'), 'From R55');
+  assert.equal(await text(page, '#choose-collect-sub'), 'Sea Point', 'the box is not mentioned on collection');
+
+  await page.click('#choose-deliver');
+  assert.equal(await text(page, '#chosen-text'), 'Deliver to your door');
+  assert.match(await text(page, '#summary'), /Delivery\s+R90/);
+  for (let i = 0; i < 12; i++) await page.click('[aria-label="One more"]');
+  assert.match(await text(page, '#summary'), /Delivery\s+R99/, '13 sachets need the Small box');
+
+  await page.click('#choose-change');
+  await page.click('#choose-locker');
+  assert.equal(await page.locator('#address-field').isHidden(), true);
+  assert.equal(await page.locator('#locker-field').isVisible(), true);
+  assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R74/);
+
+  await page.fill('#name', 'Jane Doe');
+  await page.fill('#email', 'jane@example.com');
+  await page.fill('#contact', '082 123 4567');
+  await page.click('#submit');
+  assert.match(await text(page, '#form-error'), /Pudo locker you want it sent to/);
+  await page.fill('#locker', 'Engen Sea Point');
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  const row = orderRows(dev)[0];
+  assert.equal(row.Address, 'Pudo locker: Engen Sea Point');
+  assert.equal(row['Delivery fee'], 74);
+  assert.equal(row.Total, 13 * 40 + 74);
+  noErrors(errors);
+});
+
+test('order page: with Pudo on, a collection pays for its box', async (t) => {
+  const { dev, page } = await openKiosk(t, { mode: 'ready', pudo: true });
+  await fillKiosk(page, { collect: true });
+  assert.match(await text(page, '#summary'), /Collection\s+R6/);
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(orderRows(dev)[0]['Delivery fee'], 6);
 });
 
 // Paystack's page is stood in for: the test pays the fake transaction, then comes back.
@@ -1969,8 +2013,13 @@ test('admin: settings show the current values and the order page link', async (t
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',
     brand_name: 'Supa Juice', product_name: 'Running gel sachet', currency_symbol: 'R', invoice_prefix: 'SJ',
-    alert_email: 'greg@example.com'
+    alert_email: 'greg@example.com',
+    pudo_shipping: 'on', pudo_collection_box: 'on', sachet_grams: '130',
+    pudo_xs_holds: '12', pudo_xs_box: '6', pudo_xs_locker: '49', pudo_xs_door: '83.94',
+    pudo_s_holds: '24', pudo_s_box: '15', pudo_s_locker: '59', pudo_s_door: '83.94',
+    pudo_m_holds: '72', pudo_m_box: '18', pudo_m_locker: '69', pudo_m_door: '115.81'
   });
+  assert.equal(await page.locator('[name=pudo_shipping]').isChecked(), false, 'Pudo is off in this sample shop');
   // Collection dates are a calendar and the hours are two times.
   const dates = await datesOn(page);
   assert.equal(dates.length, 26);

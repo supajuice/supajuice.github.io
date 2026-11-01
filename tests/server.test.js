@@ -20,7 +20,7 @@ function ready() {
   const key = gas.key();
   const saved = gas.call(Object.assign(
     { action: 'saveSettings', key },
-    { values: Object.assign({ price: '40', delivery_fee: '30', delivery_quote: 'no', alert_email: 'greg@example.com' }, BANK) }
+    { values: Object.assign({ price: '40', delivery_fee: '30', delivery_quote: 'no', pudo_shipping: 'no', alert_email: 'greg@example.com' }, BANK) }
   ));
   assert.equal(saved.ok, true, JSON.stringify(saved));
   return { gas, key };
@@ -82,7 +82,7 @@ test('public config shows the price but no bank details', () => {
   const { collectSlots, ...rest } = cfg;
   assert.deepEqual(rest, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R',
-    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, cardPay: false, ready: true
+    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, ship: null, cardPay: false, ready: true
   });
   assert.ok(collectSlots.length > 0, 'collection times are always offered');
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
@@ -1714,4 +1714,83 @@ test('when Paystack cannot be reached the customer is told to try again or pay b
   assert.match(r.message, /bank transfer/);
   gas.store.delete('PAYSTACK_SECRET_KEY');
   assert.equal(gas.call(startPay()).error, 'not_ready');
+});
+
+// ---------------------------------------------------------------------------
+// Pudo delivery fees
+// ---------------------------------------------------------------------------
+
+function pudoReady(values) {
+  const gas = createGas();
+  gas.run('setup()');
+  const key = gas.key();
+  const saved = gas.call({ action: 'saveSettings', key, values: Object.assign({ price: '40', alert_email: 'greg@example.com', max_quantity: '100' }, BANK, values || {}) });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  return { gas, key };
+}
+const pudoOrder = (qty, fee, over) => order(Object.assign({ qty, expectedTotal: qty * 40 + fee, requestId: rid() }, over));
+
+test('Pudo fees are on by default: box plus Pudo price for the smallest box that fits, rounded up', () => {
+  const { gas } = pudoReady();
+  const c = gas.call({ action: 'config' }).config;
+  assert.equal(c.quote, false, 'no waiting for Greg to set a fee');
+  assert.deepEqual(c.ship.tiers, [
+    { upTo: 12, door: 90, locker: 55, collect: 6 },   // Extra Small box R6 + R83.94 / R49
+    { upTo: 24, door: 99, locker: 74, collect: 15 },  // Small box R15 + R83.94 / R59
+    { upTo: 72, door: 134, locker: 87, collect: 18 }  // Medium box R18 + R115.81 / R69
+  ]);
+});
+
+test('a box is never filled past its Pudo weight limit', () => {
+  const { gas } = pudoReady({ sachet_grams: '200' });
+  const tiers = gas.call({ action: 'config' }).config.ship.tiers;
+  // 2 kg less 250 g for the box is 8 sachets of 200 g; 5 kg gives 23; 10 kg gives 48.
+  assert.deepEqual(tiers.map((t) => t.upTo), [8, 23, 48]);
+});
+
+test('door, locker and collection orders are charged their Pudo fee', () => {
+  const { gas } = pudoReady({ delivery_quote: 'yes' });
+  const door = gas.call(pudoOrder(5, 90));
+  assert.equal(door.ok, true, JSON.stringify(door));
+  assert.equal(door.order.status, 'Awaiting payment');
+  assert.equal(door.order.fee, 90);
+  assert.equal(door.order.total, 290);
+
+  const locker = gas.call(pudoOrder(13, 74, { ship: 'locker', locker: 'Engen Sea Point', address: '' }));
+  assert.equal(locker.ok, true, JSON.stringify(locker));
+  assert.equal(locker.order.address, 'Pudo locker: Engen Sea Point');
+  assert.equal(locker.order.fee, 74);
+
+  const collect = gas.call(pudoOrder(30, 18, { collect: true, address: '', collectAt: '2026-10-29 17:00' }));
+  assert.equal(collect.ok, true, JSON.stringify(collect));
+  assert.equal(collect.order.fee, 18);
+  assert.match(gas.mail.find((m) => /New order SJ-0003/.test(m.subject)).body, /Collection: R18/);
+});
+
+test('the wrong fee, a missing locker or too many sachets are turned away', () => {
+  const { gas } = pudoReady();
+  assert.equal(gas.call(pudoOrder(5, 30)).error, 'price_changed');
+  assert.match(gas.call(pudoOrder(5, 55, { ship: 'locker', locker: '' })).message, /Pudo locker/);
+  const big = gas.call(pudoOrder(73, 134));
+  assert.equal(big.error, 'invalid');
+  assert.match(big.message, /more than 72 sachets/);
+});
+
+test('Greg\'s new-order email says which box to pack and how to send it', () => {
+  const { gas } = pudoReady();
+  gas.call(pudoOrder(5, 55, { ship: 'locker', locker: 'Engen Sea Point' }));
+  const alert = gas.mail.find((m) => m.to === 'greg@example.com');
+  assert.match(alert.body, /Pack in: Extra Small box \(60 x 17 x 8 cm\), about 0\.7 kg of sachets, and send Pudo locker to locker\./);
+  assert.match(alert.body, /Address: Pudo locker: Engen Sea Point/);
+});
+
+test('with Pudo off, the old delivery fee and collection rules apply', () => {
+  const { gas } = pudoReady({ pudo_shipping: 'no', delivery_fee: '30', delivery_quote: 'no' });
+  assert.equal(gas.call({ action: 'config' }).config.ship, null);
+  assert.equal(gas.call(pudoOrder(5, 30)).order.fee, 30);
+});
+
+test('collection can stay free while delivery uses Pudo', () => {
+  const { gas } = pudoReady({ pudo_collection_box: 'no' });
+  assert.deepEqual(gas.call({ action: 'config' }).config.ship.tiers.map((t) => t.collect), [0, 0, 0]);
 });

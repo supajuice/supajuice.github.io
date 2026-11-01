@@ -49,6 +49,28 @@
       ]
     },
     {
+      id: 'pudo',
+      title: 'Delivery with Pudo',
+      about: 'Boxes, sachet weight and Pudo prices',
+      fields: [
+        { key: 'pudo_shipping', label: 'Work out delivery fees from the box and Pudo price', hint: 'Customers choose their door or a Pudo locker and see the fee straight away. Untick to use the delivery fee under Price and delivery.', type: 'checkbox', wide: true },
+        { key: 'pudo_collection_box', label: 'Collection orders pay for their box', hint: 'Shown to customers as the collection fee. Untick to keep collection free.', type: 'checkbox', wide: true },
+        { key: 'sachet_grams', label: 'Weight of one sachet (grams)', hint: 'A box is never filled past its Pudo weight limit', mode: 'decimal', max: 8 },
+        { key: 'pudo_xs_holds', label: 'Extra Small box holds (sachets)', hint: '60 x 17 x 8 cm, Pudo limit 2 kg. 0 means never use it', mode: 'numeric', max: 3 },
+        { key: 'pudo_xs_box', label: 'Extra Small box costs you', mode: 'decimal', max: 10 },
+        { key: 'pudo_xs_locker', label: 'Pudo Extra Small, locker to locker', mode: 'decimal', max: 10 },
+        { key: 'pudo_xs_door', label: 'Pudo Extra Small, locker to door', mode: 'decimal', max: 10 },
+        { key: 'pudo_s_holds', label: 'Small box holds (sachets)', hint: '60 x 41 x 8 cm, Pudo limit 5 kg. 0 means never use it', mode: 'numeric', max: 3 },
+        { key: 'pudo_s_box', label: 'Small box costs you', mode: 'decimal', max: 10 },
+        { key: 'pudo_s_locker', label: 'Pudo Small, locker to locker', mode: 'decimal', max: 10 },
+        { key: 'pudo_s_door', label: 'Pudo Small, locker to door', mode: 'decimal', max: 10 },
+        { key: 'pudo_m_holds', label: 'Medium box holds (sachets)', hint: '60 x 41 x 19 cm, Pudo limit 10 kg. 0 means never use it', mode: 'numeric', max: 3 },
+        { key: 'pudo_m_box', label: 'Medium box costs you', mode: 'decimal', max: 10 },
+        { key: 'pudo_m_locker', label: 'Pudo Medium, locker to locker', mode: 'decimal', max: 10 },
+        { key: 'pudo_m_door', label: 'Pudo Medium, locker to door', mode: 'decimal', max: 10 }
+      ]
+    },
+    {
       id: 'collection',
       title: 'Collection',
       about: 'Place, dates and times customers can collect',

@@ -93,6 +93,21 @@ const SETTING_DEFS = [
   { key: 'collection_hours', value: '17:00-19:00', note: 'The usual collection times, for example 17:00-19:00. New dates start with these, and each date can have its own.' },
   { key: 'collection_slot_minutes', value: '30', note: 'Length of one collection time in minutes: 15, 30 or 60.' },
   { key: 'collection_per_slot', value: '1', note: 'How many customers can book the same collection time.' },
+  { key: 'pudo_shipping', value: 'yes', note: 'yes: the delivery fee is worked out from the box and Pudo price for the number of sachets, to the door or to a Pudo locker. no: use the delivery fee above.' },
+  { key: 'pudo_collection_box', value: 'yes', note: 'yes: collection orders pay for their box too (shown as the collection fee). no: collection is free.' },
+  { key: 'sachet_grams', value: '130', note: 'Weight of one full sachet in grams. A box is never filled past its Pudo weight limit.' },
+  { key: 'pudo_xs_holds', value: '12', note: 'Sachets that fit an Extra Small box (60x17x8 cm, Pudo limit 2 kg). 0 means never use it.' },
+  { key: 'pudo_xs_box', value: '6', note: 'What one Extra Small box costs you.' },
+  { key: 'pudo_xs_locker', value: '49', note: 'Pudo Extra Small, locker to locker.' },
+  { key: 'pudo_xs_door', value: '83.94', note: 'Pudo Extra Small, locker to door.' },
+  { key: 'pudo_s_holds', value: '24', note: 'Sachets that fit a Small box (60x41x8 cm, Pudo limit 5 kg). 0 means never use it.' },
+  { key: 'pudo_s_box', value: '15', note: 'What one Small box costs you.' },
+  { key: 'pudo_s_locker', value: '59', note: 'Pudo Small, locker to locker.' },
+  { key: 'pudo_s_door', value: '83.94', note: 'Pudo Small, locker to door.' },
+  { key: 'pudo_m_holds', value: '72', note: 'Sachets that fit a Medium box (60x41x19 cm, Pudo limit 10 kg). 0 means never use it.' },
+  { key: 'pudo_m_box', value: '18', note: 'What one Medium box costs you.' },
+  { key: 'pudo_m_locker', value: '69', note: 'Pudo Medium, locker to locker.' },
+  { key: 'pudo_m_door', value: '115.81', note: 'Pudo Medium, locker to door.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
   { key: 'invoice_prefix', value: 'SJ', note: 'Letters before the invoice number, for example SJ-0001. Up to 6 letters or digits.' },
@@ -212,12 +227,15 @@ function createOrder_(body, source) {
   const qty = Number(body.qty);
   const collect = body.collect === true;
   const collectAt = collect ? slotText_(body.collectAt) : '';
+  const toLocker = !collect && body.ship === 'locker';
+  const locker = toLocker ? clean_(body.locker, 120) : '';
   const requestId = /^[A-Za-z0-9_-]{8,64}$/.test(String(body.requestId || '')) ? String(body.requestId) : '';
 
   if (!name) throw fail_('invalid', 'Please enter a name.');
   if (kiosk && !email) throw fail_('invalid', 'Please enter your email address so we can send your invoice.');
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
-  if (kiosk && !collect && !address) throw fail_('invalid', 'Please enter your delivery address.');
+  if (kiosk && toLocker && !locker) throw fail_('invalid', 'Please enter the Pudo locker you want it sent to.');
+  if (kiosk && !collect && !toLocker && !address) throw fail_('invalid', 'Please enter your delivery address.');
   if (kiosk && collect && !collectAt) throw fail_('invalid', 'Please pick a collection time.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
   // Greg can set the delivery fee for a DM order himself. Customers never can.
@@ -260,8 +278,13 @@ function createOrder_(body, source) {
 
     // With fees confirmed per order, a delivery from the order page is a request: the fee is
     // left blank and the total covers the sachets only, until Greg accepts it.
-    const request = kiosk && !collect && settings.quote;
-    const fee = collect || request ? 0 : (customFee !== null ? round2_(customFee) : settings.fee);
+    // With Pudo on, the fee for an order from the order page comes from its box and Pudo size.
+    const pudo = kiosk && settings.ship.on;
+    const tier = pudo ? shipTier_(settings.ship, qty) : null;
+    if (pudo && !tier) throw fail_('invalid', 'For more than ' + settings.ship.max + ' sachets, please send us a DM and we will arrange delivery.');
+    const request = kiosk && !collect && settings.quote && !pudo;
+    const fee = pudo ? (collect ? tier.collect : toLocker ? tier.locker : tier.door)
+      : collect || request ? 0 : (customFee !== null ? round2_(customFee) : settings.fee);
     const totalCents = Math.round(settings.price * 100) * qty + Math.round(fee * 100);
     const total = totalCents / 100;
 
@@ -276,7 +299,7 @@ function createOrder_(body, source) {
     const invoice = settings.prefix + '-' + String(number).padStart(4, '0');
     const row = [
       invoice, nowString_(), source,
-      safe_(name), safe_(contact), safe_(address), safe_(notes),
+      safe_(name), safe_(contact), safe_(toLocker ? 'Pudo locker: ' + locker : address), safe_(notes),
       qty, settings.price, request ? '' : fee, total,
       request ? STATUS.REQUESTED : STATUS.AWAITING, '', '', requestId,
       safe_(email), '', collect ? 'yes' : '', '', collectAt
@@ -806,8 +829,9 @@ function sendAlert_(order, s) {
       order.collect ? 'Collects: ' + collectLine_(order, s) : 'Address: ' + order.address,
       'Notes: ' + (order.notes || '-'),
       'Order: ' + order.qty + ' x ' + s.product + ' at ' + money_(order.price, s.currency),
-      order.collect ? 'Collection: free' : 'Delivery: ' + money_(order.fee, s.currency),
+      order.collect ? 'Collection: ' + (order.fee > 0 ? money_(order.fee, s.currency) : 'free') : 'Delivery: ' + money_(order.fee, s.currency),
       'Total: ' + money_(order.total, s.currency),
+      packLine_(order, s),
       '',
       'Check your bank statement for the reference ' + order.invoice + ', then mark the order paid on the admin page.'
     ];
@@ -876,7 +900,7 @@ function invoiceText_(o, s) {
   if (paid && o.paidOn) lines.push('Paid: ' + formatDay_(o.paidOn));
   lines.push('', 'For: ' + o.name);
   lines.push(o.qty + ' x ' + s.product + ' @ ' + money_(o.price, s.currency) + ' = ' + money_(lineTotal_(o), s.currency));
-  lines.push(o.collect ? 'Collection: free' : 'Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free'));
+  lines.push(o.collect ? 'Collection: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free') : 'Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free'));
   lines.push((paid ? 'Total paid: ' : 'Total due: ') + money_(o.total, s.currency));
   if (o.collect) lines.push('', 'Collecting: ' + collectLine_(o, s));
   if (paid) {
@@ -1138,6 +1162,7 @@ function readTypedSettings_() {
     currency: raw.currency_symbol || 'R',
     collectNote: raw.collection_note,
     quote: String(raw.delivery_quote).toLowerCase() !== 'no',
+    ship: shipTable_(raw),
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
     minQty: Math.min(maxQty, Math.max(1, Math.floor(parseNumber_(raw.min_quantity, 1)))),
     maxQty: maxQty,
@@ -1161,7 +1186,9 @@ function publicConfig_(s, slots) {
     fee: s.fee,
     currency: s.currency,
     collectNote: s.collectNote, // where customers collect
-    quote: s.quote, // true: the delivery fee is confirmed by Greg after the customer orders
+    quote: s.quote && !s.ship.on, // true: the delivery fee is confirmed by Greg after the customer orders
+    // Pudo fees by number of sachets: [{ upTo, door, locker, collect }]. Box costs are inside them.
+    ship: s.ship.on ? { tiers: s.ship.tiers.map(function (t) { return { upTo: t.upTo, door: t.door, locker: t.locker, collect: t.collect }; }) } : null,
     minQty: s.minQty,
     maxQty: s.maxQty,
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
@@ -1282,6 +1309,32 @@ function validateSetting_(key, value) {
       if (t === 'yes' || t === 'true') return 'yes';
       if (t === 'no' || t === 'false') return 'no';
       throw fail_('invalid', 'Confirm the delivery fee for each order must be yes or no.');
+    }
+    case 'pudo_shipping':
+    case 'pudo_collection_box': {
+      const t = text.toLowerCase();
+      if (t === 'yes' || t === 'true') return 'yes';
+      if (t === 'no' || t === 'false') return 'no';
+      throw fail_('invalid', 'Pudo settings must be yes or no.');
+    }
+    case 'sachet_grams': {
+      const n = parseNumber_(text, NaN);
+      if (!isFinite(n) || n < 1 || n > 5000) throw fail_('invalid', 'Sachet weight must be a number of grams, for example 130.');
+      return String(round2_(n));
+    }
+    case 'pudo_xs_holds':
+    case 'pudo_s_holds':
+    case 'pudo_m_holds': {
+      const n = parseNumber_(text === '' ? '0' : text, NaN);
+      if (!isFinite(n) || Math.floor(n) !== n || n < 0 || n > 500) throw fail_('invalid', 'Sachets per box must be a whole number from 0 to 500.');
+      return String(n);
+    }
+    case 'pudo_xs_box': case 'pudo_xs_locker': case 'pudo_xs_door':
+    case 'pudo_s_box': case 'pudo_s_locker': case 'pudo_s_door':
+    case 'pudo_m_box': case 'pudo_m_locker': case 'pudo_m_door': {
+      const n = parseNumber_(text === '' ? '0' : text, NaN);
+      if (!isFinite(n) || n < 0 || n > 100000) throw fail_('invalid', 'Box and Pudo prices must be numbers, for example 59.');
+      return String(round2_(n));
     }
     case 'min_quantity': {
       if (text === '') return '1';
@@ -1649,6 +1702,68 @@ function photoSheet_() {
     sheet.hideSheet();
   }
   return sheet;
+}
+
+// ---------------------------------------------------------------------------
+// Pudo delivery fees
+// ---------------------------------------------------------------------------
+//
+// Sachets go in the smallest box that holds them. Each box matches a Pudo locker size,
+// and Pudo charges by size, the same anywhere in South Africa. A fee is the box plus the
+// Pudo price (locker to door, or locker to locker), rounded up to the next rand.
+
+const PUDO_SIZES = [
+  { code: 'xs', name: 'Extra Small', box: '60 x 17 x 8 cm', kg: 2 },
+  { code: 's', name: 'Small', box: '60 x 41 x 8 cm', kg: 5 },
+  { code: 'm', name: 'Medium', box: '60 x 41 x 19 cm', kg: 10 }
+];
+// Room left in each Pudo weight limit for the box itself and the packing paper.
+const BOX_ALLOWANCE_G = 250;
+
+function shipTable_(raw) {
+  const grams = Math.max(1, parseNumber_(raw.sachet_grams, 130));
+  const money = function (k) { return Math.max(0, parseNumber_(raw[k], 0)); };
+  const up = function (n) { return Math.ceil(n - 0.000001); };
+  const collectBox = String(raw.pudo_collection_box).toLowerCase() !== 'no';
+  const tiers = [];
+  let upTo = 0;
+  PUDO_SIZES.forEach(function (size) {
+    const holds = Math.floor(parseNumber_(raw['pudo_' + size.code + '_holds'], 0));
+    // Never past Pudo's weight limit, whatever the box could hold.
+    const byWeight = Math.floor((size.kg * 1000 - BOX_ALLOWANCE_G) / grams);
+    const fits = Math.min(holds, byWeight);
+    if (fits <= upTo) return;
+    const box = money('pudo_' + size.code + '_box');
+    tiers.push({
+      upTo: fits, code: size.code, name: size.name, boxSize: size.box,
+      door: up(box + money('pudo_' + size.code + '_door')),
+      locker: up(box + money('pudo_' + size.code + '_locker')),
+      collect: collectBox ? up(box) : 0
+    });
+    upTo = fits;
+  });
+  return {
+    on: String(raw.pudo_shipping).toLowerCase() !== 'no' && tiers.length > 0,
+    grams: grams,
+    tiers: tiers,
+    max: upTo
+  };
+}
+
+function shipTier_(ship, qty) {
+  for (let i = 0; i < ship.tiers.length; i++) if (qty <= ship.tiers[i].upTo) return ship.tiers[i];
+  return null;
+}
+
+// For Greg's new-order email: which box to pack and how to send it.
+function packLine_(order, s) {
+  if (!s.ship.on) return '';
+  const tier = shipTier_(s.ship, order.qty);
+  if (!tier) return '';
+  const kg = Math.round(order.qty * s.ship.grams / 100) / 10;
+  const how = order.collect ? 'for collection'
+    : /^Pudo locker: /.test(order.address) ? 'and send Pudo locker to locker' : 'and send Pudo locker to door';
+  return 'Pack in: ' + tier.name + ' box (' + tier.boxSize + '), about ' + kg + ' kg of sachets, ' + how + '.';
 }
 
 // ---------------------------------------------------------------------------
