@@ -1353,7 +1353,7 @@ test('marking a collection paid emails the paid invoice with a calendar invite',
   assert.ok(lines.some((l) => /^ATTENDEE;CN="Jane Doe";.*:mailto:jane@example\.com$/.test(l)));
 });
 
-test('the private collection address is only given once the order is paid', () => {
+test('the collection street address is kept off the order page and emailed once the order is placed', () => {
   const { gas, key } = ready();
   const ADDRESS = '1 Example Road, Sea Point';
   assert.equal(gas.call({ action: 'saveSettings', key, values: { collection_address: ADDRESS } }).ok, true);
@@ -1361,9 +1361,8 @@ test('the private collection address is only given once the order is paid', () =
   assert.ok(!JSON.stringify(placed).includes('Example Road'), 'not in the order response');
   assert.ok(!JSON.stringify(gas.call({ action: 'config' })).includes('Example Road'), 'not on the order page');
   const unpaid = gas.mail.find((m) => m.to === 'jane@example.com');
-  assert.ok(!unpaid.body.includes('Example Road'), 'not in the unpaid invoice email');
-  assert.ok(!unpaid.attachments[0].getDataAsString().includes('Example Road'), 'not on the unpaid invoice');
-  assert.match(unpaid.body, /Collecting: Thu 29 Oct, 17:00, Sea Point/);
+  assert.match(unpaid.body, /Collecting: Thu 29 Oct, 17:00, 1 Example Road, Sea Point/, 'in the invoice email once placed');
+  assert.ok(unpaid.attachments[0].getDataAsString().includes(ADDRESS), 'on the invoice'); 
 
   gas.mail.length = 0;
   gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
@@ -1777,21 +1776,24 @@ test('door, locker and collection orders are charged their Pudo fee', () => {
   assert.equal(door.order.fee, 90);
   assert.equal(door.order.total, 290);
 
-  const locker = gas.call(pudoOrder(13, 74, { ship: 'locker', locker: 'Engen Sea Point', address: '' }));
+  const locker = gas.call(pudoOrder(13, 74, { ship: 'locker', address: '12 Main Rd, Sea Point' }));
   assert.equal(locker.ok, true, JSON.stringify(locker));
-  assert.equal(locker.order.address, 'Pudo locker: Engen Sea Point');
+  assert.equal(locker.order.address, 'Pudo locker near: 12 Main Rd, Sea Point');
+  // An order page from before lockers used the address still works.
+  const older = gas.call(pudoOrder(5, 55, { ship: 'locker', locker: 'Engen Sea Point', address: '' }));
+  assert.equal(older.order.address, 'Pudo locker near: Engen Sea Point');
   assert.equal(locker.order.fee, 74);
 
   const collect = gas.call(pudoOrder(30, 18, { collect: true, address: '', collectAt: '2026-10-29 17:00' }));
   assert.equal(collect.ok, true, JSON.stringify(collect));
   assert.equal(collect.order.fee, 18);
-  assert.match(gas.mail.find((m) => /New order SJ-0003/.test(m.subject)).body, /Collection: R18/);
+  assert.match(gas.mail.find((m) => /New order SJ-0004/.test(m.subject)).body, /Collection: R18/);
 });
 
 test('the wrong fee, a missing locker or too many sachets are turned away', () => {
   const { gas } = pudoReady();
   assert.equal(gas.call(pudoOrder(5, 30)).error, 'price_changed');
-  assert.match(gas.call(pudoOrder(5, 55, { ship: 'locker', locker: '' })).message, /Pudo locker/);
+  assert.match(gas.call(pudoOrder(5, 55, { ship: 'locker', locker: '', address: '' })).message, /address so we can pick the Pudo locker/);
   const big = gas.call(pudoOrder(73, 134));
   assert.equal(big.error, 'invalid');
   assert.match(big.message, /more than 72 sachets/);
@@ -1799,10 +1801,10 @@ test('the wrong fee, a missing locker or too many sachets are turned away', () =
 
 test('Greg\'s new-order email says which box to pack and how to send it', () => {
   const { gas } = pudoReady();
-  gas.call(pudoOrder(5, 55, { ship: 'locker', locker: 'Engen Sea Point' }));
+  gas.call(pudoOrder(5, 55, { ship: 'locker', address: '12 Main Rd, Sea Point' }));
   const alert = gas.mail.find((m) => m.to === 'greg@example.com');
   assert.match(alert.body, /Pack in: Extra Small box \(60 x 17 x 8 cm\), about 0\.7 kg of sachets, and send Pudo locker to locker\./);
-  assert.match(alert.body, /Address: Pudo locker: Engen Sea Point/);
+  assert.match(alert.body, /Address: Pudo locker near: 12 Main Rd, Sea Point/);
 });
 
 test('with Pudo off, the old delivery fee and collection rules apply', () => {

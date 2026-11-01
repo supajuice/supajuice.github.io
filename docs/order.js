@@ -184,8 +184,10 @@
     $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '')
       : choice === 'locker' ? 'Send to a Pudo locker'
       : 'Deliver to your door';
-    $('address-field').hidden = collect || choice === 'locker';
-    $('locker-field').hidden = choice !== 'locker';
+    // The locker uses the address too: Greg picks the Pudo locker nearest to it.
+    $('address-field').hidden = collect;
+    $('address-label').textContent = choice === 'locker' ? 'Your address' : 'Delivery address';
+    $('locker-hint').hidden = choice !== 'locker';
     $('collect-time').hidden = !collect || !slotsOn();
     renderTotals();
   }
@@ -251,7 +253,7 @@
       contact: $('contact').value.trim(),
       address: $('address').value.trim(),
       ship: choice === 'locker' ? 'locker' : 'door',
-      locker: $('locker').value.trim(),
+      locker: '',
       notes: $('notes').value.trim(),
       qty: stepper.get(),
       collect: collecting(),
@@ -282,7 +284,7 @@
       return { id: 'qty', message: 'For more than ' + pudoMax() + ' sachets, please send us a DM and we will arrange delivery.' };
     }
     if (d.collect) return null;
-    if (d.ship === 'locker') return d.locker ? null : { id: 'locker', message: 'Enter the Pudo locker you want it sent to.' };
+    if (d.ship === 'locker') return d.address ? null : { id: 'address', message: 'Enter your address so we can pick the Pudo locker nearest to you.' };
     if (!d.address) return { id: 'address', message: 'Enter your delivery address.' };
     return null;
   }
@@ -332,8 +334,9 @@
     }
 
     // A collection order does not send the address that is hidden on the form.
-    if (data.collect || data.ship === 'locker') data.address = '';
-    if (data.ship !== 'locker') data.locker = '';
+    if (data.collect) data.address = '';
+    // Sent as the locker too, for an order service from before lockers used the address.
+    data.locker = data.ship === 'locker' ? data.address : '';
     var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.locker, data.ship, data.notes, data.qty, data.collect, data.collectAt]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 
@@ -437,7 +440,7 @@
     var place = res.collectNote ? ' from ' + res.collectNote : '';
     if (!o.collect) collectNote.textContent = '';
     else if (o.collectAt && paid) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. The address and calendar invite are in your email.';
-    else if (o.collectAt) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. A calendar invite is emailed once your payment is confirmed.';
+    else if (o.collectAt) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. The address is in your email, and a calendar invite follows once your payment is confirmed.';
     else collectNote.textContent = 'You are collecting this order' + place + '. We will DM you to arrange a time.';
 
     var bib = $('bib');

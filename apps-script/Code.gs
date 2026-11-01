@@ -88,8 +88,8 @@ const SETTING_DEFS = [
   { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery. When fees are confirmed per order, customers see it as "from" and it is suggested when you accept a request.' },
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
-  { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page and unpaid invoices. Collection is free.' },
-  { key: 'collection_address', value: '', note: 'Optional. The full street address for collections. Kept private: customers only get it once their order is paid, on the paid invoice and the calendar invite. Blank: the collection place above is used.' },
+  { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page. Collection is free.' },
+  { key: 'collection_address', value: '', note: 'Optional. The full street address for collections. Kept off the order page: customers get it once they place an order, on their invoice email and calendar invite. Blank: the collection place above is used.' },
   { key: 'collection_dates', value: '', note: 'Dates and times customers can collect, for example "2026-11-03 07:00-08:00 17:00-19:00, 2026-11-04". A date on its own uses the usual times. Set them on the admin page, which shows the next 30 days.' },
   { key: 'collection_hours', value: '17:00-19:00', note: 'The usual collection times, for example 17:00-19:00. New dates start with these, and each date can have its own.' },
   { key: 'collection_slot_minutes', value: '30', note: 'Length of one collection time in minutes: 15, 30 or 60.' },
@@ -229,13 +229,14 @@ function createOrder_(body, source) {
   const collect = body.collect === true;
   const collectAt = collect ? slotText_(body.collectAt) : '';
   const toLocker = !collect && body.ship === 'locker';
-  const locker = toLocker ? clean_(body.locker, 120) : '';
+  // Greg picks the Pudo locker nearest the customer's address. Older pages sent a locker instead.
+  const locker = toLocker ? clean_(body.address || body.locker, 300) : '';
   const requestId = /^[A-Za-z0-9_-]{8,64}$/.test(String(body.requestId || '')) ? String(body.requestId) : '';
 
   if (!name) throw fail_('invalid', 'Please enter a name.');
   if (kiosk && !email) throw fail_('invalid', 'Please enter your email address so we can send your invoice.');
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
-  if (kiosk && toLocker && !locker) throw fail_('invalid', 'Please enter the Pudo locker you want it sent to.');
+  if (kiosk && toLocker && !locker) throw fail_('invalid', 'Please enter your address so we can pick the Pudo locker nearest to you.');
   if (kiosk && !collect && !toLocker && !address) throw fail_('invalid', 'Please enter your delivery address.');
   if (kiosk && collect && !collectAt) throw fail_('invalid', 'Please pick a collection time.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
@@ -300,7 +301,7 @@ function createOrder_(body, source) {
     const invoice = settings.prefix + '-' + String(number).padStart(4, '0');
     const row = [
       invoice, nowString_(), source,
-      safe_(name), safe_(contact), safe_(toLocker ? 'Pudo locker: ' + locker : address), safe_(notes),
+      safe_(name), safe_(contact), safe_(toLocker ? 'Pudo locker near: ' + locker : address), safe_(notes),
       qty, settings.price, request ? '' : fee, total,
       request ? STATUS.REQUESTED : STATUS.AWAITING, '', '', requestId,
       safe_(email), '', collect ? 'yes' : '', '', collectAt
@@ -986,10 +987,10 @@ function collectLine_(o, s) {
   return (o.collectAt ? formatSlot_(o.collectAt) + ', ' : '') + collectPlace_(o, s);
 }
 
-// Where to collect. The full address is given only once the order is paid;
-// until then, and everywhere public, customers see the collection place (an area).
+// Where to collect, for an order that has been placed: the full street address when
+// one is set. Everywhere public (the order page) shows only the collection place, an area.
 function collectPlace_(o, s) {
-  return isPaid_(o) && s.collectAddress ? s.collectAddress : s.collectNote;
+  return s.collectAddress || s.collectNote;
 }
 
 // ---------------------------------------------------------------------------
@@ -1168,7 +1169,7 @@ function readTypedSettings_() {
     fee: fee,
     currency: raw.currency_symbol || 'R',
     collectNote: raw.collection_note,
-    collectAddress: raw.collection_address, // private: only for paid orders, never in publicConfig_
+    collectAddress: raw.collection_address, // only for placed orders, never in publicConfig_
     quote: String(raw.delivery_quote).toLowerCase() !== 'no',
     ship: shipTable_(raw),
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
@@ -1770,7 +1771,7 @@ function packLine_(order, s) {
   if (!tier) return '';
   const kg = Math.round(order.qty * s.ship.grams / 100) / 10;
   const how = order.collect ? 'for collection'
-    : /^Pudo locker: /.test(order.address) ? 'and send Pudo locker to locker' : 'and send Pudo locker to door';
+    : /^Pudo locker/.test(order.address) ? 'and send Pudo locker to locker' : 'and send Pudo locker to door';
   return 'Pack in: ' + tier.name + ' box (' + tier.boxSize + '), about ' + kg + ' kg of sachets, ' + how + '.';
 }
 

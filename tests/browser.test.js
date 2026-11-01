@@ -169,12 +169,13 @@ test('order page: the customer first picks Collect, their door or a Pudo locker,
   assert.equal(await page.locator('#address-field').isHidden(), true, 'no address needed');
   assert.equal(await page.locator('#collect-time').isVisible(), true);
 
-  // The locker asks for a locker instead of an address, at the normal delivery fee.
+  // The locker asks for the customer's address too, at the normal delivery fee. Greg picks the nearest locker.
   await page.click('#choose-change');
   await page.click('#choose-locker');
   assert.equal(await text(page, '#chosen-text'), 'Send to a Pudo locker');
-  assert.equal(await page.locator('#locker-field').isVisible(), true);
-  assert.equal(await page.locator('#address-field').isHidden(), true);
+  assert.equal(await page.locator('#address-field').isVisible(), true);
+  assert.equal(await text(page, '#address-label'), 'Your address');
+  assert.match(await text(page, '#locker-hint'), /Pudo locker nearest to you/);
   assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R30/);
   noErrors(errors);
 });
@@ -201,7 +202,7 @@ test('order page: a customer can collect at a time they pick, and the delivery f
   await page.click('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
   assert.match(await text(page, '#done-sub'), /Pay R80 by bank transfer/);
-  assert.equal(await text(page, '#done-collect'), 'Collect on Thu 29 Oct, 17:30 from Sea Point. A calendar invite is emailed once your payment is confirmed.');
+  assert.equal(await text(page, '#done-collect'), 'Collect on Thu 29 Oct, 17:30 from Sea Point. The address is in your email, and a calendar invite follows once your payment is confirmed.');
 
   const row = orderRows(dev)[0];
   assert.equal(row.Collect, 'yes');
@@ -472,20 +473,19 @@ test('order page: with Pudo on, door and locker fees follow the number of sachet
 
   await page.click('#choose-change');
   await page.click('#choose-locker');
-  assert.equal(await page.locator('#address-field').isHidden(), true);
-  assert.equal(await page.locator('#locker-field').isVisible(), true);
+  assert.equal(await page.locator('#address-field').isVisible(), true);
   assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R74/);
 
   await page.fill('#name', 'Jane Doe');
   await page.fill('#email', 'jane@example.com');
   await page.fill('#contact', '082 123 4567');
   await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Pudo locker you want it sent to/);
-  await page.fill('#locker', 'Engen Sea Point');
+  assert.match(await text(page, '#form-error'), /Enter your address so we can pick the Pudo locker nearest to you/);
+  await page.fill('#address', '12 Main Rd, Sea Point');
   await page.click('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
   const row = orderRows(dev)[0];
-  assert.equal(row.Address, 'Pudo locker: Engen Sea Point');
+  assert.equal(row.Address, 'Pudo locker near: 12 Main Rd, Sea Point');
   assert.equal(row['Delivery fee'], 74);
   assert.equal(row.Total, 13 * 40 + 74);
   noErrors(errors);
