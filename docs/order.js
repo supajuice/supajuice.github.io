@@ -238,6 +238,16 @@
     return c.fee > 0 ? SJ.money(c.fee, c.currency) : 'Free';
   }
 
+  // While the fee is confirmed after the order, a starting price says so.
+  var QUOTE_NOTE = ' (we\'ll contact you with the final price)';
+
+  // The starting price for door or locker, with the note, or '' when there is none.
+  function quoteFromText(kind) {
+    if (!config || !config.quote || pudoOn()) return '';
+    var text = fixedFromText(kind) || (config.fee > 0 ? 'From ' + SJ.money(config.fee, config.currency) : '');
+    return text ? text + QUOTE_NOTE : '';
+  }
+
   function syncFulfil() {
     var collect = collecting();
     var place = config ? config.collectNote : '';
@@ -255,8 +265,8 @@
     if (config) {
       var collectFree = !pudo || pudoFrom('collect') === 0;
       $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? ' · ' + place : '') : (place || 'Collect');
-      $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : fixedFromText('door') || deliveryText(config);
-      $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : fixedFromText('locker') || deliveryText(config);
+      $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
+      $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : quoteFromText('locker') || deliveryText(config);
     }
     $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '')
       : choice === 'locker' ? 'Send to a Pudo locker'
@@ -314,8 +324,8 @@
       if (fee === null) opts.feeText = 'DM us for over ' + pudoMax();
     }
     if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
-    if (choice && !collecting() && fixedFromText(choice === 'locker' ? 'locker' : 'door')) {
-      opts.feeText = fixedFromText(choice === 'locker' ? 'locker' : 'door');
+    if (choice && !collecting() && quoteFromText(choice === 'locker' ? 'locker' : 'door')) {
+      opts.feeText = quoteFromText(choice === 'locker' ? 'locker' : 'door');
     }
     opts.discount = discount;
     var total = SJ.renderSummary($('summary'), config, stepper.get(), opts);
