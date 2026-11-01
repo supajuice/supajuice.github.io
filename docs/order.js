@@ -142,6 +142,20 @@
     return !!(config && Array.isArray(config.collectSlots));
   }
 
+  // A starting price from config.js (fromPrices), for when the fee is confirmed after
+  // the order and no Pudo rates are set. Null when there is none to show.
+  function fixedFrom(kind) {
+    if (!config || !config.quote || pudoOn()) return null;
+    var p = SJ.cfg.fromPrices;
+    var n = p && Number(p[kind]);
+    return n > 0 ? n : null;
+  }
+
+  function fixedFromText(kind) {
+    var n = fixedFrom(kind);
+    return n === null ? '' : 'From ' + SJ.money(n, config.currency);
+  }
+
   function deliveryText(c) {
     if (c.quote) return c.fee > 0 ? 'From ' + SJ.money(c.fee, c.currency) : 'Fee confirmed after you order';
     return c.fee > 0 ? SJ.money(c.fee, c.currency) : 'Free';
@@ -164,8 +178,8 @@
     if (config) {
       var collectFree = !pudo || pudoFrom('collect') === 0;
       $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? ' · ' + place : '') : (place || 'Collect');
-      $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : deliveryText(config);
-      $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : deliveryText(config);
+      $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : fixedFromText('door') || deliveryText(config);
+      $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : fixedFromText('locker') || deliveryText(config);
     }
     $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '')
       : choice === 'locker' ? 'Send to a Pudo locker'
@@ -220,6 +234,9 @@
       if (fee === null) opts.feeText = 'DM us for over ' + pudoMax();
     }
     if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
+    if (choice && !collecting() && fixedFromText(choice === 'locker' ? 'locker' : 'door')) {
+      opts.feeText = fixedFromText(choice === 'locker' ? 'locker' : 'door');
+    }
     var total = SJ.renderSummary($('summary'), config, stepper.get(), opts);
     if (!busy) $('submit').textContent = (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
     $('next-note').textContent = quote

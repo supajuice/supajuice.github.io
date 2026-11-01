@@ -4,7 +4,11 @@
 //            It starts with https://script.google.com/macros/s/ and ends with /exec
 // instagram  Optional. An Instagram handle without the @. Shown as a fallback when
 //            ordering is closed or busy, so customers know where to send a DM.
+// fromPrices Starting delivery prices shown on the "To your door" and "To a Pudo locker"
+//            buttons while the fee is confirmed after each order. Once Pudo rates are
+//            entered on the admin page, the prices worked out from them are shown instead.
 window.SJ_CONFIG = {
   endpoint: 'https://script.google.com/macros/s/AKfycbxEIuI6sClunrjlo5O8raoGk67ue7txtJgD6OrLrAxlg90Qa99-1DoyqDZJWmQbX1or/exec',
-  instagram: 'gregbolus02'
+  instagram: 'gregbolus02',
+  fromPrices: { door: 99, locker: 69 }
 };
