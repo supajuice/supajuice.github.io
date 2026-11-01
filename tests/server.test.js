@@ -82,7 +82,7 @@ test('public config shows the price but no bank details', () => {
   const { collectSlots, ...rest } = cfg;
   assert.deepEqual(rest, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R',
-    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, ship: null, cardPay: false, ready: true
+    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, ship: null, cardPay: false, codesOn: false, ready: true
   });
   assert.ok(collectSlots.length > 0, 'collection times are always offered');
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
@@ -1816,4 +1816,129 @@ test('with Pudo off, the old delivery fee and collection rules apply', () => {
 test('collection can stay free while delivery uses Pudo', () => {
   const { gas } = pudoReady({ pudo_collection_box: 'no' });
   assert.deepEqual(gas.call({ action: 'config' }).config.ship.tiers.map((t) => t.collect), [0, 0, 0]);
+});
+
+// ---------------------------------------------------------------------------
+// Discount codes
+// ---------------------------------------------------------------------------
+
+function readyCodes(extra) {
+  const env = ready();
+  const r = env.gas.call({ action: 'saveSettings', key: env.key, values: Object.assign({ discount_codes: 'run10 10 on, HALF 50% on\nFREESHIP delivery on, OLD20 20 off' }, extra) });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  return env;
+}
+
+test('discount codes are saved tidied up, and bad lines are turned away with the code named', () => {
+  const { gas, key } = readyCodes();
+  assert.equal(gas.call({ action: 'getSettings', key }).values.discount_codes, 'RUN10 10 on, HALF 50 on, FREESHIP delivery on, OLD20 20 off');
+  const bad = (text) => gas.call({ action: 'saveSettings', key, values: { discount_codes: text } });
+  assert.match(bad('RUN10 0 on').message, /RUN10.*1 to 100/);
+  assert.match(bad('RUN10 150 on').message, /RUN10/);
+  assert.match(bad('R! 10 on').message, /3 to 20 letters or digits/);
+  assert.match(bad('RUN10 10 on, run10 20 off').message, /RUN10 is there twice/);
+  assert.match(bad('RUN10 10').message, /RUN10/);
+  assert.equal(bad('').ok, true, 'no codes is fine');
+});
+
+test('the order page learns only that codes exist, and checks one code at a time', () => {
+  const { gas } = readyCodes();
+  const cfg = gas.call({ action: 'config' }).config;
+  assert.equal(cfg.codesOn, true);
+  assert.ok(!JSON.stringify(cfg).includes('RUN10'), 'the codes stay private');
+  assert.deepEqual(gas.call({ action: 'checkCode', code: ' run10 ' }).discount, { code: 'RUN10', percent: 10, delivery: false });
+  assert.deepEqual(gas.call({ action: 'checkCode', code: 'freeship' }).discount, { code: 'FREESHIP', percent: 0, delivery: true });
+  assert.equal(gas.call({ action: 'checkCode', code: 'OLD20' }).error, 'bad_code', 'a code that is not live');
+  assert.equal(gas.call({ action: 'checkCode', code: 'NOPE' }).error, 'bad_code');
+
+  const { gas: none } = readyCodes({ discount_codes: 'OLD20 20 off' });
+  assert.equal(none.call({ action: 'config' }).config.codesOn, false, 'no box when nothing is live');
+});
+
+test('a percent code comes off the sachets, not the delivery, and shows on the invoice and alert', () => {
+  const { gas } = readyCodes();
+  // 3 x R40 = R120, 10% off = R12, plus R30 delivery.
+  const r = gas.call(order({ code: 'run10', expectedTotal: 138 }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.total, 138);
+  assert.equal(r.order.code, 'RUN10');
+  assert.equal(r.order.discountPct, 10);
+  assert.equal(r.order.freeDelivery, false);
+  const row = gas.rows('Orders')[0];
+  assert.equal(row['Discount code'], 'RUN10');
+  assert.equal(row['Discount %'], 10);
+
+  const invoice = gas.mail.find((m) => m.to === 'jane@example.com');
+  assert.match(invoice.body, /Discount \(RUN10, 10% off\): -R12/);
+  assert.match(invoice.body, /Total due: R138/);
+  assert.ok(invoice.attachments[0].getDataAsString().includes('Discount (RUN10, 10% off)'));
+  const alert = gas.mail.find((m) => m.to === 'greg@example.com');
+  assert.match(alert.body, /Code: RUN10 \(10% off, -R12/);
+});
+
+test('the total the customer saw must include the discount', () => {
+  const { gas } = readyCodes();
+  assert.equal(gas.call(order({ code: 'RUN10', expectedTotal: 150 })).error, 'price_changed');
+  assert.equal(gas.rows('Orders').length, 0);
+});
+
+test('a code that is not live, or made up, stops the order and says so', () => {
+  const { gas } = readyCodes();
+  const r = gas.call(order({ code: 'OLD20', expectedTotal: 126 }));
+  assert.equal(r.error, 'bad_code');
+  assert.match(r.message, /OLD20 is not valid/);
+  assert.ok(r.config, 'fresh settings come back');
+  assert.equal(gas.call(order({ code: 'MADEUP' })).error, 'bad_code');
+  assert.equal(gas.rows('Orders').length, 0);
+});
+
+test('a free delivery code makes delivery free, even when fees are confirmed per order', () => {
+  const { gas, key } = readyCodes({ delivery_quote: 'yes' });
+  const r = gas.call(order({ code: 'FREESHIP', expectedTotal: 120 }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'Awaiting payment', 'no fee to confirm, so no request');
+  assert.equal(r.order.fee, 0);
+  assert.equal(r.order.freeDelivery, true);
+  assert.equal(r.order.total, 120);
+  assert.match(gas.mail.find((m) => m.to === 'jane@example.com').body, /Delivery: free \(FREESHIP\)/);
+
+  // A collection with the code is simply a collection.
+  const c = gas.call(order({ code: 'FREESHIP', collect: true, address: '', collectAt: '2026-10-29 17:00', expectedTotal: 120 }));
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(c.order.freeDelivery, false);
+
+  // With Pudo fees on, the code still takes the fee off.
+  const p = gas.call({ action: 'saveSettings', key, values: { pudo_shipping: 'yes' } });
+  assert.equal(p.ok, true);
+  const pudo = gas.call(order({ code: 'FREESHIP', ship: 'locker', expectedTotal: 120 }));
+  assert.equal(pudo.ok, true, JSON.stringify(pudo));
+  assert.equal(pudo.order.fee, 0);
+});
+
+test('editing an order keeps its discount, worked out on the new price', () => {
+  const { gas, key } = readyCodes();
+  gas.call(order({ code: 'HALF', expectedTotal: 90 })); // 3 x 40 = 120, half off = 60, + 30
+  gas.mail.length = 0;
+  const r = gas.call({ action: 'editOrder', key, invoice: 'SJ-0001', name: 'Jane Doe', email: 'jane@example.com', contact: '@jane',
+    address: '12 Beach Rd', notes: '', qty: 3, collect: false, price: '30', fee: '30', sendInvoice: true });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.total, 75, '3 x 30 = 90, half off = 45, + 30');
+  assert.equal(r.order.code, 'HALF');
+  assert.equal(r.emailed, true);
+  assert.match(gas.mail[0].body, /Discount \(HALF, 50% off\): -R45/);
+});
+
+test('accepting a request keeps its discount', () => {
+  const { gas, key } = readyCodes({ delivery_quote: 'yes' });
+  const r = gas.call(order({ code: 'RUN10', expectedTotal: 108 })); // 120 less 12, fee later
+  assert.equal(r.order.status, 'New request');
+  assert.equal(r.order.total, 108);
+  const a = gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0001', fee: '30' });
+  assert.equal(a.ok, true, JSON.stringify(a));
+  assert.equal(a.order.total, 138);
+});
+
+test('setup adds the discount columns to the orders tab', () => {
+  const { gas } = ready();
+  assert.equal(gas.sheet('Orders').getRange(1, 21, 1, 3).getValues()[0].join('|'), 'Discount code|Discount %|Free delivery');
 });

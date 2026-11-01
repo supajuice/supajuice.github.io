@@ -93,6 +93,15 @@
           <input id="notes" type="text" maxlength="300">
         </div>
 
+        <div class="field" id="code-field" hidden>
+          <label for="code">Discount code (optional)</label>
+          <div class="code-row">
+            <input id="code" type="text" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="code-msg">
+            <button type="button" class="btn btn-quiet" id="code-apply">Apply</button>
+          </div>
+          <p class="hint" id="code-msg" role="status"></p>
+        </div>
+
         <div class="hp" aria-hidden="true">
           <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
         </div>

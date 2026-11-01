@@ -664,6 +664,81 @@ a {
 .btn-block {
   width: 100%;
 }
+.code-row {
+  display: flex;
+  gap: 8px;
+}
+.code-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-transform: uppercase;
+}
+.code-row .btn {
+  flex: 0 0 auto;
+}
+#code-msg:empty {
+  display: none;
+}
+.code-ok {
+  font-weight: 600;
+}
+.codes-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+.code-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s4);
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line);
+}
+.code-main {
+  flex: 1 1 160px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.code-name {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+.code-what {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.code-item--off .code-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.code-live {
+  min-height: 0;
+}
+.codes-add-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--s3);
+}
+.codes-add .btn {
+  justify-self: start;
+}
+.hint-bad {
+  color: var(--ink);
+  font-weight: 600;
+}
+.link-btn {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
 .btn-small {
   min-height: 42px;
   padding: 0 var(--s4);

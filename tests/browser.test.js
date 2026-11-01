@@ -2374,3 +2374,123 @@ for (const width of [320, 390, 768, 1280]) {
     assert.deepEqual(bad.filter((b) => b[1] > 0), [], 'screens that scroll sideways');
   });
 }
+
+// ---------------------------------------------------------------------------
+// Discount codes
+// ---------------------------------------------------------------------------
+
+async function withCodes(dev, page, codes) {
+  dev.gas.call({ action: 'saveSettings', key: dev.key, values: { discount_codes: codes } });
+  await page.reload();
+}
+
+test('order page: no code box until a code is live', async (t) => {
+  const { dev, page } = await openKiosk(t, { mode: 'ready' });
+  await choose(page, 'deliver');
+  assert.equal(await page.locator('#code-field').isHidden(), true);
+  await withCodes(dev, page, 'OLD 20 off');
+  await choose(page, 'deliver');
+  assert.equal(await page.locator('#code-field').isHidden(), true, 'a code that is not live does not count');
+});
+
+test('order page: a percent code comes off the sachets and is saved on the order', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
+  await withCodes(dev, page, 'RUN10 10 on, OLD20 20 off');
+  await fillKiosk(page, { more: 2 }); // 3 sachets
+  assert.equal(await page.locator('#code-field').isVisible(), true);
+
+  await page.fill('#code', 'old20');
+  await page.click('#code-apply');
+  await page.waitForFunction(() => /not valid/.test(document.getElementById('code-msg').textContent));
+  assert.match(await text(page, '#summary'), /Total\s+R150/, 'nothing off for a code that is not live');
+
+  await page.fill('#code', 'run10');
+  await page.press('#code', 'Enter');
+  await page.waitForSelector('#code-remove');
+  assert.match(await text(page, '#code-msg'), /RUN10: 10% off your sachets/);
+  assert.match(await text(page, '#summary'), /Discount \(RUN10, 10% off\)\s+-R12/);
+  assert.match(await text(page, '#summary'), /Total\s+R138/);
+  assert.equal(await text(page, '#submit'), 'Place order for R138');
+
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  const row = orderRows(dev)[0];
+  assert.equal(row['Discount code'], 'RUN10');
+  assert.equal(row.Total, 138);
+  noErrors(errors);
+});
+
+test('order page: a typed code is checked when ordering, and Remove takes it off', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
+  await withCodes(dev, page, 'FREESHIP delivery on');
+  await fillKiosk(page);
+  await page.fill('#code', 'nope');
+  await page.click('#submit');
+  await page.waitForSelector('#form-error:not([hidden])');
+  assert.match(await text(page, '#form-error'), /Check your discount code/);
+  assert.equal(orderRows(dev).length, 0);
+
+  await page.fill('#code', 'freeship');
+  await page.click('#code-apply');
+  await page.waitForSelector('#code-remove');
+  assert.match(await text(page, '#summary'), /Delivery\s+Free \(FREESHIP\)/);
+  await page.click('#code-remove');
+  assert.match(await text(page, '#summary'), /Delivery\s+R30/);
+  assert.equal(await page.inputValue('#code'), '');
+
+  await page.fill('#code', 'FREESHIP');
+  await page.click('#submit'); // applied on the way
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(orderRows(dev)[0]['Delivery fee'], 0);
+  assert.equal(orderRows(dev)[0]['Free delivery'], 'yes');
+  noErrors(errors);
+});
+
+test('admin: add a discount code, switch it off and remove it', async (t) => {
+  const { dev, page, errors } = await openAdmin(t);
+  await openSettings(page);
+  assert.match(await text(page, '#codes-list'), /No codes yet/);
+
+  await page.fill('#code-new', 'r');
+  await page.click('#code-add');
+  assert.match(await text(page, '#code-add-error'), /3 to 20 letters or digits/);
+  await page.fill('#code-new', 'run10');
+  await page.fill('#code-pct', '10');
+  await page.click('#code-add');
+  await page.fill('#code-new', 'freeship');
+  await page.selectOption('#code-kind', 'delivery');
+  assert.equal(await page.locator('#code-pct').isHidden(), true);
+  await page.press('#code-new', 'Enter');
+  assert.match(await text(page, '#codes-list'), /RUN10\s+10% off sachets/);
+  assert.match(await text(page, '#codes-list'), /FREESHIP\s+Free delivery/);
+
+  await page.uncheck('#code-live-FREESHIP');
+  await page.click('#settings-save');
+  await page.waitForFunction(() => document.getElementById('settings-save').textContent === 'Save settings');
+  const saved = () => dev.gas.call({ action: 'getSettings', key: dev.key }).values.discount_codes;
+  assert.equal(saved(), 'RUN10 10 on, FREESHIP delivery off');
+  assert.match(await text(page, '#codes-list'), /Not live/);
+
+  await page.click('#code-remove-RUN10');
+  await page.click('#settings-save');
+  await page.waitForFunction(() => document.getElementById('settings-save').textContent === 'Save settings');
+  assert.equal(saved(), 'FREESHIP delivery off');
+  noErrors(errors);
+});
+
+test('admin: an order shows its code, and editing it keeps the discount in the new total', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { mode: 'ready' });
+  dev.gas.call({ action: 'saveSettings', key: dev.key, values: { discount_codes: 'HALF 50 on' } });
+  const r = dev.gas.call({ action: 'order', name: 'Jane Doe', email: 'jane@example.com', contact: '082 123 4567', address: '12 Beach Rd',
+    qty: 2, code: 'HALF', requestId: 'req_code_000001', expectedTotal: 70, website: '' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  await page.reload();
+  await page.waitForSelector('.tabs');
+  const c = card(page, r.order.invoice);
+  await c.waitFor();
+  assert.match(await c.innerText(), /HALF, 50% off \(-R40/);
+  await c.locator('[data-role=edit]').click();
+  await page.fill('#e-price', '30');
+  assert.match(await card(page, r.order.invoice).locator('.list-total').innerText(), /New total: R60, after HALF \(50% off\)/);
+  noErrors(errors);
+});

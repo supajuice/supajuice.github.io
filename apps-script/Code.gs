@@ -51,16 +51,18 @@ const MAX_ORDERS_LISTED = 500;
 const HEADERS = [
   'Invoice', 'Created', 'Source', 'Name', 'Contact', 'Address', 'Notes',
   'Qty', 'Unit price', 'Delivery fee', 'Total', 'Status', 'Paid on', 'Delivered on', 'Request ID',
-  'Email', 'Invoice emailed', 'Collect', 'Edited on', 'Collect at'
+  'Email', 'Invoice emailed', 'Collect', 'Edited on', 'Collect at',
+  'Discount code', 'Discount %', 'Free delivery'
 ];
 // New columns go at the end, so rows written by an older version still line up.
 const COL = {
   INVOICE: 0, CREATED: 1, SOURCE: 2, NAME: 3, CONTACT: 4, ADDRESS: 5, NOTES: 6,
   QTY: 7, PRICE: 8, FEE: 9, TOTAL: 10, STATUS: 11, PAID: 12, DELIVERED: 13, REQUEST: 14,
-  EMAIL: 15, EMAILED: 16, COLLECT: 17, EDITED: 18, COLLECT_AT: 19
+  EMAIL: 15, EMAILED: 16, COLLECT: 17, EDITED: 18, COLLECT_AT: 19,
+  CODE: 20, DISCOUNT: 21, FREE_DELIVERY: 22
 };
 // Text columns are stored as plain text so Sheets never turns input into a formula or a date.
-const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@', '@', '@', '@'];
+const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@', '@', '@', '@', '@', '0', '@'];
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -109,6 +111,7 @@ const SETTING_DEFS = [
   { key: 'pudo_m_box', value: '18', note: 'What one Medium box costs you.' },
   { key: 'pudo_m_locker', value: '69', note: 'Pudo Medium, locker to locker.' },
   { key: 'pudo_m_door', value: '115.81', note: 'Pudo Medium, locker to door.' },
+  { key: 'discount_codes', value: '', note: 'Discount codes customers can enter on the order page, separated by commas: the code, then a percent off the sachets or "delivery" for free delivery, then on or off. For example: RUN10 10 on. Set them on the admin page.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
   { key: 'invoice_prefix', value: 'SJ', note: 'Letters before the invoice number, for example SJ-0001. Up to 6 letters or digits.' },
@@ -124,7 +127,7 @@ const SETTING_DEFS = [
 // Longest allowed text per setting.
 const SETTING_MAX = {
   brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, collection_address: 200, alert_email: 120,
-  collection_dates: 8000, collection_hours: 20,
+  collection_dates: 8000, discount_codes: 4000, collection_hours: 20,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
 
@@ -159,6 +162,7 @@ function handle_(body) {
 
     // Public actions.
     if (body.action === 'config') return { ok: true, config: customerConfig_() };
+    if (body.action === 'checkCode') return checkCode_(body);
     if (body.action === 'order') return placeKioskOrder_(body);
     if (body.action === 'photo') return { ok: true, photo: readPhoto_() };
     if (body.action === 'startPayment') return startPayment_(body);
@@ -232,6 +236,7 @@ function createOrder_(body, source) {
   // Greg picks the Pudo locker nearest the customer's address. Older pages sent a locker instead.
   const locker = toLocker ? clean_(body.address || body.locker, 300) : '';
   const requestId = /^[A-Za-z0-9_-]{8,64}$/.test(String(body.requestId || '')) ? String(body.requestId) : '';
+  const codeText = clean_(body.code, 30);
 
   if (!name) throw fail_('invalid', 'Please enter a name.');
   if (kiosk && !email) throw fail_('invalid', 'Please enter your email address so we can send your invoice.');
@@ -284,10 +289,15 @@ function createOrder_(body, source) {
     const pudo = kiosk && settings.ship.on;
     const tier = pudo ? shipTier_(settings.ship, qty) : null;
     if (pudo && !tier) throw fail_('invalid', 'For more than ' + settings.ship.max + ' sachets, please send us a DM and we will arrange delivery.');
-    const request = kiosk && !collect && settings.quote && !pudo;
-    const fee = pudo ? (collect ? tier.collect : toLocker ? tier.locker : tier.door)
+    // A code must be live when the order is placed. Free delivery leaves a collection as it is.
+    const code = codeText ? findCode_(settings.codes, codeText) : null;
+    if (codeText && !code) throw fail_('bad_code', 'The discount code ' + codeText.toUpperCase() + ' is not valid. Check it, or remove it to order without it.', { config: publicConfig_(settings, freeSlots_(settings, sheet)) });
+    const freeDelivery = !!(code && code.delivery && !collect);
+    const percent = code && !code.delivery ? code.percent : 0;
+    const request = kiosk && !collect && settings.quote && !pudo && !freeDelivery;
+    const fee = freeDelivery ? 0 : pudo ? (collect ? tier.collect : toLocker ? tier.locker : tier.door)
       : collect || request ? 0 : (customFee !== null ? round2_(customFee) : settings.fee);
-    const totalCents = Math.round(settings.price * 100) * qty + Math.round(fee * 100);
+    const totalCents = totalCents_(settings.price, qty, fee, percent);
     const total = totalCents / 100;
 
     // The total the customer saw must still be the real total.
@@ -304,7 +314,8 @@ function createOrder_(body, source) {
       safe_(name), safe_(contact), safe_(toLocker ? 'Pudo locker near: ' + locker : address), safe_(notes),
       qty, settings.price, request ? '' : fee, total,
       request ? STATUS.REQUESTED : STATUS.AWAITING, '', '', requestId,
-      safe_(email), '', collect ? 'yes' : '', '', collectAt
+      safe_(email), '', collect ? 'yes' : '', '', collectAt,
+      code ? code.code : '', percent, freeDelivery ? 'yes' : ''
     ];
     writeRow_(sheet, sheet.getLastRow() + 1, row);
     SpreadsheetApp.flush();
@@ -472,7 +483,8 @@ function editOrder_(body) {
 
     const unit = round2_(price);
     const delivery = request ? 0 : round2_(fee);
-    const total = (Math.round(unit * 100) * qty + Math.round(delivery * 100)) / 100;
+    // A discount code's percent stays with the order, so it still applies to the new price.
+    const total = totalCents_(unit, qty, delivery, Number(row[COL.DISCOUNT]) || 0) / 100;
     row[COL.NAME] = safe_(name);
     row[COL.CONTACT] = safe_(contact);
     row[COL.ADDRESS] = safe_(address);
@@ -654,9 +666,8 @@ function acceptOrder_(body) {
       throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
     }
     const delivery = collect ? 0 : round2_(fee);
-    const items = Math.round((Number(row[COL.PRICE]) || 0) * 100) * (Number(row[COL.QTY]) || 0);
     row[COL.FEE] = delivery;
-    row[COL.TOTAL] = (items + Math.round(delivery * 100)) / 100;
+    row[COL.TOTAL] = totalCents_(Number(row[COL.PRICE]) || 0, Number(row[COL.QTY]) || 0, delivery, Number(row[COL.DISCOUNT]) || 0) / 100;
     row[COL.STATUS] = STATUS.AWAITING;
     sheet.getRange(rowNum, 1, 1, HEADERS.length).setNumberFormats([FORMATS]).setValues([row]);
     SpreadsheetApp.flush();
@@ -740,7 +751,10 @@ function rowToOrder_(r) {
     emailedOn: str_(r[COL.EMAILED]),
     collect: str_(r[COL.COLLECT]).toLowerCase() === 'yes',
     editedOn: str_(r[COL.EDITED]),
-    collectAt: str_(r[COL.COLLECT_AT])
+    collectAt: str_(r[COL.COLLECT_AT]),
+    code: str_(r[COL.CODE]),
+    discountPct: Number(r[COL.DISCOUNT]) || 0,
+    freeDelivery: str_(r[COL.FREE_DELIVERY]).toLowerCase() === 'yes'
   };
 }
 
@@ -817,6 +831,7 @@ function sendAlert_(order, s) {
         'Address: ' + order.address,
         'Notes: ' + (order.notes || '-'),
         'Order: ' + order.qty + ' x ' + s.product + ' at ' + money_(order.price, s.currency) + ' = ' + money_(order.total, s.currency),
+        order.code ? 'Code: ' + order.code + ' (' + order.discountPct + '% off)' : '',
         '',
         'Open the admin page, set the delivery fee for this address and accept the request. The customer is then emailed the invoice.'
       ].join('\n'));
@@ -831,6 +846,7 @@ function sendAlert_(order, s) {
       order.collect ? 'Collects: ' + collectLine_(order, s) : 'Address: ' + order.address,
       'Notes: ' + (order.notes || '-'),
       'Order: ' + order.qty + ' x ' + s.product + ' at ' + money_(order.price, s.currency),
+      order.code ? 'Code: ' + order.code + (order.freeDelivery ? ' (free delivery)' : ' (' + order.discountPct + '% off, -' + money_(discountOf_(order), s.currency) + ')') : '',
       order.collect ? 'Collection: ' + (order.fee > 0 ? money_(order.fee, s.currency) : 'free') : 'Delivery: ' + money_(order.fee, s.currency),
       'Total: ' + money_(order.total, s.currency),
       packLine_(order, s),
@@ -902,7 +918,8 @@ function invoiceText_(o, s) {
   if (paid && o.paidOn) lines.push('Paid: ' + formatDay_(o.paidOn));
   lines.push('', 'For: ' + o.name);
   lines.push(o.qty + ' x ' + s.product + ' @ ' + money_(o.price, s.currency) + ' = ' + money_(lineTotal_(o), s.currency));
-  lines.push(o.collect ? 'Collection: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free') : 'Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free'));
+  if (o.discountPct > 0) lines.push(discountLine_(o, s));
+  lines.push(o.collect ? 'Collection: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free') : 'Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free' + (o.freeDelivery && o.code ? ' (' + o.code + ')' : '')));
   lines.push((paid ? 'Total paid: ' : 'Total due: ') + money_(o.total, s.currency));
   if (o.collect) lines.push('', 'Collecting: ' + collectLine_(o, s));
   if (paid) {
@@ -962,7 +979,8 @@ function invoiceHtml_(o, s) {
   parts.push(
     '<table><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>',
     '<tr><td>' + esc_(s.product) + '</td><td class="r">' + o.qty + '</td><td class="r">' + m(o.price) + '</td><td class="r">' + m(lineTotal_(o)) + '</td></tr>',
-    '<tr><td>' + (o.collect ? 'Collection' : 'Delivery') + '</td><td></td><td></td><td class="r">' + (o.fee > 0 ? m(o.fee) : 'Free') + '</td></tr>',
+    o.discountPct > 0 ? '<tr><td>Discount (' + esc_(o.code) + ', ' + o.discountPct + '% off)</td><td></td><td></td><td class="r">-' + m(discountOf_(o)) + '</td></tr>' : '',
+    '<tr><td>' + (o.collect ? 'Collection' : 'Delivery' + (o.freeDelivery && o.code ? ' (' + esc_(o.code) + ')' : '')) + '</td><td></td><td></td><td class="r">' + (o.fee > 0 ? m(o.fee) : 'Free') + '</td></tr>',
     '<tr class="total"><td>' + (paid ? 'Total paid' : 'Total due') + '</td><td></td><td></td><td class="r">' + m(o.total) + '</td></tr>',
     '</table>'
   );
@@ -1119,6 +1137,90 @@ function lineTotal_(o) {
   return Math.round(o.price * 100) * o.qty / 100;
 }
 
+// The rand taken off the sachets by a discount code's percent, rounded to the cent.
+function discountCents_(price, qty, percent) {
+  return percent > 0 ? Math.round(Math.round(price * 100) * qty * percent / 100) : 0;
+}
+
+function discountOf_(o) {
+  return discountCents_(o.price, o.qty, o.discountPct) / 100;
+}
+
+// The order total in cents: the sachets, less any discount, plus the delivery or collection fee.
+function totalCents_(price, qty, fee, percent) {
+  const items = Math.round(price * 100) * qty;
+  return items - discountCents_(price, qty, percent) + Math.round(fee * 100);
+}
+
+// "Discount (RUN10, 10% off): -R20.00", or '' without one.
+function discountLine_(o, s) {
+  if (!(o.discountPct > 0)) return '';
+  return 'Discount (' + o.code + ', ' + o.discountPct + '% off): -' + money_(discountOf_(o), s.currency);
+}
+
+// ---------------------------------------------------------------------------
+// Discount codes
+// ---------------------------------------------------------------------------
+//
+// Kept in the discount_codes setting, separated by commas: "RUN10 10 on" (10% off the sachets) or
+// "FREESHIP delivery off" (free delivery, not live). Codes are letters and digits, any case
+// when typed. Customers never see the list: the order page only checks the code they enter.
+
+const CODE_PATTERN = /^[A-Z0-9]{3,20}$/;
+
+// [{ code, percent, delivery, live }], or null when a line does not make sense.
+function parseCodes_(text) {
+  const out = [];
+  const seen = {};
+  const lines = String(text || '').split(/[\r\n,]+/).map(function (l) { return l.trim(); }).filter(String);
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\S+)\s+(\S+)\s+(on|off)$/i.exec(lines[i]);
+    if (!m) return null;
+    const code = m[1].toUpperCase();
+    if (!CODE_PATTERN.test(code) || seen[code]) return null;
+    const what = m[2].toLowerCase().replace(/%$/, '');
+    const delivery = what === 'delivery';
+    const percent = delivery ? 0 : Number(what);
+    if (!delivery && !(Math.floor(percent) === percent && percent >= 1 && percent <= 100)) return null;
+    seen[code] = true;
+    out.push({ code: code, percent: percent, delivery: delivery, live: m[3].toLowerCase() === 'on' });
+  }
+  return out;
+}
+
+function codesText_(codes) {
+  return codes.map(function (c) { return c.code + ' ' + (c.delivery ? 'delivery' : c.percent) + ' ' + (c.live ? 'on' : 'off'); }).join(', ');
+}
+
+// Says which line is wrong, for the admin page.
+function codesError_(text) {
+  const lines = String(text || '').split(/[\r\n,]+/).map(function (l) { return l.trim(); }).filter(String);
+  const seen = {};
+  for (let i = 0; i < lines.length; i++) {
+    const one = parseCodes_(lines[i]);
+    const code = (lines[i].split(/\s+/)[0] || '').toUpperCase();
+    if (!one) return 'Discount code ' + code + ': use 3 to 20 letters or digits, and a percent from 1 to 100.';
+    if (seen[code]) return 'The discount code ' + code + ' is there twice.';
+    seen[code] = true;
+  }
+  return 'Check the discount codes.';
+}
+
+// The live code matching what the customer typed, or null.
+function findCode_(codes, typed) {
+  const want = String(typed || '').trim().toUpperCase();
+  return codes.filter(function (c) { return c.live && c.code === want; })[0] || null;
+}
+
+// The order page checks a code before the order is placed. Only a live code is found.
+function checkCode_(body) {
+  const typed = clean_(body.code, 30);
+  if (!typed) throw fail_('bad_code', 'Enter a discount code.');
+  const code = findCode_(readTypedSettings_().codes, typed);
+  if (!code) throw fail_('bad_code', 'The discount code ' + typed.toUpperCase() + ' is not valid.');
+  return { ok: true, discount: { code: code.code, percent: code.percent, delivery: code.delivery } };
+}
+
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -1172,6 +1274,7 @@ function readTypedSettings_() {
     collectAddress: raw.collection_address, // only for placed orders, never in publicConfig_
     quote: String(raw.delivery_quote).toLowerCase() !== 'no',
     ship: shipTable_(raw),
+    codes: parseCodes_(raw.discount_codes) || [],
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
     minQty: Math.min(maxQty, Math.max(1, Math.floor(parseNumber_(raw.min_quantity, 1)))),
     maxQty: maxQty,
@@ -1204,6 +1307,7 @@ function publicConfig_(s, slots) {
     collectSlots: slots, // [{ date, label, times }], the free collection times
     collectAhead: COLLECT_WINDOW_DAYS,
     cardPay: !!paystackKey_(), // collection orders can be paid by card
+    codesOn: s.codes.some(function (c) { return c.live; }), // shows the discount code box. The codes stay private.
     ready: s.ready
   };
 }
@@ -1355,6 +1459,11 @@ function validateSetting_(key, value) {
       const n = parseNumber_(text, NaN);
       if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 200) throw fail_('invalid', 'Most per order must be a whole number from 1 to 200.');
       return String(n);
+    }
+    case 'discount_codes': {
+      const codes = parseCodes_(text);
+      if (!codes) throw fail_('invalid', codesError_(text));
+      return codesText_(codes);
     }
     case 'collection_note':
       if (text === '') throw fail_('invalid', 'Collection place cannot be blank.');
@@ -2037,7 +2146,7 @@ function setup() {
   FORMATS.forEach(function (format, i) {
     orders.getRange(2, i + 1, orders.getMaxRows() - 1, 1).setNumberFormat(format);
   });
-  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130, 70, 130, 130].forEach(function (w, i) {
+  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130, 70, 130, 130, 110, 80, 90].forEach(function (w, i) {
     orders.setColumnWidth(i + 1, w);
   });
 

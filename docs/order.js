@@ -20,6 +20,8 @@
   var photo = null;      // { version, alt, width, height } from the config, or null
   var choice = null;     // 'collect', 'deliver' (to the door) or 'locker', null until the customer picks one
   var paying = false;    // waiting for Paystack's payment page
+  var discount = null;   // the applied discount code: { code, percent, delivery }, or null
+  var checkingCode = false;
 
   function showView(id) {
     VIEWS.forEach(function (v) { $(v).hidden = v !== id; });
@@ -86,6 +88,81 @@
       $('choose-' + (was || 'deliver')).focus();
     });
     $('collect-day').addEventListener('change', function () { fillTimes(''); });
+    $('code-apply').addEventListener('click', function () { applyCode(); });
+    $('code').addEventListener('keydown', function (ev) {
+      // Enter in the code box applies the code instead of placing the order.
+      if (ev.key === 'Enter') { ev.preventDefault(); applyCode(); }
+    });
+    $('code').addEventListener('input', function () {
+      // A changed code has to be applied again.
+      if (discount && $('code').value.trim().toUpperCase() !== discount.code) {
+        discount = null;
+        syncCode('');
+        renderTotals();
+      }
+    });
+  }
+
+  // ---------- Discount code ----------
+
+  function freeDeliveryCode() {
+    return !!(discount && discount.delivery);
+  }
+
+  // Shows the code box when the shop has a live code, and what the applied code does.
+  function syncCode(message) {
+    $('code-field').hidden = !(config && config.codesOn) && !discount;
+    var msg = SJ.clear($('code-msg'));
+    if (discount) {
+      msg.appendChild(el('span', { class: 'code-ok' }, discount.code + ': ' +
+        (discount.delivery ? 'free delivery' : discount.percent + '% off your sachets')));
+      if (discount.delivery && collecting()) msg.appendChild(document.createTextNode(' (applies when we deliver)'));
+      msg.appendChild(document.createTextNode('. '));
+      var remove = el('button', { type: 'button', class: 'link-btn', id: 'code-remove' }, 'Remove');
+      remove.addEventListener('click', function () {
+        discount = null;
+        $('code').value = '';
+        syncCode('');
+        renderTotals();
+        $('code').focus();
+      });
+      msg.appendChild(remove);
+    } else if (message) {
+      msg.textContent = message;
+    }
+  }
+
+  // Asks the order service whether the typed code is live. Resolves true when it is applied.
+  async function applyCode() {
+    var typed = $('code').value.trim();
+    if (!typed) {
+      discount = null;
+      syncCode('Enter a discount code first.');
+      renderTotals();
+      return false;
+    }
+    if (discount && discount.code === typed.toUpperCase()) return true;
+    if (checkingCode) return false;
+    checkingCode = true;
+    $('code-apply').disabled = true;
+    $('code-apply').textContent = 'Checking…';
+    try {
+      var res = await SJ.api('checkCode', { code: typed });
+      discount = res.discount;
+      $('code').value = discount.code;
+      syncCode('');
+      renderTotals();
+      return true;
+    } catch (err) {
+      discount = null;
+      syncCode(err.code === 'bad_code' ? err.message : 'Could not check the code. ' + err.message);
+      renderTotals();
+      return false;
+    } finally {
+      checkingCode = false;
+      $('code-apply').disabled = false;
+      $('code-apply').textContent = 'Apply';
+    }
   }
 
   // ---------- Collect or delivery ----------
@@ -104,7 +181,7 @@
 
   // A delivery whose fee Greg confirms after the order: it is sent as a request.
   function quoting() {
-    return !!(config && config.quote) && !collecting();
+    return !!(config && config.quote) && !collecting() && !freeDeliveryCode();
   }
 
   // ---------- Pudo fees ----------
@@ -189,6 +266,7 @@
     $('address-label').textContent = choice === 'locker' ? 'Your address' : 'Delivery address';
     $('locker-hint').hidden = choice !== 'locker';
     $('collect-time').hidden = !collect || !slotsOn();
+    syncCode($('code-msg').textContent && !discount ? $('code-msg').textContent : '');
     renderTotals();
   }
 
@@ -239,6 +317,7 @@
     if (choice && !collecting() && fixedFromText(choice === 'locker' ? 'locker' : 'door')) {
       opts.feeText = fixedFromText(choice === 'locker' ? 'locker' : 'door');
     }
+    opts.discount = discount;
     var total = SJ.renderSummary($('summary'), config, stepper.get(), opts);
     if (!busy) $('submit').textContent = (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
     $('next-note').textContent = quote
@@ -258,7 +337,8 @@
       qty: stepper.get(),
       collect: collecting(),
       collectAt: collecting() && $('collect-day').value && $('collect-hour').value
-        ? $('collect-day').value + ' ' + $('collect-hour').value : ''
+        ? $('collect-day').value + ' ' + $('collect-hour').value : '',
+      code: discount ? discount.code : ''
     };
   }
 
@@ -325,6 +405,16 @@
     if (busy || !config) return;
     hideError();
 
+    // A code typed but not applied is checked first, so it is never silently left out.
+    var typedCode = $('code').value.trim();
+    if (!$('code-field').hidden && typedCode && !(discount && discount.code === typedCode.toUpperCase())) {
+      if (!(await applyCode())) {
+        showError('Check your discount code, or clear it to order without one.');
+        $('code').focus();
+        return;
+      }
+    }
+
     var data = readForm();
     var problem = validate(data);
     if (problem) {
@@ -337,7 +427,7 @@
     if (data.collect) data.address = '';
     // Sent as the locker too, for an order service from before lockers used the address.
     data.locker = data.ship === 'locker' ? data.address : '';
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.locker, data.ship, data.notes, data.qty, data.collect, data.collectAt]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.locker, data.ship, data.notes, data.qty, data.collect, data.collectAt, data.code]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 
     setSubmitting(true);
@@ -346,7 +436,8 @@
         requestId: pending.id,
         // The total the customer was shown: without a fee for collection, or for a request.
         expectedTotal: SJ.totalFor(data.qty, config.price,
-          pudoOn() ? pudoFee() : data.collect || config.quote ? 0 : config.fee),
+          freeDeliveryCode() && !data.collect ? 0 : pudoOn() ? pudoFee() : data.collect || config.quote ? 0 : config.fee,
+          discount && !discount.delivery ? discount.percent : 0),
         website: $('website').value
       }));
       pending = null;
@@ -360,7 +451,19 @@
   }
 
   function onOrderError(err) {
-    if (err.code === 'price_changed' && err.data && err.data.config) {
+    if (err.code === 'bad_code') {
+      // The code was switched off after it was applied.
+      pending = null;
+      discount = null;
+      if (err.data && err.data.config) {
+        SJ.store.set(CONFIG_KEY, err.data.config);
+        applyConfig(err.data.config);
+      }
+      syncCode(err.message);
+      renderTotals();
+      showError(err.message);
+      $('code').focus();
+    } else if (err.code === 'price_changed' && err.data && err.data.config) {
       pending = null;
       SJ.store.set(CONFIG_KEY, err.data.config);
       applyConfig(err.data.config);

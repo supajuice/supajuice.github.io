@@ -49,6 +49,14 @@
       ]
     },
     {
+      id: 'codes',
+      title: 'Discount codes',
+      about: 'Codes customers enter for money off or free delivery',
+      fields: [
+        { key: 'discount_codes', label: 'Discount codes', type: 'codes' }
+      ]
+    },
+    {
       id: 'pudo',
       title: 'Delivery with Pudo',
       about: 'Boxes, sachet weight and Pudo prices',
@@ -932,6 +940,7 @@
     if (o.collect) card.appendChild(labelled('Collect', o.collectAt ? SJ.formatWhen(o.collectAt) : 'The customer collects this order. No time set yet.'));
     else if (o.address) card.appendChild(labelled('Address', addressNode(o.address)));
     if (o.notes) card.appendChild(labelled('Note', o.notes));
+    if (o.code) card.appendChild(labelled('Code', codeSummary(o)));
 
     card.appendChild(metaRow(o));
     card.appendChild(actionsFor(o));
@@ -1355,12 +1364,13 @@
   }
 
   // The total as it will be saved, or null while a number does not make sense yet.
-  function draftTotal(d, request) {
+  // percent: the order's discount code percent, which stays when Greg changes the price.
+  function draftTotal(d, request, percent) {
     var qty = Number(d.qty);
     var price = Number(String(d.price).replace(',', '.'));
     var fee = d.collect || request ? 0 : Number(String(d.fee).replace(',', '.'));
     if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1 || !isFinite(price) || price < 0 || !isFinite(fee) || fee < 0) return null;
-    return SJ.totalFor(qty, price, fee);
+    return SJ.totalFor(qty, price, fee, percent || 0);
   }
 
   function editForm(o) {
@@ -1375,9 +1385,10 @@
     var timeField;
 
     function sync() {
-      var total = draftTotal(d, request);
+      var total = draftTotal(d, request, o.discountPct);
       totalLine.textContent = total === null ? 'Check the quantity and prices.'
-        : (request ? 'Total before delivery: ' : 'New total: ') + SJ.money(total, sym);
+        : (request ? 'Total before delivery: ' : 'New total: ') + SJ.money(total, sym) +
+          (o.discountPct > 0 ? ', after ' + o.code + ' (' + o.discountPct + '% off)' : '');
       addressField.hidden = d.collect;
       timeField.hidden = !d.collect;
       // A request's fee is set when it is accepted, and its invoice is sent then.
@@ -1784,6 +1795,123 @@
       SJ.copyButton(url, 'Copy'));
   }
 
+  // ---------- Settings: discount codes ----------
+
+  // The discount_codes setting, separated by commas: "RUN10 10 on" or "FREESHIP delivery off".
+  var codesDraft = [];     // [{ code, percent, delivery, live }] as shown, saved with Save settings
+  var CODE_PATTERN = /^[A-Z0-9]{3,20}$/;
+
+  function parseCodes(text) {
+    return String(text || '').split(/[\r\n,]+/).map(function (line) {
+      var m = /^(\S+)\s+(\S+)\s+(on|off)$/i.exec(line.trim());
+      if (!m) return null;
+      var what = m[2].toLowerCase().replace(/%$/, '');
+      return { code: m[1].toUpperCase(), percent: what === 'delivery' ? 0 : Number(what), delivery: what === 'delivery', live: m[3].toLowerCase() === 'on' };
+    }).filter(Boolean);
+  }
+
+  function codesText(codes) {
+    return codes.map(function (c) { return c.code + ' ' + (c.delivery ? 'delivery' : c.percent) + ' ' + (c.live ? 'on' : 'off'); }).join(', ');
+  }
+
+  function codeWhat(c) {
+    return c.delivery ? 'Free delivery' : c.percent + '% off sachets';
+  }
+
+  // "RUN10, 10% off (-R20.00)" for an order's card.
+  function codeSummary(o) {
+    var sym = state.config ? state.config.currency : 'R';
+    if (o.freeDelivery) return o.code + ', free delivery';
+    if (o.discountPct > 0) return o.code + ', ' + o.discountPct + '% off (-' + SJ.money(SJ.discountFor(o.qty, o.price, o.discountPct), sym) + ')';
+    return o.code;
+  }
+
+  function codeUses(code) {
+    return state.orders.filter(function (o) { return o.code === code && o.status !== CANCELLED; }).length;
+  }
+
+  function codesField(f) {
+    var codeIn = el('input', { type: 'text', id: 'code-new', maxlength: '20', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', 'aria-describedby': 'code-new-hint' });
+    var kind = el('select', { id: 'code-kind' },
+      el('option', { value: 'percent' }, '% off sachets'),
+      el('option', { value: 'delivery' }, 'Free delivery'));
+    var pct = el('input', { type: 'text', id: 'code-pct', inputmode: 'numeric', maxlength: '3', autocomplete: 'off' });
+    var pctField = el('div', { class: 'field' }, el('label', { for: 'code-pct' }, 'Percent off'), pct);
+    var add = el('button', { type: 'button', class: 'btn btn-quiet', id: 'code-add' }, 'Add code');
+    var error = el('p', { class: 'hint hint-bad', id: 'code-add-error', role: 'alert', hidden: true });
+
+    kind.addEventListener('change', function () { pctField.hidden = kind.value === 'delivery'; });
+    function addCode() {
+      var code = codeIn.value.trim().toUpperCase();
+      var delivery = kind.value === 'delivery';
+      var percent = Number(pct.value.trim().replace('%', ''));
+      var problem = !CODE_PATTERN.test(code) ? 'Use 3 to 20 letters or digits for the code, for example RUN10.'
+        : codesDraft.some(function (c) { return c.code === code; }) ? code + ' is already in your list.'
+        : !delivery && !(Math.floor(percent) === percent && percent >= 1 && percent <= 100) ? 'Enter a percent from 1 to 100.'
+        : '';
+      if (problem) {
+        error.textContent = problem;
+        error.hidden = false;
+        (problem.indexOf('percent') !== -1 ? pct : codeIn).focus();
+        return;
+      }
+      error.hidden = true;
+      codesDraft.push({ code: code, percent: delivery ? 0 : percent, delivery: delivery, live: true });
+      codeIn.value = '';
+      pct.value = '';
+      renderCodes();
+      codeIn.focus();
+    }
+    add.addEventListener('click', addCode);
+    [codeIn, pct].forEach(function (node) {
+      node.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); addCode(); }
+      });
+    });
+
+    return el('div', { class: 'field span-all stack', id: 's-' + f.key },
+      el('div', { class: 'codes-list', id: 'codes-list' }),
+      el('fieldset', { class: 'field choice codes-add' },
+        el('legend', null, 'Add a code'),
+        el('div', { class: 'codes-add-row' },
+          el('div', { class: 'field' }, el('label', { for: 'code-new' }, 'Code'), codeIn),
+          el('div', { class: 'field' }, el('label', { for: 'code-kind' }, 'Gives'), kind),
+          pctField),
+        el('p', { class: 'hint', id: 'code-new-hint' }, 'Customers type the code on your order page. Letters and digits only, any case.'),
+        error,
+        add),
+      el('p', { class: 'hint' }, 'Live codes work on your order page. Press Save settings below to keep any change.'));
+  }
+
+  function renderCodes() {
+    var list = $('codes-list');
+    if (!list) return;
+    SJ.clear(list);
+    if (!codesDraft.length) {
+      list.appendChild(el('p', { class: 'fine' }, 'No codes yet. Add your first one below.'));
+      return;
+    }
+    codesDraft.forEach(function (c, i) {
+      var live = el('input', { type: 'checkbox', id: 'code-live-' + c.code });
+      live.checked = c.live;
+      live.addEventListener('change', function () { c.live = live.checked; renderCodes(); $('code-live-' + c.code).focus(); });
+      var remove = el('button', { type: 'button', class: 'btn btn-small btn-quiet', id: 'code-remove-' + c.code, 'aria-label': 'Remove ' + c.code }, 'Remove');
+      remove.addEventListener('click', function () {
+        codesDraft.splice(i, 1);
+        renderCodes();
+        var next = $('code-new');
+        if (next) next.focus();
+      });
+      var uses = codeUses(c.code);
+      list.appendChild(el('div', { class: 'code-item' + (c.live ? '' : ' code-item--off') },
+        el('div', { class: 'code-main' },
+          el('span', { class: 'code-name' }, c.code),
+          el('span', { class: 'code-what' }, codeWhat(c) + (uses ? ' · used on ' + uses + (uses === 1 ? ' order' : ' orders') : ''))),
+        el('label', { class: 'check code-live' }, live, el('span', null, c.live ? 'Live' : 'Not live')),
+        remove));
+    });
+  }
+
   // Each field gets its saved value from writeSetting once the form is on the page.
   function settingField(f) {
     if (f.type === 'checkbox') {
@@ -1794,6 +1922,7 @@
         f.hint ? el('p', { class: 'hint', id: boxId + '-hint' }, f.hint) : null);
     }
     if (f.type === 'dates') return datesField(f);
+    if (f.type === 'codes') return codesField(f);
     if (f.type === 'hours') {
       var from = el('input', { type: 'time', id: 's-' + f.key + '-from', step: '900' });
       var until = el('input', { type: 'time', id: 's-' + f.key + '-until', step: '900' });
@@ -2301,6 +2430,7 @@
       }).filter(String).join(',');
     }
     if (f.type === 'hours') return $('s-' + f.key + '-from').value + '-' + $('s-' + f.key + '-until').value;
+    if (f.type === 'codes') return codesText(codesDraft);
     return node.value;
   }
 
@@ -2311,6 +2441,9 @@
       node.checked = value.toLowerCase() !== 'no';
     } else if (f.type === 'dates') {
       readDatesDraft(value);
+    } else if (f.type === 'codes') {
+      codesDraft = parseCodes(value);
+      renderCodes();
     } else if (f.type === 'hours') {
       var parts = value.split('-');
       $('s-' + f.key + '-from').value = parts[0] || '';

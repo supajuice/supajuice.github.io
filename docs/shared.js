@@ -61,8 +61,19 @@
   }
 
   // Order total in cents-safe arithmetic. Same rule as the server.
-  function totalFor(qty, price, fee) {
-    return (Math.round(price * 100) * qty + Math.round(fee * 100)) / 100;
+  // percent: a discount code's percent off the sachets (optional).
+  function totalFor(qty, price, fee, percent) {
+    var items = Math.round(price * 100) * qty;
+    return (items - discountCents(price, qty, percent) + Math.round(fee * 100)) / 100;
+  }
+
+  // The same rounding as the order service: the discount on the sachets, in cents.
+  function discountCents(price, qty, percent) {
+    return percent > 0 ? Math.round(Math.round(price * 100) * qty * percent / 100) : 0;
+  }
+
+  function discountFor(qty, price, percent) {
+    return discountCents(price, qty, percent) / 100;
   }
 
   function pad2(n) {
@@ -127,7 +138,11 @@
     lines.push('');
     lines.push('For: ' + order.name);
     lines.push(order.qty + ' x ' + c.product + ' @ ' + money(order.price, sym) + ' = ' + money(totalFor(order.qty, order.price, 0), sym));
-    lines.push(order.collect ? 'Collection: free' : 'Delivery: ' + (order.fee > 0 ? money(order.fee, sym) : 'free'));
+    if (order.discountPct > 0) {
+      lines.push('Discount (' + order.code + ', ' + order.discountPct + '% off): -' + money(discountFor(order.qty, order.price, order.discountPct), sym));
+    }
+    lines.push(order.collect ? 'Collection: ' + (order.fee > 0 ? money(order.fee, sym) : 'free')
+      : 'Delivery: ' + (order.fee > 0 ? money(order.fee, sym) : 'free' + (order.freeDelivery && order.code ? ' (' + order.code + ')' : '')));
     lines.push((paid ? 'Total paid: ' : 'Total due: ') + money(order.total, sym));
     if (order.collect) {
       lines.push('');
@@ -360,20 +375,30 @@
   //   opts.collect  collection: no fee
   //   opts.quote    the fee is confirmed later, so the total covers the sachets only
   //   opts.fee      a fee to use instead of the usual one (Greg's DM orders)
+  //   opts.discount a discount code: { code, percent, delivery }. Free delivery leaves a collection as it is.
   function renderSummary(dl, c, qty, opts) {
     opts = opts || {};
     var sym = c.currency;
-    var quote = !!opts.quote && !opts.collect;
+    var d = opts.discount || null;
+    var freeDelivery = !!(d && d.delivery && !opts.collect);
+    var percent = d && !d.delivery ? d.percent : 0;
+    var quote = !!opts.quote && !opts.collect && !freeDelivery;
     // A collection is free unless a collection fee is given (the box, with Pudo fees on).
-    var fee = quote ? 0
+    var fee = freeDelivery || quote ? 0
       : opts.collect ? (typeof opts.collectFee === 'number' ? opts.collectFee : 0)
       : typeof opts.fee === 'number' ? opts.fee : c.fee;
-    var total = totalFor(qty, c.price, fee);
-    var feeText = opts.feeText || (quote ? (c.fee > 0 ? 'From ' + money(c.fee, sym) : 'Confirmed later') : (fee > 0 ? money(fee, sym) : 'Free'));
+    var total = totalFor(qty, c.price, fee, percent);
+    var feeText = freeDelivery ? 'Free (' + d.code + ')'
+      : opts.feeText || (quote ? (c.fee > 0 ? 'From ' + money(c.fee, sym) : 'Confirmed later') : (fee > 0 ? money(fee, sym) : 'Free'));
     clear(dl);
     dl.appendChild(el('div', { class: 'summary-row' },
       el('dt', null, qty + ' x ' + c.product),
       el('dd', null, money(totalFor(qty, c.price, 0), sym))));
+    if (percent > 0) {
+      dl.appendChild(el('div', { class: 'summary-row summary-discount' },
+        el('dt', null, 'Discount (' + d.code + ', ' + percent + '% off)'),
+        el('dd', null, '-' + money(discountFor(qty, c.price, percent), sym))));
+    }
     dl.appendChild(el('div', { class: 'summary-row' },
       el('dt', null, opts.label || (opts.collect ? 'Collection' : 'Delivery')),
       el('dd', null, feeText)));
@@ -389,6 +414,7 @@
     api: api,
     money: money,
     totalFor: totalFor,
+    discountFor: discountFor,
     formatWhen: formatWhen,
     formatDay: formatDay,
     dayOf: dayOf,
