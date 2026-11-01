@@ -23,7 +23,9 @@
     { id: 'delivered', status: DELIVERED, label: 'Delivered' },
     { id: 'cancelled', status: CANCELLED, label: 'Cancelled' },
     // Not a status: every collection still to hand over, by date and time.
-    { id: 'collections', status: null, label: 'Collections' }
+    { id: 'collections', status: null, label: 'Collections' },
+    // Not a status: how many gels to make each week, for collections and deliveries.
+    { id: 'weeks', status: null, label: 'Gels per week' }
   ];
   var BULK_MAX = 50; // the most orders the service changes at once
   var LOW_EMAILS = 10; // warn when fewer emails than this can still be sent today
@@ -142,6 +144,8 @@
     acceptFees: {},     // delivery fee typed for each new request, by invoice
     declineReason: '',
     query: '',          // the search box
+    weekKind: 'all',    // Gels per week: 'all', 'collect' or 'deliver'
+    weekOpen: {},       // Gels per week: the weeks whose orders are shown
     selected: {},       // ticked orders in the list shown, by invoice
     bulk: null,         // { op, reason, subject, message, error } while a bulk action is being confirmed
     bulkFailures: [],   // orders the last bulk action could not change, with the reason
@@ -412,7 +416,10 @@
     pickable = canSelect(f) && list.length > 0;
     panel.appendChild(listHead(f, list));
 
-    if (!list.length) {
+    if (f.id === 'weeks' && !searching()) {
+      // The switch stays even when one kind has no orders, so Greg can switch back.
+      panel.appendChild(weeksView());
+    } else if (!list.length) {
       panel.appendChild(searching() ? el('div', { class: 'empty' }, el('p', null, 'No orders match.')) : emptyState(f));
     } else if (f.id === 'collections' && !searching()) {
       collectionGroups(list).forEach(function (g) {
@@ -447,7 +454,7 @@
 
   // Ticking several orders only makes sense where they are all at the same step.
   function canSelect(f) {
-    return !searching() && f.id !== 'collections';
+    return !searching() && f.id !== 'collections' && f.id !== 'weeks';
   }
 
   // A collection still to hand over: placed or paid, not yet collected or cancelled.
@@ -456,6 +463,7 @@
   }
 
   function filterCount(f) {
+    if (f.id === 'weeks') return gelsThisWeek();
     return f.id === 'collections' ? state.orders.filter(upcomingCollection).length : countOf(f.status);
   }
 
@@ -476,6 +484,7 @@
   function visibleOrders(f) {
     if (searching()) return state.orders.filter(function (o) { return matches(o, state.query); }).sort(newestFirst);
     if (f.id === 'collections') return state.orders.filter(upcomingCollection).sort(byCollectTime);
+    if (f.id === 'weeks') return weekOrders();
     return state.orders.filter(function (o) { return o.status === f.status; }).sort(newestFirst);
   }
 
@@ -504,6 +513,136 @@
       group(title).orders.push(o);
     });
     return groups;
+  }
+
+  // ---------- Gels per week ----------
+
+  // A collection counts in the week the customer picked up (or the week ordered, while no
+  // time is set). A delivery counts in the week it was ordered. Cancelled orders do not count.
+  function weekOrders() {
+    return state.orders.filter(function (o) {
+      if (o.status === CANCELLED) return false;
+      return state.weekKind === 'all' || (state.weekKind === 'collect') === !!o.collect;
+    });
+  }
+
+  // The day an order counts on: '2026-11-03'.
+  function weekDay(o) {
+    return o.collect && o.collectAt ? SJ.dayOf(o.collectAt) : SJ.dayOf(o.created);
+  }
+
+  // Monday to Sunday weeks, numbered the usual way (ISO): { key, year, week, monday }.
+  function weekOf(day) {
+    var d = new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))));
+    var dow = (d.getUTCDay() + 6) % 7; // Monday 0
+    var monday = new Date(d.getTime() - dow * 86400000);
+    var thursday = new Date(monday.getTime() + 3 * 86400000);
+    var year = thursday.getUTCFullYear();
+    var week = 1 + Math.floor((thursday - Date.UTC(year, 0, 1)) / (7 * 86400000));
+    return { key: year + '-' + (week < 10 ? '0' : '') + week, year: year, week: week, monday: monday };
+  }
+
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  // "2 – 8 Nov", or "30 Nov – 6 Dec" across two months.
+  function weekRange(monday) {
+    var sunday = new Date(monday.getTime() + 6 * 86400000);
+    var a = monday.getUTCDate(), b = sunday.getUTCDate();
+    var ma = MONTHS[monday.getUTCMonth()], mb = MONTHS[sunday.getUTCMonth()];
+    return ma === mb ? a + ' \u2013 ' + b + ' ' + mb : a + ' ' + ma + ' \u2013 ' + b + ' ' + mb;
+  }
+
+  function thisWeekKey() {
+    return weekOf(dateText(new Date())).key;
+  }
+
+  // [{ key, year, week, monday, orders, gels, paid, collect, deliver }], oldest first.
+  function weekGroups(list) {
+    var byKey = {};
+    list.forEach(function (o) {
+      var w = weekOf(weekDay(o));
+      var g = byKey[w.key] || (byKey[w.key] = Object.assign(w, { orders: [], gels: 0, paid: 0, collect: 0, deliver: 0 }));
+      g.orders.push(o);
+      g.gels += o.qty;
+      if (o.status === PAID || o.status === DELIVERED) g.paid += o.qty;
+      if (o.collect) g.collect += o.qty; else g.deliver += o.qty;
+    });
+    return Object.keys(byKey).sort().map(function (k) { return byKey[k]; });
+  }
+
+  // For the chip: gels in this week, collections and deliveries together.
+  function gelsThisWeek() {
+    var key = thisWeekKey();
+    return state.orders.reduce(function (n, o) {
+      return o.status !== CANCELLED && weekOf(weekDay(o)).key === key ? n + o.qty : n;
+    }, 0);
+  }
+
+  function weekKindSwitch() {
+    var row = el('div', { class: 'seg', role: 'group', 'aria-label': 'Count orders for' });
+    [['all', 'All'], ['collect', 'Collection'], ['deliver', 'Delivery']].forEach(function (k) {
+      var btn = el('button', { type: 'button', class: 'seg-btn', 'aria-pressed': state.weekKind === k[0] ? 'true' : 'false', 'data-role': 'week-kind-' + k[0] }, k[1]);
+      btn.addEventListener('click', function () {
+        state.weekKind = k[0];
+        state.focus = { role: 'week-kind-' + k[0] };
+        renderOrders();
+      });
+      row.appendChild(btn);
+    });
+    return row;
+  }
+
+  function weekCard(g, current) {
+    var open = !!state.weekOpen[g.key];
+    var unpaid = g.gels - g.paid;
+    var split = state.weekKind === 'all' && g.collect && g.deliver
+      ? g.collect + ' collection, ' + g.deliver + ' delivery · ' : '';
+    var toggle = el('button', { type: 'button', class: 'week-toggle', 'aria-expanded': open ? 'true' : 'false', 'data-role': 'week-' + g.key },
+      el('span', { class: 'week-when' },
+        el('span', { class: 'week-name' }, (current ? 'This week · ' : '') + 'Week ' + g.week + (g.year !== new Date().getFullYear() ? ' ' + g.year : '')),
+        el('span', { class: 'week-range' }, weekRange(g.monday))),
+      el('span', { class: 'week-gels' }, el('strong', null, String(g.gels)), el('span', null, g.gels === 1 ? ' gel' : ' gels')));
+    toggle.addEventListener('click', function () {
+      state.weekOpen[g.key] = !open;
+      state.focus = { role: 'week-' + g.key };
+      renderOrders();
+    });
+    var box = el('div', { class: 'week' + (current ? ' week--now' : '') },
+      toggle,
+      el('p', { class: 'week-detail' }, split + plural(g.orders.length, 'order') + ' · ' + g.paid + ' paid' + (unpaid ? ', ' + unpaid + ' not paid yet' : '')));
+    if (open) {
+      var ul = el('ul', { class: 'week-orders' });
+      g.orders.slice().sort(function (a, b) { return weekDay(a) < weekDay(b) ? -1 : weekDay(a) > weekDay(b) ? 1 : 0; }).forEach(function (o) {
+        var when = o.collect ? (o.collectAt ? 'Collect ' + SJ.formatWhen(o.collectAt) : 'Collect, no time yet') : 'Deliver, ordered ' + SJ.formatDay(o.created);
+        ul.appendChild(el('li', null,
+          el('span', { class: 'week-order-qty' }, String(o.qty)),
+          el('span', { class: 'week-order-who' }, o.name + ' · ' + o.invoice),
+          el('span', { class: 'week-order-when' }, when + ' · ' + o.status)));
+      });
+      box.appendChild(ul);
+    }
+    return box;
+  }
+
+  function weeksView() {
+    var wrap = el('div', { class: 'stack' }, weekKindSwitch());
+    var list = weekOrders();
+    if (!list.length) {
+      wrap.appendChild(emptyState({ id: 'weeks' }));
+      return wrap;
+    }
+    var now = thisWeekKey();
+    var groups = weekGroups(list);
+    var ahead = groups.filter(function (g) { return g.key >= now; });
+    var past = groups.filter(function (g) { return g.key < now; }).reverse();
+    wrap.appendChild(el('h3', { class: 'collect-day' }, 'This week and ahead'));
+    if (ahead.length) ahead.forEach(function (g) { wrap.appendChild(weekCard(g, g.key === now)); });
+    else wrap.appendChild(el('p', { class: 'fine' }, 'Nothing for this week or later yet.'));
+    if (past.length) {
+      wrap.appendChild(el('h3', { class: 'collect-day' }, 'Earlier weeks'));
+      past.forEach(function (g) { wrap.appendChild(weekCard(g, false)); });
+    }
+    return wrap;
   }
 
   function searchBox() {
@@ -564,6 +703,7 @@
     if (!n) return '';
     var total = SJ.money(sumOf(list), state.config.currency);
     if (f.id === 'collections') return plural(n, 'collection') + ' to hand over.';
+    if (f.id === 'weeks') return 'Gels to make each week, from orders that are not cancelled.';
     if (f.id === 'requests') return plural(n, 'new request') + ' to set a delivery fee for and accept.';
     if (f.id === 'awaiting') return plural(n, 'order') + ' waiting for payment, ' + total + ' in total.';
     if (f.id === 'paid') return plural(n, 'paid order') + ' to deliver, ' + total + ' in total.';
@@ -846,7 +986,8 @@
       awaiting: 'Nothing is waiting for payment.',
       paid: 'No paid orders are waiting for delivery.',
       delivered: 'No orders have been delivered yet.',
-      cancelled: 'No orders have been cancelled.'
+      cancelled: 'No orders have been cancelled.',
+      weeks: state.weekKind === 'collect' ? 'No collection orders yet.' : state.weekKind === 'deliver' ? 'No delivery orders yet.' : 'No orders yet.'
     };
     var box = el('div', { class: 'empty stack' },
       el('p', null, none ? 'No orders yet. Orders from your order page and the DM orders you add will show up here.' : texts[f.id]));

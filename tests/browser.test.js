@@ -743,10 +743,10 @@ async function toast(page, expected) {
   }, typeof expected === 'string' ? expected : { source: expected.source });
 }
 
-// The status chips. Collections is a view across statuses and has its own tests.
+// The status chips. Collections and Gels per week are views across statuses and have their own tests.
 const chipCounts = (page) => page.evaluate(() => {
   const out = {};
-  document.querySelectorAll('.chip:not([data-role="chip-collections"])').forEach((c) => {
+  document.querySelectorAll('.chip:not([data-role="chip-collections"]):not([data-role="chip-weeks"])').forEach((c) => {
     out[c.getAttribute('data-role').replace('chip-', '')] = Number(c.querySelector('.chip-count').textContent);
   });
   return out;
@@ -2493,5 +2493,48 @@ test('admin: an order shows its code, and editing it keeps the discount in the n
   await c.locator('[data-role=edit]').click();
   await page.fill('#e-price', '30');
   assert.match(await card(page, r.order.invoice).locator('.list-total').innerText(), /New total: R60, after HALF \(50% off\)/);
+  noErrors(errors);
+});
+
+// ---------------------------------------------------------------------------
+// Gels per week
+// ---------------------------------------------------------------------------
+
+test('admin: gels per week, by pickup week for collections and order week for deliveries', async (t) => {
+  const { dev, page, errors } = await open(t, { collections: true });
+  await page.clock.setFixedTime(new Date('2026-10-28T12:00:00+02:00')); // week 44: 26 Oct to 1 Nov
+  // A collection picked up next week, and a cancelled order that must not count.
+  dev.gas.call({ action: 'create', key: dev.key, name: 'Next Week', contact: '', address: '', notes: '', qty: 5, collect: true, collectAt: '2026-11-03 17:00', requestId: 'req_week_00001' });
+  dev.gas.call({ action: 'create', key: dev.key, name: 'Gone', contact: '', address: '1 Road', notes: '', qty: 7, fee: '30', requestId: 'req_week_00002' });
+  const gone = dev.gas.rows('Orders').find((r) => r.Name === 'Gone').Invoice;
+  dev.gas.call({ action: 'setStatus', key: dev.key, invoice: gone, status: 'Cancelled' });
+
+  // What the sheet says should be made in week 44.
+  const rows = dev.gas.rows('Orders').filter((r) => r.Status !== 'Cancelled' && r.Name !== 'Next Week');
+  const sum = (list) => list.reduce((n, r) => n + Number(r.Qty), 0);
+  const all = sum(rows);
+  const collect = sum(rows.filter((r) => r.Collect === 'yes'));
+
+  await page.goto(dev.adminUrl());
+  await page.waitForSelector('.tabs');
+  assert.equal(await text(page, '[data-role=chip-weeks] .chip-count'), String(all), 'the chip shows this week');
+  await page.click('[data-role=chip-weeks]');
+
+  const thisWeek = page.locator('.week--now');
+  assert.match(await thisWeek.innerText(), /This week · Week 44\s+26 – 1 Nov|This week · Week 44\s+26 Oct – 1 Nov/);
+  assert.match(await thisWeek.locator('.week-gels').innerText(), new RegExp('^' + all + ' gels'));
+  const next = page.locator('[data-role="week-2026-45"]');
+  assert.match(await next.innerText(), /Week 45\s+2 – 8 Nov\s+5 gels/);
+
+  await page.click('[data-role=week-kind-collect]');
+  assert.match(await page.locator('.week--now .week-gels').innerText(), new RegExp('^' + collect + ' gels'));
+  await page.click('[data-role=week-kind-deliver]');
+  assert.match(await page.locator('.week--now .week-gels').innerText(), new RegExp('^' + (all - collect) + ' gels'));
+  assert.equal(await page.locator('[data-role="week-2026-45"]').count(), 0, 'the collection is not a delivery');
+
+  // Opening a week lists its orders.
+  await page.click('[data-role=week-kind-all]');
+  await page.click('[data-role="week-2026-45"]');
+  assert.match(await page.locator('.week-orders').innerText(), /5\s+Next Week · SJ-\d+\s+Collect Tue 3 Nov, 17:00/);
   noErrors(errors);
 });
