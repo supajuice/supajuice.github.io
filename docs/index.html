@@ -109,8 +109,13 @@
         <p class="fine" id="done-collect" hidden></p>
       </div>
       <div class="bib" id="bib"></div>
+      <div class="stack" id="card-section" hidden>
+        <button type="button" class="btn btn-primary btn-block" id="pay-card">Pay by card</button>
+        <p class="fine">Card, Apple Pay or instant EFT, on Paystack's secure page. You come straight back here.</p>
+        <div class="alert alert-bad" id="card-error" role="alert" hidden></div>
+      </div>
       <div class="stack" id="pay-section">
-        <h3 class="section-title">Pay by bank transfer</h3>
+        <h3 class="section-title" id="pay-title">Pay by bank transfer</h3>
         <div class="pay" id="pay"></div>
         <p class="fine" id="pay-note"></p>
       </div>

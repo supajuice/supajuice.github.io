@@ -10,7 +10,7 @@
  * The pages call this with POST requests. The body is JSON sent as text/plain,
  * which avoids a CORS preflight request (Apps Script cannot answer one).
  *
- * Public actions   config, order, photo
+ * Public actions   config, order, photo, startPayment, confirmPayment
  * Admin actions    list, create, editOrder, acceptOrder, declineOrder, setStatus, sendInvoice,
  *                  setCollectTime, bulk, getSettings, saveSettings,
  *                  setPhoto, removePhoto
@@ -26,6 +26,10 @@
  * Customers who collect pick a time slot from the collection hours in Settings. When
  * the order is marked paid, the paid invoice email carries a calendar invite (.ics).
  * Moving the time or cancelling a paid order emails an update to that invite.
+ *
+ * Collection orders can be paid by card through Paystack when PAYSTACK_SECRET_KEY is
+ * set in Script properties. The order is marked paid only after this script asks
+ * Paystack itself that the payment went through, so a faked message changes nothing.
  *
  * Run setup() once after pasting this in. See README.md.
  */
@@ -141,6 +145,12 @@ function handle_(body) {
     if (body.action === 'config') return { ok: true, config: customerConfig_() };
     if (body.action === 'order') return placeKioskOrder_(body);
     if (body.action === 'photo') return { ok: true, photo: readPhoto_() };
+    if (body.action === 'startPayment') return startPayment_(body);
+    if (body.action === 'confirmPayment') return confirmPayment_(body);
+    // Paystack's webhook: a hint only. confirmPayment_ asks Paystack before anything changes.
+    if (body.event === 'charge.success' && body.data && typeof body.data === 'object') {
+      return confirmPayment_({ reference: body.data.reference });
+    }
 
     // Everything else needs the admin key.
     requireAdmin_(body.key);
@@ -1157,6 +1167,7 @@ function publicConfig_(s, slots) {
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
     collectSlots: slots, // [{ date, label, times }], the free collection times
     collectAhead: COLLECT_WINDOW_DAYS,
+    cardPay: !!paystackKey_(), // collection orders can be paid by card
     ready: s.ready
   };
 }
@@ -1638,6 +1649,148 @@ function photoSheet_() {
     sheet.hideSheet();
   }
   return sheet;
+}
+
+// ---------------------------------------------------------------------------
+// Card payments (Paystack)
+// ---------------------------------------------------------------------------
+//
+// The secret key is kept in Script properties as PAYSTACK_SECRET_KEY: sk_test_... while
+// trying it out, sk_live_... for real money. Without it the order page offers bank transfer only.
+
+const PAYSTACK_API = 'https://api.paystack.co';
+const PAYSTACK_CURRENCY = 'ZAR';
+const REFERENCE_PATTERN = /^[A-Za-z0-9.=-]{6,100}$/;
+
+function paystackKey_() {
+  const k = str_(PropertiesService.getScriptProperties().getProperty('PAYSTACK_SECRET_KEY'));
+  return /^sk_(test|live)_[A-Za-z0-9]+$/.test(k) ? k : '';
+}
+
+function paystack_(method, path, payload) {
+  const key = paystackKey_();
+  if (!key) throw fail_('not_ready', 'Card payments are not switched on. Please pay by bank transfer.');
+  const options = { method: method, headers: { Authorization: 'Bearer ' + key }, muteHttpExceptions: true };
+  if (payload) {
+    options.contentType = 'application/json';
+    options.payload = JSON.stringify(payload);
+  }
+  let res;
+  try {
+    res = UrlFetchApp.fetch(PAYSTACK_API + path, options);
+  } catch (err) {
+    throw fail_('pay_failed', 'Could not reach the card payment service. Please try again, or pay by bank transfer.');
+  }
+  let json = null;
+  try {
+    json = JSON.parse(res.getContentText());
+  } catch (err) {
+    json = null;
+  }
+  return { code: res.getResponseCode(), json: json && typeof json === 'object' ? json : {} };
+}
+
+// The customer taps "Pay by card" on the confirmation screen. Only a collection order that
+// is waiting for payment can be paid, and only with the email it was placed with.
+function startPayment_(body) {
+  const invoice = clean_(body.invoice, 32);
+  const email = clean_(body.email, 120).toLowerCase();
+  const returnUrl = String(body.returnUrl || '');
+  if (!/^https?:\/\/[^\s"'<>?#]{1,280}$/.test(returnUrl)) throw fail_('bad_request', 'Could not start the payment.');
+
+  const sheet = ordersSheet_();
+  const rowNum = findRow_(sheet, invoice);
+  const row = rowNum ? sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0] : null;
+  if (!row || !email || str_(row[COL.EMAIL]).toLowerCase() !== email) throw fail_('not_found', 'We could not find that order.');
+  const order = rowToOrder_(row);
+  if (order.status === STATUS.PAID || order.status === STATUS.DELIVERED) return { ok: true, paid: true };
+  if (!order.collect) throw fail_('invalid', 'Card payment is for collection orders. Please pay by bank transfer.');
+  if (order.status !== STATUS.AWAITING) throw fail_('invalid', 'Order ' + order.invoice + ' is ' + order.status + ' and cannot be paid.');
+
+  // Each try gets its own reference: Paystack never accepts the same one twice.
+  const reference = order.invoice + '-' + Utilities.getUuid().replace(/-/g, '').slice(0, 10);
+  const r = paystack_('post', '/transaction/initialize', {
+    email: order.email,
+    amount: Math.round(order.total * 100),
+    currency: PAYSTACK_CURRENCY,
+    reference: reference,
+    callback_url: returnUrl,
+    metadata: { invoice: order.invoice, cancel_action: returnUrl }
+  });
+  const url = r.json.data && r.json.data.authorization_url;
+  if (!r.json.status || typeof url !== 'string' || !/^https:\/\//.test(url)) {
+    console.error('Paystack initialize failed: ' + r.code + ' ' + JSON.stringify(r.json));
+    throw fail_('pay_failed', 'Card payment is not working right now. Please try again, or pay by bank transfer.');
+  }
+  return { ok: true, url: url, reference: reference };
+}
+
+// After paying, Paystack sends the customer back with the reference (and calls the
+// webhook). Either way this asks Paystack whether the money really came in.
+function confirmPayment_(body) {
+  const reference = String(body.reference || '');
+  if (!REFERENCE_PATTERN.test(reference)) throw fail_('bad_request', 'That payment reference is not right.');
+
+  const r = paystack_('get', '/transaction/verify/' + encodeURIComponent(reference));
+  if (r.code === 404 || (r.json.status === false && r.code < 500)) throw fail_('not_found', 'We could not find that payment.');
+  const tx = r.json.data;
+  if (!r.json.status || !tx || typeof tx !== 'object') {
+    throw fail_('pay_failed', 'We could not check your payment just now. Please try again in a moment.');
+  }
+
+  let meta = tx.metadata;
+  if (typeof meta === 'string') {
+    try { meta = JSON.parse(meta); } catch (err) { meta = null; }
+  }
+  const invoice = clean_(meta && meta.invoice ? meta.invoice : reference.replace(/-[A-Za-z0-9]+$/, ''), 32);
+  const sheet = ordersSheet_();
+  const rowNum = findRow_(sheet, invoice);
+  if (!rowNum) throw fail_('not_found', 'We could not find the order for that payment.');
+  let order = rowToOrder_(sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0]);
+  const s = readTypedSettings_();
+
+  if (tx.status !== 'success') {
+    return Object.assign(orderResponse_(order, s), { paid: false, payment: str_(tx.status) });
+  }
+
+  // Paid, but not the amount on the order (for example the order was changed meanwhile).
+  if (Number(tx.amount) !== Math.round(order.total * 100) || String(tx.currency || '').toUpperCase() !== PAYSTACK_CURRENCY) {
+    const key = 'PAY_MISMATCH_' + reference;
+    const props = PropertiesService.getScriptProperties();
+    if (!props.getProperty(key)) {
+      props.setProperty(key, '1');
+      if (s.alertEmail) {
+        MailApp.sendEmail(s.alertEmail, 'Check card payment for ' + order.invoice,
+          'Paystack received ' + money_(Number(tx.amount) / 100, s.currency) + ' (reference ' + reference + ') for ' +
+          order.invoice + ', but the order total is ' + money_(order.total, s.currency) + '.\n\n' +
+          'The order was not marked paid. Check it on the admin page and in Paystack.');
+      }
+    }
+    throw fail_('pay_mismatch', 'We received your payment, but it does not match the order total. We will be in touch to sort it out.');
+  }
+
+  if (order.status === STATUS.AWAITING) {
+    // Note the card payment on the order, then mark it paid. That sends the paid invoice
+    // and, for a collection, the calendar invite.
+    const lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(20000);
+    } catch (err) {
+      throw fail_('busy', 'We are busy right now. Your payment is safe: please try again in a moment.');
+    }
+    try {
+      const notesCell = sheet.getRange(rowNum, COL.NOTES + 1);
+      const notes = str_(notesCell.getValue());
+      const tag = 'Paid by card (Paystack ' + reference + ')';
+      if (notes.indexOf(tag) === -1) notesCell.setValue(safe_((notes ? notes + ' · ' : '') + tag));
+    } finally {
+      lock.releaseLock();
+    }
+    const out = setStatus_({ invoice: order.invoice, status: STATUS.PAID });
+    order = out.order;
+    return Object.assign(orderResponse_(order, s, out.emailed), { paid: true });
+  }
+  return Object.assign(orderResponse_(order, s), { paid: order.status === STATUS.PAID || order.status === STATUS.DELIVERED });
 }
 
 // ---------------------------------------------------------------------------

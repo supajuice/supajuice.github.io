@@ -121,6 +121,7 @@ function build(mode, opts) {
       }, BANK)
     }));
   }
+  if (opts.cardPay) gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
   if (mode === 'seeded') seed(gas, key);
   if (mode === 'seeded' && opts.collections) seedCollections(gas, key);
   // Delivery fees confirmed per order, with one request waiting for a fee when there are sample orders.

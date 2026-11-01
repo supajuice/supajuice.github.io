@@ -143,6 +143,21 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 - **If the admin key leaks or Greg loses his phone:** run `rotateAdminKey` in the script editor. The old link stops working. Give Greg the new key and link.
 - **Invoice prefix:** `SJ` by default, changeable in Settings. Numbers always continue; a number is never reused, even if you delete rows.
 
+## Card payments for collections (Paystack)
+
+Customers who collect can pay by card, Apple Pay or instant EFT on Paystack's secure page. When they come back, the order turns **Paid** by itself and they get the paid invoice and calendar invite. Bank transfer stays on the page as the other option. Delivery orders are still paid by bank transfer.
+
+1. In Paystack, open **Settings > API Keys & Webhooks** and copy the **Test Secret Key** (it starts with `sk_test_`). Never put it in the website files.
+2. In Apps Script, click the gear (**Project Settings**). Under **Script properties**, click **Add script property**. Property: `PAYSTACK_SECRET_KEY`. Value: the key. **Save script properties**.
+3. Paste the new `Code.gs`, run `setup` once and allow the new permission ("Connect to an external service"). Then deploy a **New version** as in "Changing things later" below.
+4. Back in Paystack, on the same page, set **Test Webhook URL** to your web app address (the one ending in `/exec`). This marks the order paid even if the customer closes the page before coming back.
+5. Place a collection order and pay with Paystack's test card. The order should turn **Paid**.
+6. To take real money: once Paystack approves the business, swap the property for the **Live Secret Key** (`sk_live_`) and set the **Live Webhook URL** to the same address.
+
+To switch card payments off, delete the `PAYSTACK_SECRET_KEY` property. The page goes back to bank transfer only.
+
+A payment is only counted after the script asks Paystack itself, so a faked message changes nothing. If Paystack received a different amount from the order total (for example the order was edited meanwhile), the order is not marked paid and Greg gets an email. Card orders have "Paid by card (Paystack ...)" added to their notes. Paystack keeps about 3% of each card payment.
+
 ## Moving it to Greg's accounts
 
 Nothing is tied to your accounts except where the pieces live, so moving is a few steps:

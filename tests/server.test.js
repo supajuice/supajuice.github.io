@@ -82,7 +82,7 @@ test('public config shows the price but no bank details', () => {
   const { collectSlots, ...rest } = cfg;
   assert.deepEqual(rest, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R',
-    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, ready: true
+    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, cardPay: false, ready: true
   });
   assert.ok(collectSlots.length > 0, 'collection times are always offered');
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
@@ -1592,4 +1592,126 @@ test('bulk actions need the key, a known action and 1 to 50 orders', () => {
   assert.equal(bulk(gas, key, 'paid', 'SJ-0001').error, 'invalid');
   const many = Array.from({ length: 51 }, (_, i) => 'SJ-' + String(i + 1).padStart(4, '0'));
   assert.match(bulk(gas, key, 'paid', many).message, /at most 50/);
+});
+
+// ---------------------------------------------------------------------------
+// Card payments (Paystack)
+// ---------------------------------------------------------------------------
+
+function withCard() {
+  const env = ready();
+  env.gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
+  const placed = env.gas.call(order({ collect: true, address: '', qty: 3, expectedTotal: 120, collectAt: '2026-10-29 17:00' }));
+  assert.equal(placed.ok, true, JSON.stringify(placed));
+  env.mail = () => env.gas.mail.length;
+  return env;
+}
+const startPay = (over) => Object.assign({ action: 'startPayment', invoice: 'SJ-0001', email: 'jane@example.com', returnUrl: 'https://supajuice.github.io/' }, over);
+
+test('card payment is offered only once a Paystack key is set', () => {
+  const { gas } = ready();
+  assert.equal(gas.call({ action: 'config' }).config.cardPay, false);
+  gas.store.set('PAYSTACK_SECRET_KEY', 'not a key');
+  assert.equal(gas.call({ action: 'config' }).config.cardPay, false);
+  gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
+  assert.equal(gas.call({ action: 'config' }).config.cardPay, true);
+});
+
+test('a collection order is paid by card: Paystack is asked, then the order is marked paid and emailed', () => {
+  const { gas } = withCard();
+  const mailBefore = gas.mail.length;
+  const s = gas.call(startPay());
+  assert.equal(s.ok, true, JSON.stringify(s));
+  assert.match(s.url, /^https:\/\/checkout\.paystack\.com\//);
+  const tx = gas.paystack.last();
+  assert.equal(tx.amount, 12000, 'R120 in cents');
+  assert.equal(tx.currency, 'ZAR');
+  assert.equal(tx.email, 'jane@example.com');
+  assert.equal(tx.callback_url, 'https://supajuice.github.io/');
+  assert.equal(tx.metadata.invoice, 'SJ-0001');
+  assert.match(tx.reference, /^SJ-0001-[a-f0-9]{10}$/);
+
+  // Back before paying: nothing changes.
+  const early = gas.call({ action: 'confirmPayment', reference: tx.reference });
+  assert.equal(early.ok, true);
+  assert.equal(early.paid, false);
+  assert.equal(gas.rows('Orders')[0].Status, 'Awaiting payment');
+
+  gas.paystack.pay(tx.reference);
+  const done = gas.call({ action: 'confirmPayment', reference: tx.reference });
+  assert.equal(done.ok, true, JSON.stringify(done));
+  assert.equal(done.paid, true);
+  assert.equal(done.order.status, 'Paid');
+  const row = gas.rows('Orders')[0];
+  assert.equal(row.Status, 'Paid');
+  assert.match(row.Notes, /Paid by card \(Paystack SJ-0001-/);
+  // The paid invoice with the calendar invite went to the customer.
+  const sent = gas.mail.slice(mailBefore);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'jane@example.com');
+  assert.ok(sent[0].attachments.some((a) => /\.ics$/.test(a.getName())), 'calendar invite attached');
+
+  // The webhook and the customer's return can both arrive: one email only, notes not doubled.
+  const again = gas.call({ event: 'charge.success', data: { reference: tx.reference } });
+  assert.equal(again.ok, true);
+  assert.equal(gas.mail.length, mailBefore + 1);
+  assert.equal((gas.rows('Orders')[0].Notes.match(/Paid by card/g) || []).length, 1);
+});
+
+test('the webhook alone marks the order paid, but only after Paystack confirms it', () => {
+  const { gas } = withCard();
+  const tx = (gas.call(startPay()), gas.paystack.last());
+  // A faked webhook for an unpaid transaction changes nothing.
+  gas.call({ event: 'charge.success', data: { reference: tx.reference } });
+  assert.equal(gas.rows('Orders')[0].Status, 'Awaiting payment');
+  // A made-up reference changes nothing either.
+  assert.equal(gas.call({ event: 'charge.success', data: { reference: 'SJ-0001-fake000000' } }).ok, false);
+  assert.equal(gas.rows('Orders')[0].Status, 'Awaiting payment');
+  gas.paystack.pay(tx.reference);
+  gas.call({ event: 'charge.success', data: { reference: tx.reference } });
+  assert.equal(gas.rows('Orders')[0].Status, 'Paid');
+});
+
+test('a card payment for the wrong amount is not marked paid, and Greg is told once', () => {
+  const { gas } = withCard();
+  gas.call(startPay());
+  const tx = gas.paystack.last();
+  gas.paystack.pay(tx.reference, { amount: 100 });
+  const before = gas.mail.length;
+  assert.equal(gas.call({ action: 'confirmPayment', reference: tx.reference }).error, 'pay_mismatch');
+  assert.equal(gas.call({ action: 'confirmPayment', reference: tx.reference }).error, 'pay_mismatch');
+  assert.equal(gas.rows('Orders')[0].Status, 'Awaiting payment');
+  const sent = gas.mail.slice(before);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'greg@example.com');
+  assert.match(sent[0].subject, /Check card payment for SJ-0001/);
+});
+
+test('starting a card payment needs the right email, a collection, and an unpaid order', () => {
+  const { gas, key } = withCard();
+  assert.equal(gas.call(startPay({ email: 'someone@else.com' })).error, 'not_found');
+  assert.equal(gas.call(startPay({ invoice: 'SJ-9999' })).error, 'not_found');
+  assert.equal(gas.call(startPay({ returnUrl: 'javascript:alert(1)' })).error, 'bad_request');
+  assert.equal(gas.call(startPay({ email: 'JANE@example.com' })).ok, true, 'email case does not matter');
+
+  // A delivery order is paid by bank transfer.
+  gas.call(order({ requestId: rid() }));
+  assert.equal(gas.call(startPay({ invoice: 'SJ-0002' })).error, 'invalid');
+
+  // Already paid: nothing to start.
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  const paid = gas.call(startPay());
+  assert.equal(paid.ok, true);
+  assert.equal(paid.paid, true);
+  assert.equal(paid.url, undefined);
+});
+
+test('when Paystack cannot be reached the customer is told to try again or pay by transfer', () => {
+  const { gas } = withCard();
+  gas.paystack.down = true;
+  const r = gas.call(startPay());
+  assert.equal(r.error, 'pay_failed');
+  assert.match(r.message, /bank transfer/);
+  gas.store.delete('PAYSTACK_SECRET_KEY');
+  assert.equal(gas.call(startPay()).error, 'not_ready');
 });

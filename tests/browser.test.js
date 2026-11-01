@@ -13,7 +13,7 @@ test.after(async () => { if (browser) await browser.close(); });
 // A fresh fake service, browser context and page for one test. Everything is closed afterwards.
 async function open(t, opts) {
   opts = opts || {};
-  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote, collections: opts.collections });
+  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote, collections: opts.collections, cardPay: opts.cardPay });
   const ctx = await browser.newContext({
     viewport: { width: opts.width || 390, height: opts.height || 844 },
     deviceScaleFactor: 1,
@@ -445,6 +445,79 @@ test('order page: a collection also needs a phone number', async (t) => {
   await page.click('#submit');
   assert.match(await text(page, '#form-error'), /Enter your phone number/);
   assert.equal(dev.calls.length, before, 'nothing was sent');
+});
+
+// Paystack's page is stood in for: the test pays the fake transaction, then comes back.
+async function fakePaystackPage(page) {
+  await page.route('https://checkout.paystack.com/**', (route) => route.fulfill({ contentType: 'text/html', body: '<h1>Paystack test page</h1>' }));
+}
+
+test('order page: a collection is paid by card, and coming back from Paystack shows it paid', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready', cardPay: true });
+  await fakePaystackPage(page);
+  await fillKiosk(page, { collect: true });
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await page.locator('#card-section').isVisible(), true);
+  assert.equal(await text(page, '#pay-card'), 'Pay R40 by card');
+  assert.match(await text(page, '#done-sub'), /Pay R40 by card below, or by bank transfer with SJ-0001 as the reference/);
+  assert.equal(await text(page, '#pay-title'), 'Or pay by bank transfer');
+
+  await page.click('#pay-card');
+  await page.waitForURL(/checkout\.paystack\.com/);
+  const tx = dev.gas.paystack.last();
+  assert.equal(tx.amount, 4000);
+  assert.equal(tx.callback_url, dev.siteUrl + '/');
+
+  dev.gas.paystack.pay(tx.reference);
+  await page.goto(dev.siteUrl + '/?trxref=' + tx.reference + '&reference=' + tx.reference);
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await text(page, '#done-title'), 'Paid, thank you');
+  assert.match(await text(page, '#done-sub'), /We have received your payment of R40\. Your paid invoice is on its way to jane@example\.com/);
+  assert.match(await text(page, '#done-collect'), /The calendar invite is in your email/);
+  assert.equal(await page.locator('#pay-section').isHidden(), true);
+  assert.equal(await page.locator('#card-section').isHidden(), true);
+  assert.equal(new URL(page.url()).search, '', 'the reference is taken off the address');
+  assert.equal(orderRows(dev)[0].Status, 'Paid');
+
+  // Reloading later still shows it paid.
+  await page.reload();
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await text(page, '#done-title'), 'Paid, thank you');
+  noErrors(errors);
+});
+
+test('order page: a card payment that did not go through can be tried again', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready', cardPay: true });
+  await fakePaystackPage(page);
+  await fillKiosk(page, { collect: true });
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  await page.click('#pay-card');
+  await page.waitForURL(/checkout\.paystack\.com/);
+  const tx = dev.gas.paystack.last();
+  await page.goto(dev.siteUrl + '/?reference=' + tx.reference);
+  await page.waitForSelector('#card-error:not([hidden])');
+  assert.match(await text(page, '#card-error'), /did not go through, so nothing was charged/);
+  assert.equal(await page.locator('#pay-card').isEnabled(), true);
+  assert.equal(await page.locator('#pay-section').isVisible(), true, 'bank transfer is still there');
+  assert.equal(orderRows(dev)[0].Status, 'Awaiting payment');
+  noErrors(errors);
+});
+
+test('order page: card payment is only offered for collections, and only once it is switched on', async (t) => {
+  const { page } = await openKiosk(t, { mode: 'ready', cardPay: true });
+  await fillKiosk(page, {});
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await page.locator('#card-section').isHidden(), true, 'a delivery is paid by transfer');
+  assert.equal(await text(page, '#pay-title'), 'Pay by bank transfer');
+
+  const off = await openKiosk(t, { mode: 'ready' });
+  await fillKiosk(off.page, { collect: true });
+  await off.page.click('#submit');
+  await off.page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await off.page.locator('#card-section').isHidden(), true, 'no Paystack key, no card button');
 });
 
 test('order page: a double tap places one order', async (t) => {

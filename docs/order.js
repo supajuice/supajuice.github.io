@@ -19,6 +19,7 @@
   var current = null;    // the order response being shown on the done view
   var photo = null;      // { version, alt, width, height } from the config, or null
   var choice = null;     // 'collect' or 'deliver', null until the customer picks one
+  var paying = false;    // waiting for Paystack's payment page
 
   function showView(id) {
     VIEWS.forEach(function (v) { $(v).hidden = v !== id; });
@@ -322,21 +323,29 @@
 
     // A delivery request has no fee yet, so no bank details: the invoice comes by email later.
     var request = o.status === 'New request';
-    $('pay-section').hidden = request;
+    var paid = isPaid(o);
+    $('pay-section').hidden = request || paid;
     $('copy-invoice').hidden = request;
     $('done-keep').textContent = 'Take a screenshot of this page to keep your ' + (request ? 'order' : 'invoice') + ' number.';
 
-    $('done-title').textContent = request
-      ? (restored ? 'Your last request' : 'Order request sent')
+    $('done-title').textContent = paid ? 'Paid, thank you'
+      : request ? (restored ? 'Your last request' : 'Order request sent')
       : (restored ? 'Your last order' : 'Order received');
     var sub = SJ.clear($('done-sub'));
-    if (request) {
+    if (paid) {
+      sub.textContent = 'We have received your payment of ' + SJ.money(o.total, sym) + '.' +
+        (o.email ? ' Your paid invoice is on its way to ' + o.email + '.' : '');
+    } else if (request) {
       sub.textContent = restored
         ? 'Sent ' + SJ.formatWhen(o.created) + '. We will email your invoice once the delivery fee is confirmed.'
         : 'We will work out the delivery fee for your address and email your invoice to ' + o.email +
           ' with the bank details. There is nothing to pay yet.';
     } else if (restored) {
       sub.textContent = 'Placed ' + SJ.formatWhen(o.created) + '. If you have already paid, there is nothing more to do.';
+    } else if (cardOn(o)) {
+      sub.appendChild(document.createTextNode('Pay ' + SJ.money(o.total, sym) + ' by card below, or by bank transfer with '));
+      sub.appendChild(el('span', { class: 'nowrap' }, o.invoice));
+      sub.appendChild(document.createTextNode(' as the reference.'));
     } else {
       sub.appendChild(document.createTextNode('Pay ' + SJ.money(o.total, sym) + ' by bank transfer and use '));
       sub.appendChild(el('span', { class: 'nowrap' }, o.invoice));
@@ -344,7 +353,7 @@
     }
 
     var emailNote = $('done-email');
-    emailNote.hidden = restored || request || !o.email;
+    emailNote.hidden = restored || request || paid || !o.email;
     if (o.emailedOn) emailNote.textContent = 'We have emailed your invoice to ' + o.email + '. Check your spam folder if it is not there.';
     else emailNote.textContent = 'We could not email your invoice just now. Take a screenshot of this page instead.';
 
@@ -352,6 +361,7 @@
     collectNote.hidden = !o.collect;
     var place = res.collectNote ? ' from ' + res.collectNote : '';
     if (!o.collect) collectNote.textContent = '';
+    else if (o.collectAt && paid) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. The calendar invite is in your email.';
     else if (o.collectAt) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. A calendar invite is emailed once your payment is confirmed.';
     else collectNote.textContent = 'You are collecting this order' + place + '. We will DM you to arrange a time.';
 
@@ -362,7 +372,9 @@
       el('p', { class: 'bib-brand' }, res.brand),
       el('p', { class: 'bib-number' }, o.invoice),
       el('p', { class: 'bib-caption' }, request ? 'Your order number' : 'Your invoice number')));
-    bib.appendChild(el('div', { class: 'bib-tear' }, el('span', null, request ? 'Mention it if you contact us' : 'Use it as your payment reference')));
+    bib.appendChild(el('div', { class: 'bib-tear' }, el('span', null,
+      paid ? (o.collect ? 'Show it when you collect' : 'Mention it if you contact us')
+        : request ? 'Mention it if you contact us' : 'Use it as your payment reference')));
 
     var pay = $('pay');
     SJ.clear(pay);
@@ -374,11 +386,117 @@
     if (bank.type) pay.appendChild(payRow('Account type', bank.type));
     pay.appendChild(payRow('Reference', o.invoice, o.invoice));
     $('pay-note').textContent = res.paymentNote || '';
+    hideCardError();
+    syncCard();
 
     showView('view-done');
     window.scrollTo(0, 0);
     $('done-title').focus({ preventScroll: true });
   }
+
+  // ---------- Card payment (Paystack) ----------
+
+  function isPaid(o) {
+    return o.status === 'Paid' || o.status === 'Delivered';
+  }
+
+  // Collection orders waiting for payment can be paid by card, once Greg has switched it on.
+  function cardOn(o) {
+    return !!(config && config.cardPay) && !!o.collect && o.status === 'Awaiting payment' && !!o.email;
+  }
+
+  function syncCard() {
+    var on = !!current && cardOn(current.order);
+    $('card-section').hidden = !on;
+    $('pay-title').textContent = on ? 'Or pay by bank transfer' : 'Pay by bank transfer';
+    if (on && !paying) {
+      $('pay-card').disabled = false;
+      $('pay-card').textContent = 'Pay ' + SJ.money(current.order.total, current.currency) + ' by card';
+    }
+  }
+
+  function showCardError(message) {
+    var box = $('card-error');
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  function hideCardError() {
+    $('card-error').hidden = true;
+    $('card-error').textContent = '';
+  }
+
+  function saveShown(res) {
+    current = res;
+    SJ.store.set(LAST_KEY, { savedAt: Date.now(), data: res });
+  }
+
+  async function startCard() {
+    if (!current || paying) return;
+    var o = current.order;
+    var btn = $('pay-card');
+    paying = true;
+    btn.disabled = true;
+    btn.textContent = 'Opening secure payment…';
+    hideCardError();
+    try {
+      var res = await SJ.api('startPayment', {
+        invoice: o.invoice, email: o.email, returnUrl: location.origin + location.pathname
+      });
+      if (res.paid) {
+        paying = false;
+        saveShown(Object.assign({}, current, { order: Object.assign({}, o, { status: 'Paid' }) }));
+        showDone(current, false);
+        return;
+      }
+      if (typeof res.url !== 'string' || !/^https:\/\//.test(res.url)) throw new Error('Card payment is not working right now. Please pay by bank transfer.');
+      window.location.assign(res.url);
+    } catch (err) {
+      paying = false;
+      syncCard();
+      showCardError(err.message);
+    }
+  }
+
+  // Coming back from Paystack: the address has ?reference=... on it.
+  function returnedReference() {
+    var q = new URLSearchParams(location.search);
+    return q.get('reference') || q.get('trxref') || '';
+  }
+
+  function clearReference() {
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch (err) { /* old browser */ }
+  }
+
+  // The server asks Paystack whether the money came in, and marks the order paid if it did.
+  async function confirmReturn(reference, last) {
+    showView('view-loading');
+    try {
+      var res = await SJ.api('confirmPayment', { reference: reference });
+      clearReference();
+      saveShown(res);
+      showDone(res, !res.paid);
+      if (!res.paid) showCardError('Your card payment did not go through, so nothing was charged. You can try again, or pay by bank transfer.');
+    } catch (err) {
+      if (err.code !== 'network' && err.code !== 'busy') clearReference();
+      var msg = err.code === 'pay_mismatch' || err.code === 'not_found' ? err.message
+        : 'We could not check your payment just now. If you paid, it is safe: reload this page in a moment.';
+      if (last) {
+        showDone(last.data, true);
+        showCardError(msg);
+      } else {
+        showClosed('We could not check your payment', msg, err.code === 'network' || err.code === 'busy' || err.code === 'pay_failed');
+      }
+    }
+  }
+
+  // Back from the payment page with the browser's Back button: the button works again.
+  window.addEventListener('pageshow', function (ev) {
+    if (ev.persisted && paying) {
+      paying = false;
+      syncCard();
+    }
+  });
 
   function newOrder() {
     SJ.store.remove(LAST_KEY);
@@ -438,8 +556,10 @@
     var last = readLast();
     var cached = SJ.store.get(CONFIG_KEY);
     if (cached && cached.ready) applyConfig(cached);
+    var reference = returnedReference();
 
-    if (last) showDone(last.data, true);
+    if (reference) await confirmReturn(reference, last);
+    else if (last) showDone(last.data, true);
     else if (config) showView('order-form');
     else showView('view-loading');
 
@@ -447,11 +567,12 @@
       var res = await SJ.api('config');
       SJ.store.set(CONFIG_KEY, res.config);
       if (!res.config.ready) {
-        if (!last) showClosed('Ordering opens soon', 'We are not taking orders on this page yet. Please check back soon.');
+        if (!last && !reference) showClosed('Ordering opens soon', 'We are not taking orders on this page yet. Please check back soon.');
         return;
       }
       applyConfig(res.config);
-      if (!last && $('view-done').hidden) showView('order-form');
+      syncCard();
+      if (!last && !reference && $('view-done').hidden) showView('order-form');
     } catch (err) {
       if (!config) showClosed('We could not load the order form', err.message, true);
     }
@@ -465,6 +586,7 @@
     setTimeout(function () { btn.textContent = 'Copy invoice'; }, 1800);
   });
   $('new-order').addEventListener('click', newOrder);
+  $('pay-card').addEventListener('click', startCard);
   $('closed-retry').addEventListener('click', function () {
     showView('view-loading');
     init();

@@ -160,6 +160,35 @@ function createGas() {
   const lock = { failNext: false, held: false };
   const mailQuota = { left: 100 }; // a consumer Gmail account's daily limit
 
+  // A stand-in for Paystack's API: transactions start unpaid, and a test pays them.
+  const paystack = {
+    tx: new Map(), requests: [], down: false,
+    pay(reference, over) { Object.assign(this.tx.get(reference), { status: 'success' }, over || {}); },
+    last() { return Array.from(this.tx.values()).pop(); }
+  };
+  function paystackFetch(url, opts) {
+    opts = opts || {};
+    paystack.requests.push({ url, method: opts.method || 'get', headers: opts.headers || {}, payload: opts.payload });
+    if (paystack.down) throw new Error('Address unavailable: ' + url);
+    const reply = (code, obj) => ({ getResponseCode: () => code, getContentText: () => JSON.stringify(obj) });
+    const auth = (opts.headers || {}).Authorization;
+    if (!auth || auth !== 'Bearer ' + store.get('PAYSTACK_SECRET_KEY')) return reply(401, { status: false, message: 'Invalid key' });
+    const u = new URL(url);
+    if (u.pathname === '/transaction/initialize' && opts.method === 'post') {
+      const b = JSON.parse(opts.payload);
+      if (paystack.tx.has(b.reference)) return reply(400, { status: false, message: 'Duplicate Transaction Reference' });
+      paystack.tx.set(b.reference, Object.assign({ status: 'abandoned' }, b));
+      return reply(200, { status: true, data: { authorization_url: 'https://checkout.paystack.com/' + b.reference, reference: b.reference } });
+    }
+    const m = /^\/transaction\/verify\/(.+)$/.exec(u.pathname);
+    if (m) {
+      const t = paystack.tx.get(decodeURIComponent(m[1]));
+      if (!t) return reply(404, { status: false, message: 'Transaction reference not found' });
+      return reply(200, { status: true, data: { status: t.status, reference: t.reference, amount: t.amount, currency: t.currency, metadata: t.metadata } });
+    }
+    return reply(404, { status: false, message: 'Not found' });
+  }
+
   class FakeDate extends Date {
     constructor(...a) { if (a.length === 0) super(clock.now); else super(...a); }
     static now() { return clock.now; }
@@ -209,6 +238,7 @@ function createGas() {
       }
     },
     Session: { getScriptTimeZone: () => 'Africa/Johannesburg' },
+    UrlFetchApp: { fetch: paystackFetch },
     MailApp: {
       // Both forms Apps Script accepts: (to, subject, body) and ({ to, subject, body, attachments, ... }).
       sendEmail: (to, subject, body) => {
@@ -225,7 +255,7 @@ function createGas() {
   vm.runInContext(code, ctx, { filename: 'Code.gs' });
 
   const gas = {
-    ctx, ss, clock, mail, mailQuota, logs, errors, sleeps, lock, store, cacheStore,
+    ctx, ss, clock, mail, mailQuota, paystack, logs, errors, sleeps, lock, store, cacheStore,
     // Send one request through doPost, like the pages do.
     call(body) {
       const out = ctx.doPost({ postData: { contents: JSON.stringify(body), type: 'text/plain' } });
