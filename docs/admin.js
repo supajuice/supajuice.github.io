@@ -75,7 +75,8 @@
       title: 'Collection',
       about: 'Place, dates and times customers can collect',
       fields: [
-        { key: 'collection_note', label: 'Collection place', hint: 'Where customers collect, for example Sea Point. Shown on your order page, invoices and calendar invites. Collection is free.', wide: true, max: 200 },
+        { key: 'collection_note', label: 'Collection place', hint: 'The area customers see, for example Sea Point. Shown on your order page and unpaid invoices. Collection is free.', wide: true, max: 200 },
+        { key: 'collection_address', label: 'Collection address (private)', hint: 'Your full street address. Customers only get it once their order is paid: on the paid invoice and the calendar invite. Leave blank to use the collection place.', wide: true, max: 200 },
         { key: 'collection_hours', label: 'Usual times', hint: 'New dates start with these. You can change any date below.', type: 'hours' },
         { key: 'collection_slot_minutes', label: 'Length of each time', type: 'select', options: [['15', '15 minutes'], ['30', '30 minutes'], ['60', '1 hour']] },
         { key: 'collection_per_slot', label: 'Customers per time', hint: '1 means no two customers share a time', mode: 'numeric', max: 2 },

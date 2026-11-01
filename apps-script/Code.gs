@@ -88,7 +88,8 @@ const SETTING_DEFS = [
   { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery. When fees are confirmed per order, customers see it as "from" and it is suggested when you accept a request.' },
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
-  { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page, invoices and calendar invites. Collection is free.' },
+  { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page and unpaid invoices. Collection is free.' },
+  { key: 'collection_address', value: '', note: 'Optional. The full street address for collections. Kept private: customers only get it once their order is paid, on the paid invoice and the calendar invite. Blank: the collection place above is used.' },
   { key: 'collection_dates', value: '', note: 'Dates and times customers can collect, for example "2026-11-03 07:00-08:00 17:00-19:00, 2026-11-04". A date on its own uses the usual times. Set them on the admin page, which shows the next 30 days.' },
   { key: 'collection_hours', value: '17:00-19:00', note: 'The usual collection times, for example 17:00-19:00. New dates start with these, and each date can have its own.' },
   { key: 'collection_slot_minutes', value: '30', note: 'Length of one collection time in minutes: 15, 30 or 60.' },
@@ -122,7 +123,7 @@ const SETTING_DEFS = [
 
 // Longest allowed text per setting.
 const SETTING_MAX = {
-  brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, alert_email: 120,
+  brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, collection_address: 200, alert_email: 120,
   collection_dates: 8000, collection_hours: 20,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
@@ -982,7 +983,13 @@ function invoiceHtml_(o, s) {
 
 // "Tue 3 Nov, 17:30, Sea Point", or just the place when no time is set.
 function collectLine_(o, s) {
-  return (o.collectAt ? formatSlot_(o.collectAt) + ', ' : '') + s.collectNote;
+  return (o.collectAt ? formatSlot_(o.collectAt) + ', ' : '') + collectPlace_(o, s);
+}
+
+// Where to collect. The full address is given only once the order is paid;
+// until then, and everywhere public, customers see the collection place (an area).
+function collectPlace_(o, s) {
+  return isPaid_(o) && s.collectAddress ? s.collectAddress : s.collectNote;
 }
 
 // ---------------------------------------------------------------------------
@@ -1022,7 +1029,7 @@ function inviteIcs_(o, s, method) {
     'DTSTART:' + icsTime_(r.start),
     'DTEND:' + icsTime_(r.end),
     'SUMMARY:' + icsText_('Collect ' + s.brand + ' order ' + o.invoice),
-    'LOCATION:' + icsText_(s.collectNote),
+    'LOCATION:' + icsText_(collectPlace_(o, s)),
     'DESCRIPTION:' + icsText_(o.qty + ' x ' + s.product + '. Reply to the invoice email if you need another time.'),
     'STATUS:' + (cancel ? 'CANCELLED' : 'CONFIRMED')
   ];
@@ -1071,7 +1078,7 @@ function googleCalendarLink_(o, s) {
   return 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
     '&text=' + encodeURIComponent('Collect ' + s.brand + ' order ' + o.invoice) +
     '&dates=' + icsTime_(r.start) + '/' + icsTime_(r.end) +
-    '&location=' + encodeURIComponent(s.collectNote) +
+    '&location=' + encodeURIComponent(collectPlace_(o, s)) +
     '&details=' + encodeURIComponent(o.qty + ' x ' + s.product);
 }
 
@@ -1086,7 +1093,7 @@ function emailInvite_(order, s, kind) {
     if (cancel) {
       lines.push('Your collection of order ' + order.invoice + ' on ' + when + ' is cancelled. The attached update removes it from your calendar.');
     } else {
-      lines.push('Your collection of order ' + order.invoice + ' is now on ' + when + ' at ' + s.collectNote + '.',
+      lines.push('Your collection of order ' + order.invoice + ' is now on ' + when + ' at ' + collectPlace_(order, s) + '.',
         '', 'The attached invite updates your calendar.',
         'Using Google Calendar? Add the new time here: ' + googleCalendarLink_(order, s));
     }
@@ -1161,6 +1168,7 @@ function readTypedSettings_() {
     fee: fee,
     currency: raw.currency_symbol || 'R',
     collectNote: raw.collection_note,
+    collectAddress: raw.collection_address, // private: only for paid orders, never in publicConfig_
     quote: String(raw.delivery_quote).toLowerCase() !== 'no',
     ship: shipTable_(raw),
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.

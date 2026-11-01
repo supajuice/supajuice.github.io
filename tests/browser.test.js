@@ -527,7 +527,7 @@ test('order page: a collection is paid by card, and coming back from Paystack sh
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await text(page, '#done-title'), 'Paid, thank you');
   assert.match(await text(page, '#done-sub'), /We have received your payment of R40\. Your paid invoice is on its way to jane@example\.com/);
-  assert.match(await text(page, '#done-collect'), /The calendar invite is in your email/);
+  assert.match(await text(page, '#done-collect'), /The address and calendar invite are in your email/);
   assert.equal(await page.locator('#pay-section').isHidden(), true);
   assert.equal(await page.locator('#card-section').isHidden(), true);
   assert.equal(new URL(page.url()).search, '', 'the reference is taken off the address');
@@ -2018,7 +2018,7 @@ test('admin: settings show the current values and the order page link', async (t
   assert.deepEqual(values, {
     price: '40', delivery_fee: '30', delivery_quote: 'on',
     min_quantity: '1', max_quantity: '20',
-    collection_note: 'Sea Point', collection_slot_minutes: '30', collection_per_slot: '1',
+    collection_note: 'Sea Point', collection_address: '', collection_slot_minutes: '30', collection_per_slot: '1',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',
     brand_name: 'Supa Juice', product_name: 'Running gel sachet', currency_symbol: 'R', invoice_prefix: 'SJ',

@@ -1353,6 +1353,27 @@ test('marking a collection paid emails the paid invoice with a calendar invite',
   assert.ok(lines.some((l) => /^ATTENDEE;CN="Jane Doe";.*:mailto:jane@example\.com$/.test(l)));
 });
 
+test('the private collection address is only given once the order is paid', () => {
+  const { gas, key } = ready();
+  const ADDRESS = '1 Example Road, Sea Point';
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { collection_address: ADDRESS } }).ok, true);
+  const placed = gas.call(pickup());
+  assert.ok(!JSON.stringify(placed).includes('Example Road'), 'not in the order response');
+  assert.ok(!JSON.stringify(gas.call({ action: 'config' })).includes('Example Road'), 'not on the order page');
+  const unpaid = gas.mail.find((m) => m.to === 'jane@example.com');
+  assert.ok(!unpaid.body.includes('Example Road'), 'not in the unpaid invoice email');
+  assert.ok(!unpaid.attachments[0].getDataAsString().includes('Example Road'), 'not on the unpaid invoice');
+  assert.match(unpaid.body, /Collecting: Thu 29 Oct, 17:00, Sea Point/);
+
+  gas.mail.length = 0;
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  const paid = gas.mail[0];
+  assert.match(paid.body, /Collecting: Thu 29 Oct, 17:00, 1 Example Road, Sea Point/);
+  assert.ok(paid.attachments[0].getDataAsString().includes(ADDRESS), 'on the paid invoice');
+  assert.ok(invite(paid).getDataAsString().replace(/\r\n /g, '').includes('LOCATION:1 Example Road\\, Sea Point'), 'in the invite');
+  assert.match(paid.body, /location=1%20Example%20Road%2C%20Sea%20Point/);
+});
+
 test('a paid delivery gets no invite', () => {
   const { gas, key } = ready();
   gas.call(order());

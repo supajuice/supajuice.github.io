@@ -436,7 +436,7 @@
     collectNote.hidden = !o.collect;
     var place = res.collectNote ? ' from ' + res.collectNote : '';
     if (!o.collect) collectNote.textContent = '';
-    else if (o.collectAt && paid) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. The calendar invite is in your email.';
+    else if (o.collectAt && paid) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. The address and calendar invite are in your email.';
     else if (o.collectAt) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. A calendar invite is emailed once your payment is confirmed.';
     else collectNote.textContent = 'You are collecting this order' + place + '. We will DM you to arrange a time.';
 
