@@ -140,18 +140,19 @@ test('order page: with a minimum order the quantity starts there and cannot go b
   noErrors(errors);
 });
 
-test('order page: the customer first picks Collect or Get delivered, and only then sees the form', async (t) => {
+test('order page: the customer first picks Collect, their door or a Pudo locker, and only then sees the form', async (t) => {
   const { page, errors } = await openKiosk(t, { mode: 'ready' });
   await page.waitForSelector('#order-form:not([hidden])');
   assert.equal(await text(page, '#choose-collect'), 'Collect\nFree · Sea Point');
-  assert.equal(await text(page, '#choose-deliver'), 'Get delivered\nR30');
+  assert.equal(await text(page, '#choose-deliver'), 'To your door\nR30');
+  assert.equal(await text(page, '#choose-locker'), 'To a Pudo locker\nR30', 'locker offered before Pudo prices are set');
   for (const id of ['#order-rest', '#chosen', '#address-field', '#name', '#submit']) {
     assert.equal(await page.locator(id).isVisible(), false, id + ' waits for the choice');
   }
 
   await page.click('#choose-deliver');
   assert.equal(await page.locator('#choose').isHidden(), true);
-  assert.equal(await text(page, '#chosen-text'), 'Get delivered');
+  assert.equal(await text(page, '#chosen-text'), 'Deliver to your door');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'chosen-text', 'focus moves to the choice');
   assert.equal(await page.locator('#address-field').isVisible(), true);
   assert.equal(await page.locator('#collect-time').isHidden(), true);
@@ -167,6 +168,14 @@ test('order page: the customer first picks Collect or Get delivered, and only th
   assert.equal(await page.inputValue('#name'), 'Typed Before');
   assert.equal(await page.locator('#address-field').isHidden(), true, 'no address needed');
   assert.equal(await page.locator('#collect-time').isVisible(), true);
+
+  // The locker asks for a locker instead of an address, at the normal delivery fee.
+  await page.click('#choose-change');
+  await page.click('#choose-locker');
+  assert.equal(await text(page, '#chosen-text'), 'Send to a Pudo locker');
+  assert.equal(await page.locator('#locker-field').isVisible(), true);
+  assert.equal(await page.locator('#address-field').isHidden(), true);
+  assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R30/);
   noErrors(errors);
 });
 

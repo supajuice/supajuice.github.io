@@ -157,19 +157,19 @@
     $('choose-collect').setAttribute('aria-pressed', String(collect));
     $('choose-deliver').setAttribute('aria-pressed', String(choice === 'deliver'));
     $('choose-locker').setAttribute('aria-pressed', String(choice === 'locker'));
-    $('choose-locker').hidden = !pudo;
-    $('choose').querySelector('.choose-row').classList.toggle('choose-row--three', pudo);
-    $('choose-deliver-title').textContent = pudo ? 'To your door' : 'Get delivered';
+    // Door and locker are always offered. Without Pudo prices both use the delivery fee.
+    $('choose-locker').hidden = false;
+    $('choose').querySelector('.choose-row').classList.add('choose-row--three');
+    $('choose-deliver-title').textContent = 'To your door';
     if (config) {
       var collectFree = !pudo || pudoFrom('collect') === 0;
       $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? ' · ' + place : '') : (place || 'Collect');
       $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : deliveryText(config);
-      if (pudo) $('choose-locker-sub').textContent = 'From ' + SJ.money(pudoFrom('locker'), config.currency);
+      $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : deliveryText(config);
     }
-    if (choice === 'locker' && !pudo) choice = 'deliver';
     $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '')
       : choice === 'locker' ? 'Send to a Pudo locker'
-      : pudo ? 'Deliver to your door' : 'Get delivered';
+      : 'Deliver to your door';
     $('address-field').hidden = collect || choice === 'locker';
     $('locker-field').hidden = choice !== 'locker';
     $('collect-time').hidden = !collect || !slotsOn();
@@ -218,8 +218,8 @@
       opts.fee = fee === null ? 0 : fee;
       opts.collectFee = opts.fee;
       if (fee === null) opts.feeText = 'DM us for over ' + pudoMax();
-      if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
     }
+    if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
     var total = SJ.renderSummary($('summary'), config, stepper.get(), opts);
     if (!busy) $('submit').textContent = (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
     $('next-note').textContent = quote
