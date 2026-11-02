@@ -600,14 +600,21 @@ a {
 .summary-row {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: var(--s4);
 }
+/* The label keeps its width (up to about half the row) and the price takes the rest,
+   wrapping onto more lines when it is long, such as "From R69 (we'll contact you ...)". */
 .summary-row dt {
-  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 55%;
   color: var(--ink-soft);
 }
 .summary-row dd {
-  flex: none;
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 .summary-total {
   font-size: 1.125rem;

@@ -360,6 +360,7 @@ html:has(body.shop) {
 }
 @media (min-width: 52rem) {
   .why { padding-top: 72px; }
+  .why .h-display { text-align: center; }
   .why-list { grid-template-columns: repeat(3, 1fr); gap: 32px; }
 }
 
@@ -368,6 +369,7 @@ html:has(body.shop) {
 .how { padding: 48px 0 8px; }
 .how-card {
   max-width: 40rem;
+  margin-inline: auto;
   border: 2px solid var(--label);
   border-radius: 14px;
   background: var(--surface);
@@ -601,3 +603,6 @@ html:has(body.shop) {
 .foot-text { color: #fff; max-width: 46ch; }
 .foot a { color: #fff; text-underline-offset: 3px; font-weight: 600; }
 .foot a:focus-visible { outline-color: #fff; }
+@media (min-width: 52rem) {
+  .foot-inner { justify-items: center; text-align: center; }
+}
