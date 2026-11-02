@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'SJ Logo';
+  src: url('fonts/barlow-condensed-black-italic.woff') format('woff');
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 /*
   Supa Juice shop page. Loaded after app.css, on the order page only (the admin page keeps app.css alone).
   The look comes straight off the pouch: the blue label, its white writing box, the yellow sparks
@@ -20,7 +28,9 @@
   --accent: #1660c2;
   --accent-ink: #ffffff;
   --focus: #1660c2;
-  --font-display: ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Nunito', 'Public Sans', system-ui, sans-serif;
+  --font-display: 'Public Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* The sticker's logo face: heavy, narrow, leaning slightly forward. */
+  --font-logo: 'SJ Logo', 'Barlow Condensed', 'Arial Narrow', Impact, var(--font-display);
   --radius: 12px;
   --wrap: 68rem;
   scroll-padding-top: 76px;
@@ -115,14 +125,14 @@ html:has(body.shop) {
   border-radius: 9px;
   background: var(--label);
   color: #fff;
-  font-family: var(--font-display);
+  font-family: var(--font-logo); font-style: italic;
   font-weight: 900;
   font-size: 0.95rem;
 }
 .bar-name {
-  font-family: var(--font-display);
+  font-family: var(--font-logo); font-style: italic;
   font-weight: 900;
-  font-size: 1.125rem;
+  font-size: 1.375rem;
   letter-spacing: -0.01em;
 }
 .bar-nav {
@@ -169,31 +179,35 @@ html:has(body.shop) {
   gap: 4px;
 }
 .logo {
-  font-family: var(--font-display);
+  font-family: var(--font-logo);
+  font-style: italic;
   font-weight: 900;
-  font-size: clamp(3.25rem, 16vw, 5.5rem);
-  line-height: 0.86;
-  letter-spacing: -0.01em;
+  font-size: clamp(4rem, 21vw, 7rem);
+  line-height: 0.84;
+  letter-spacing: 0;
   text-transform: uppercase;
   text-align: center;
-  max-width: 4.6ch;   /* SUPA over JUICE, like the pouch */
-  text-shadow: 0 2px 0 var(--label-deep);
+  width: min-content;   /* one word per line: SUPA over JUICE, like the pouch */
 }
+/* Three straight dashes each side, with gaps, pointing in at the logo.
+   As on the sticker, the left set sits higher than the right. */
 .spark {
   flex: none;
   width: clamp(28px, 8vw, 44px);
   height: auto;
   fill: none;
   stroke: var(--spark);
-  stroke-width: 6;
+  stroke-width: 5.5;
   stroke-linecap: round;
 }
+.spark--l { transform: translateY(-16%); }
+.spark--r { transform: translateY(36%); }
 .label-sub {
   margin-top: 10px;
   text-align: center;
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 1.125rem;
+  font-family: var(--font-logo); font-style: italic;
+  font-weight: 900;
+  font-size: 1.5rem;
 }
 .label-box {
   margin-top: 22px;
@@ -284,15 +298,14 @@ html:has(body.shop) {
 
 /* One orchestrated moment: the sparks flicker on when the page opens. */
 @media (prefers-reduced-motion: no-preference) {
-  .spark path {
-    stroke-dasharray: 30;
-    stroke-dashoffset: 30;
-    animation: spark-on 420ms ease-out forwards;
+  .spark line {
+    opacity: 0;
+    animation: spark-on 260ms ease-out forwards;
   }
-  .spark path:nth-child(1) { animation-delay: 150ms; }
-  .spark path:nth-child(2) { animation-delay: 230ms; }
-  .spark path:nth-child(3) { animation-delay: 310ms; }
-  @keyframes spark-on { to { stroke-dashoffset: 0; } }
+  .spark line:nth-child(1) { animation-delay: 150ms; }
+  .spark line:nth-child(2) { animation-delay: 230ms; }
+  .spark line:nth-child(3) { animation-delay: 310ms; }
+  @keyframes spark-on { to { opacity: 1; } }
 }
 
 /* ---------- Why ---------- */
@@ -357,9 +370,9 @@ html:has(body.shop) {
   padding: 12px 20px;
   background: var(--label);
   color: #fff;
-  font-family: var(--font-display);
+  font-family: var(--font-logo); font-style: italic;
   font-weight: 900;
-  font-size: 1.375rem;
+  font-size: 1.625rem;
 }
 .how-list { margin: 0; padding: 4px 20px; }
 .how-row {
@@ -534,9 +547,9 @@ html:has(body.shop) {
 .shop .bib-main { padding: 22px 16px 20px; }
 .shop .bib-brand {
   color: #fff;
-  font-family: var(--font-display);
+  font-family: var(--font-logo); font-style: italic;
   font-weight: 900;
-  font-size: 1.125rem;
+  font-size: 1.5rem;
   letter-spacing: 0;
   text-transform: none;
 }
@@ -573,9 +586,9 @@ html:has(body.shop) {
   gap: 8px;
 }
 .foot-mark {
-  font-family: var(--font-display);
+  font-family: var(--font-logo); font-style: italic;
   font-weight: 900;
-  font-size: 1.5rem;
+  font-size: 2rem;
 }
 .foot-text { color: #fff; max-width: 46ch; }
 .foot a { color: #fff; text-underline-offset: 3px; font-weight: 600; }
