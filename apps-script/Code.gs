@@ -1306,7 +1306,7 @@ function publicConfig_(s, slots) {
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
     collectSlots: slots, // [{ date, label, times }], the free collection times
     collectAhead: COLLECT_WINDOW_DAYS,
-    cardPay: !!paystackKey_(), // orders waiting for payment can be paid by card
+    cardPay: !!paystackKey_(), // collection orders can be paid by card
     codesOn: s.codes.some(function (c) { return c.live; }), // shows the discount code box. The codes stay private.
     ready: s.ready
   };
@@ -1923,8 +1923,8 @@ function paystack_(method, path, payload) {
   return { code: res.getResponseCode(), json: json && typeof json === 'object' ? json : {} };
 }
 
-// The customer taps "Pay by card" on the confirmation screen. Any order that is waiting for
-// payment (collection or delivery) can be paid, and only with the email it was placed with.
+// The customer taps "Pay by card" on the confirmation screen. Only a collection order that
+// is waiting for payment can be paid, and only with the email it was placed with.
 function startPayment_(body) {
   const invoice = clean_(body.invoice, 32);
   const email = clean_(body.email, 120).toLowerCase();
@@ -1937,10 +1937,7 @@ function startPayment_(body) {
   if (!row || !email || str_(row[COL.EMAIL]).toLowerCase() !== email) throw fail_('not_found', 'We could not find that order.');
   const order = rowToOrder_(row);
   if (order.status === STATUS.PAID || order.status === STATUS.DELIVERED) return { ok: true, paid: true };
-  // A delivery whose fee is still being worked out has no total yet: its invoice follows by email.
-  if (order.status === STATUS.REQUESTED) {
-    throw fail_('invalid', 'We are still working out the delivery fee for ' + order.invoice + '. Your invoice follows by email.');
-  }
+  if (!order.collect) throw fail_('invalid', 'Card payment is for collection orders. Please pay by bank transfer.');
   if (order.status !== STATUS.AWAITING) throw fail_('invalid', 'Order ' + order.invoice + ' is ' + order.status + ' and cannot be paid.');
 
   // Each try gets its own reference: Paystack never accepts the same one twice.

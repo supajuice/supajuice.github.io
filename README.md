@@ -2,7 +2,7 @@
 
 > **Setting this up for yourself, without any coding?** Follow **[SETUP-GUIDE.md](SETUP-GUIDE.md)**. It needs only a web browser.
 
-Orders and invoices for a one-product running gel business.
+Orders and invoices for a one-product energy gel business.
 
 - Customers order from a page linked in the Instagram bio, see the bank details and get an invoice number. The invoice is also emailed to them as a PDF.
 - Greg can also enter an order himself when someone sends a DM, then paste the invoice into the chat. If he adds their email, they get the PDF too.
@@ -158,13 +158,9 @@ Starting prices (The Courier Guy, August 2026): boxes R6 / R15 / R18; locker to 
 
 Greg's new-order email says which box to pack and how to send it. Orders bigger than the Medium box are turned away with "send us a DM". Untick **Work out delivery fees from the box and Pudo price** to go back to the single delivery fee.
 
-## Card payments (Paystack)
+## Card payments for collections (Paystack)
 
-Any order waiting for payment, collection or delivery, can be paid by card, Apple Pay or instant EFT on Paystack's secure page. When the customer comes back, the order turns **Paid** by itself and they get the paid invoice (and, for a collection, the calendar invite). Bank transfer stays on the page as the other option.
-
-A delivery is only payable by card once its fee is known. With **Work out delivery fees from the box and Pudo price** ticked (see Delivery fees with Pudo), that is straight away. With **Confirm the delivery fee for each order** ticked instead, the order waits as a **New request** and the customer pays by bank transfer from the emailed invoice.
-
-While the key is a **Test** key (`sk_test_`), real customers also see the card button but no real money moves. Only add the test key when you are about to test, and swap to the live key as soon as Paystack approves the business.
+Customers who collect can pay by card, Apple Pay or instant EFT on Paystack's secure page. When they come back, the order turns **Paid** by itself and they get the paid invoice and calendar invite. Bank transfer stays on the page as the other option. Delivery orders are still paid by bank transfer.
 
 1. In Paystack, open **Settings > API Keys & Webhooks** and copy the **Test Secret Key** (it starts with `sk_test_`). Never put it in the website files.
 2. In Apps Script, click the gear (**Project Settings**). Under **Script properties**, click **Add script property**. Property: `PAYSTACK_SECRET_KEY`. Value: the key. **Save script properties**.
@@ -204,7 +200,7 @@ Nothing is tied to your accounts except where the pieces live, so moving is a fe
 
 ### Not included, on purpose
 
-One product only. No stock counts. No automatic bank matching. No refunds or partial payments. No email reminders for unpaid orders. Fake orders from the order page are possible; they sit under **Awaiting payment** and can be cancelled. Someone could type a stranger's email into the order page, who would then get one invoice email; the hourly cap limits this.
+One product only. No stock counts. No card payments. No automatic bank matching. No refunds or partial payments. No email reminders for unpaid orders. Fake orders from the order page are possible; they sit under **Awaiting payment** and can be cancelled. Someone could type a stranger's email into the order page, who would then get one invoice email; the hourly cap limits this.
 
 ### Privacy
 

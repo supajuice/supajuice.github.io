@@ -559,25 +559,13 @@ test('order page: a card payment that did not go through can be tried again', as
   noErrors(errors);
 });
 
-test('order page: card payment is offered for deliveries too, and only once it is switched on', async (t) => {
-  const { dev, page } = await openKiosk(t, { mode: 'ready', cardPay: true });
-  await fakePaystackPage(page);
+test('order page: card payment is only offered for collections, and only once it is switched on', async (t) => {
+  const { page } = await openKiosk(t, { mode: 'ready', cardPay: true });
   await fillKiosk(page, {});
-  assert.match(await text(page, '#lede'), /Pay by card or bank transfer\.$/);
-  assert.match(await text(page, '#next-note'), /can pay by card/);
   await page.click('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(await page.locator('#card-section').isVisible(), true, 'a delivery can be paid by card');
-  assert.equal(await text(page, '#pay-title'), 'Or pay by bank transfer');
-  await page.click('#pay-card');
-  await page.waitForURL(/checkout\.paystack\.com/);
-  assert.equal(dev.gas.paystack.last().amount, Math.round(orderRows(dev)[0].Total * 100));
-
-  const quoted = await openKiosk(t, { mode: 'ready', cardPay: true, quote: true });
-  await fillKiosk(quoted.page, {});
-  await quoted.page.click('#submit');
-  await quoted.page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(await quoted.page.locator('#card-section').isHidden(), true, 'a delivery request has no fee to pay yet');
+  assert.equal(await page.locator('#card-section').isHidden(), true, 'a delivery is paid by transfer');
+  assert.equal(await text(page, '#pay-title'), 'Pay by bank transfer');
 
   const off = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(off.page, { collect: true });

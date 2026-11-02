@@ -307,7 +307,7 @@
     $('brand').textContent = c.brand;
     document.title = c.brand;
     $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you. ' : 'We send them to you, or you can collect. ') +
-      (c.cardPay ? 'Pay by card or bank transfer.' : 'Pay by bank transfer.');
+      'Pay by bank transfer.';
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
     stepper.setItem(SJ.itemLine(c));
@@ -335,9 +335,7 @@
     if (!busy) $('submit').textContent = (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
     $('next-note').textContent = quote
       ? 'Next we work out the delivery fee for your address and email your invoice with the bank details. There is nothing to pay yet.'
-      : config.cardPay
-        ? 'Next you get your invoice number and can pay by card, or by bank transfer with the invoice number as your reference.'
-        : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
+      : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
   }
 
   function readForm() {
@@ -596,10 +594,9 @@
     return o.status === 'Paid' || o.status === 'Delivered';
   }
 
-  // Orders waiting for payment (collection or delivery) can be paid by card, once Greg has
-  // switched it on. A delivery request has no fee yet, so it waits for the emailed invoice.
+  // Collection orders waiting for payment can be paid by card, once Greg has switched it on.
   function cardOn(o) {
-    return !!(config && config.cardPay) && o.status === 'Awaiting payment' && !!o.email;
+    return !!(config && config.cardPay) && !!o.collect && o.status === 'Awaiting payment' && !!o.email;
   }
 
   function syncCard() {

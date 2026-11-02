@@ -1707,28 +1707,16 @@ test('a card payment for the wrong amount is not marked paid, and Greg is told o
   assert.match(sent[0].subject, /Check card payment for SJ-0001/);
 });
 
-test('starting a card payment needs the right email and an unpaid order', () => {
+test('starting a card payment needs the right email, a collection, and an unpaid order', () => {
   const { gas, key } = withCard();
   assert.equal(gas.call(startPay({ email: 'someone@else.com' })).error, 'not_found');
   assert.equal(gas.call(startPay({ invoice: 'SJ-9999' })).error, 'not_found');
   assert.equal(gas.call(startPay({ returnUrl: 'javascript:alert(1)' })).error, 'bad_request');
   assert.equal(gas.call(startPay({ email: 'JANE@example.com' })).ok, true, 'email case does not matter');
 
-  // A delivery order with its fee known can be paid by card too.
-  const delivery = gas.call(order({ requestId: rid() }));
-  assert.equal(delivery.order.status, 'Awaiting payment');
-  const started = gas.call(startPay({ invoice: delivery.order.invoice }));
-  assert.equal(started.ok, true, JSON.stringify(started));
-  assert.match(started.url, /^https:\/\//);
-  assert.equal(gas.paystack.last().amount, Math.round(delivery.order.total * 100));
-
-  // A delivery still waiting for Greg to set its fee has no total to pay yet.
-  gas.call({ action: 'saveSettings', key, values: { delivery_quote: 'yes' } });
-  const request = gas.call(order({ requestId: rid(), expectedTotal: 120 }));
-  assert.equal(request.order.status, 'New request', JSON.stringify(request));
-  const early = gas.call(startPay({ invoice: request.order.invoice }));
-  assert.equal(early.error, 'invalid');
-  assert.match(early.message, /still working out the delivery fee/);
+  // A delivery order is paid by bank transfer.
+  gas.call(order({ requestId: rid() }));
+  assert.equal(gas.call(startPay({ invoice: 'SJ-0002' })).error, 'invalid');
 
   // Already paid: nothing to start.
   gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
