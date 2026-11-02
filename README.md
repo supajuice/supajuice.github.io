@@ -2,7 +2,7 @@
 
 > **Setting this up for yourself, without any coding?** Follow **[SETUP-GUIDE.md](SETUP-GUIDE.md)**. It needs only a web browser.
 
-Orders and invoices for a one-product running gel business.
+Orders and invoices for a one-product energy gel business.
 
 - Customers order from a page linked in the Instagram bio, see the bank details and get an invoice number. The invoice is also emailed to them as a PDF.
 - Greg can also enter an order himself when someone sends a DM, then paste the invoice into the chat. If he adds their email, they get the PDF too.
@@ -16,7 +16,9 @@ Instagram bio  ->  Order page (GitHub Pages)  ->  Apps Script web app  ->  Googl
 
 | File | What it is |
 | --- | --- |
-| `docs/index.html` | The order page customers use |
+| `docs/index.html` | The shop page customers use: the label hero, how to use, and the order form |
+| `docs/shop.css` | The shop page's look (brand colours, label hero). `app.css` is shared with Greg's page |
+| `docs/img/` | The shop page photo (`gels.jpg`) and the link preview picture (`share.jpg`) |
 | `docs/admin.html` | Greg's page: orders, new DM order, settings |
 | `docs/config.js` | The one file you edit on the website side: the web app address |
 | `apps-script/Code.gs` | The backend. Pasted into the Google Sheet's script editor |

@@ -1,0 +1,582 @@
+/*
+  Supa Juice shop page. Loaded after app.css, on the order page only (the admin page keeps app.css alone).
+  The look comes straight off the pouch: the blue label, its white writing box, the yellow sparks
+  around the logo, and the red of the gel. One loud thing (the label hero), everything else quiet.
+*/
+
+.shop {
+  --label: #1d6fd3;      /* the pouch label */
+  --label-deep: #1557ad;
+  --juice: #b8241c;      /* the gel */
+  --spark: #f7c948;      /* the sparks around the logo */
+  --ink: #0d2240;
+  --ink-soft: #34476a;
+  --muted: #56667f;
+  --paper: #f2f6fb;
+  --surface: #ffffff;
+  --line: #dce4ef;
+  --line-strong: #8c9ab2;
+  --tint: #e6eef8;
+  --accent: #1660c2;
+  --accent-ink: #ffffff;
+  --focus: #1660c2;
+  --font-display: ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Nunito', 'Public Sans', system-ui, sans-serif;
+  --radius: 12px;
+  --wrap: 68rem;
+  scroll-padding-top: 76px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .shop {
+    --ink: #eaf1fb;
+    --ink-soft: #c3d0e4;
+    --muted: #9aaac3;
+    --paper: #0a1628;
+    --surface: #12223a;
+    --line: #23385a;
+    --line-strong: #5d7396;
+    --tint: #1a2e4c;
+    --accent: #5aa2ff;
+    --accent-ink: #06142a;
+    --focus: #8cc0ff;
+  }
+}
+
+html:has(body.shop) {
+  scroll-behavior: smooth;
+  scroll-padding-top: 76px;
+}
+@media (prefers-reduced-motion: reduce) {
+  html:has(body.shop) { scroll-behavior: auto; }
+}
+
+.shop a:not(.btn) { color: inherit; }
+
+.skip {
+  position: absolute;
+  left: 8px;
+  top: -60px;
+  z-index: 30;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-weight: 600;
+}
+.skip:focus { top: 8px; }
+
+.wrap {
+  width: 100%;
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding-inline: max(16px, env(safe-area-inset-left));
+}
+
+.h-display {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.75rem, 5vw, 2.5rem);
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+/* ---------- Top bar ---------- */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--line);
+  padding-top: env(safe-area-inset-top);
+}
+.bar-inner {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bar-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+.bar-badge {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--label);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 0.95rem;
+}
+.bar-name {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.125rem;
+  letter-spacing: -0.01em;
+}
+.bar-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.bar-link {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  text-decoration: none;
+}
+.bar-link:hover { text-decoration: underline; }
+.bar-cta { border-radius: 999px; }
+@media (max-width: 420px) {
+  .bar-link { display: none; }
+}
+
+/* ---------- Hero: the label ---------- */
+
+.hero { padding: 20px 0 8px; }
+.hero-inner {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding-inline: max(16px, env(safe-area-inset-left));
+  display: grid;
+  gap: 20px;
+}
+
+.label {
+  position: relative;
+  padding: 28px 22px 24px;
+  border-radius: 18px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(255, 255, 255, 0.16), transparent 60%),
+    var(--label);
+  color: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 24px 48px -28px rgba(13, 34, 64, 0.65);
+}
+.label-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.logo {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(3.25rem, 16vw, 5.5rem);
+  line-height: 0.86;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  text-align: center;
+  max-width: 4.6ch;   /* SUPA over JUICE, like the pouch */
+  text-shadow: 0 2px 0 var(--label-deep);
+}
+.spark {
+  flex: none;
+  width: clamp(28px, 8vw, 44px);
+  height: auto;
+  fill: none;
+  stroke: var(--spark);
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+.label-sub {
+  margin-top: 10px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.125rem;
+}
+.label-box {
+  margin-top: 22px;
+  padding: 18px 18px 16px;
+  border-radius: 10px;
+  background: #fff;
+  color: #0d2240;
+}
+.hero-title {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.5rem, 5.6vw, 2.125rem);
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.hero-text {
+  margin-top: 10px;
+  color: #34476a;
+  max-width: 40ch;
+}
+.hero-facts {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1.5px solid #0d2240;
+  font-weight: 700;
+  font-size: 0.9375rem;
+}
+.hero-actions {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+}
+.btn-sun {
+  min-height: 54px;
+  padding: 0 28px;
+  border-radius: 999px;
+  background: var(--spark);
+  color: #0d2240;
+  font-weight: 800;
+  font-size: 1.0625rem;
+  box-shadow: 0 2px 0 #c99a12;
+}
+.btn-sun:hover { background: #ffd65e; }
+.btn-sun:focus-visible { outline-color: #fff; }
+.hero-link {
+  color: #fff !important;
+  font-weight: 600;
+  text-decoration-color: rgba(255, 255, 255, 0.6);
+  text-underline-offset: 4px;
+}
+.hero-link:focus-visible { outline-color: #fff; }
+
+.hero-photo {
+  margin: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  background: var(--tint);
+}
+.hero-photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 82%;
+}
+
+@media (min-width: 52rem) {
+  .hero { padding: 40px 0 16px; }
+  .hero-inner {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
+    gap: 32px;
+    align-items: stretch;
+  }
+  .label {
+    padding: 44px 40px 36px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .label-box { padding: 24px 24px 20px; }
+  .hero-photo { aspect-ratio: auto; min-height: 100%; }
+  .hero-photo img { object-position: 50% 70%; }
+}
+
+/* One orchestrated moment: the sparks flicker on when the page opens. */
+@media (prefers-reduced-motion: no-preference) {
+  .spark path {
+    stroke-dasharray: 30;
+    stroke-dashoffset: 30;
+    animation: spark-on 420ms ease-out forwards;
+  }
+  .spark path:nth-child(1) { animation-delay: 150ms; }
+  .spark path:nth-child(2) { animation-delay: 230ms; }
+  .spark path:nth-child(3) { animation-delay: 310ms; }
+  @keyframes spark-on { to { stroke-dashoffset: 0; } }
+}
+
+/* ---------- Why ---------- */
+
+.why { padding: 48px 0 8px; }
+.why-list {
+  margin-top: 24px;
+  display: grid;
+  gap: 28px;
+}
+.why-list li {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  column-gap: 14px;
+  align-items: start;
+}
+.why-icon {
+  grid-row: span 2;
+  width: 44px;
+  height: 44px;
+  padding: 7px;
+  border-radius: 50%;
+  background: var(--tint);
+  fill: none;
+  stroke: var(--juice);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (prefers-color-scheme: dark) {
+  .why-icon { stroke: #ff7b6e; }
+}
+.why-list h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+.why-list p {
+  margin-top: 4px;
+  color: var(--ink-soft);
+  max-width: 34ch;
+}
+@media (min-width: 52rem) {
+  .why { padding-top: 72px; }
+  .why-list { grid-template-columns: repeat(3, 1fr); gap: 32px; }
+}
+
+/* ---------- How to use: the back of the label ---------- */
+
+.how { padding: 48px 0 8px; }
+.how-card {
+  max-width: 40rem;
+  border: 2px solid var(--label);
+  border-radius: 14px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.how-head {
+  margin: 0;
+  padding: 12px 20px;
+  background: var(--label);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.375rem;
+}
+.how-list { margin: 0; padding: 4px 20px; }
+.how-row {
+  display: grid;
+  gap: 2px;
+  padding: 14px 0;
+}
+.how-row + .how-row { border-top: 1px solid var(--line); }
+.how-row dt {
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.how-row dd { margin: 0; color: var(--ink-soft); }
+.how-row dd strong { color: var(--ink); font-size: 1.0625rem; }
+.how-tip {
+  margin: 0 20px 18px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--tint);
+  font-weight: 600;
+}
+@media (min-width: 40rem) {
+  .how-row { grid-template-columns: 8.5rem 1fr; align-items: baseline; }
+}
+@media (min-width: 52rem) {
+  .how { padding-top: 64px; }
+}
+
+/* ---------- Order panel ---------- */
+
+.order-panel { padding: 48px 0 24px; }
+.order-panel .page {
+  max-width: 34rem;
+  padding: 28px 20px 32px;
+  background: var(--surface);
+  border-radius: 20px;
+  box-shadow: 0 0 0 1px var(--line), 0 30px 60px -40px rgba(13, 34, 64, 0.45);
+}
+@media (max-width: 34rem) {
+  .order-panel { padding-inline: 12px; }
+  .order-panel .page { padding-inline: 16px; }
+}
+@media (min-width: 52rem) {
+  .order-panel { padding-top: 72px; }
+  .order-panel .page { padding: 36px 36px 40px; }
+}
+.order-intro .lede { max-width: 40ch; }
+
+/* Fields sit on white, so give them the paper colour to read as fields. */
+.shop .order-panel .field input[type='text'],
+.shop .order-panel .field input[type='email'],
+.shop .order-panel .field input[type='tel'],
+.shop .order-panel .field select,
+.shop .order-panel .field textarea {
+  background: var(--paper);
+  border-color: var(--line);
+  border-radius: 10px;
+}
+.shop .order-panel .field input:hover,
+.shop .order-panel .field select:hover,
+.shop .order-panel .field textarea:hover { border-color: var(--line-strong); }
+
+.shop .btn { border-radius: 999px; }
+.shop .btn-primary { font-weight: 700; }
+.shop .btn-primary.btn-block { min-height: 56px; font-size: 1.0625rem; }
+.shop .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.shop .btn-quiet { border-color: var(--line); background: var(--surface); }
+
+/* Collect / door / locker */
+.shop .choose-legend {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.1875rem;
+}
+.shop .choose-btn {
+  gap: 4px;
+  min-height: 112px;
+  padding: 14px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.shop .choose-btn:hover { border-color: var(--accent); }
+.shop .choose-btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--tint);
+}
+.choose-icon {
+  width: 26px;
+  height: 26px;
+  margin-bottom: 4px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.shop .choose-title { font-size: 1rem; line-height: 1.2; }
+.shop .choose-sub { font-size: 0.8125rem; line-height: 1.3; }
+@media (max-width: 400px) {
+  .shop .choose-row.choose-row--three { grid-template-columns: 1fr; }
+  .shop .choose-btn {
+    min-height: 64px;
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    align-items: center;
+    column-gap: 10px;
+  }
+  .shop .choose-icon { grid-row: span 2; margin: 0; }
+}
+.shop .chosen {
+  border-color: var(--accent);
+  background: var(--tint);
+  border-radius: 14px;
+}
+
+/* Quantity */
+.shop .qty { border-color: var(--line); }
+.shop .qty-btn {
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.shop .qty-btn:active:not(:disabled) { background: var(--accent); filter: brightness(0.92); }
+.shop .qty-input { font-family: var(--font-display); font-weight: 900; }
+
+/* Summary as a torn receipt */
+.shop .tear {
+  border-top: 2px dashed var(--line);
+}
+.shop .summary-total {
+  border-top: 2px solid var(--ink);
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.375rem;
+}
+
+.shop .alert-bad {
+  border-color: var(--juice);
+  color: var(--ink);
+}
+@media (prefers-color-scheme: dark) {
+  .shop .alert-bad { border-color: #ff7b6e; }
+}
+
+/* ---------- After ordering ---------- */
+
+/* The order panel takes over: no hero above the invoice number. */
+.shop.shop--done .landing { display: none; }
+.shop.shop--done .order-panel { padding-top: 20px; }
+.shop.shop--done .order-intro { display: none; }
+.shop.shop--done .bar-nav { display: none; }
+
+.shop .done-title,
+.shop .closed h2 {
+  font-family: var(--font-display);
+  font-weight: 900;
+}
+
+/* The invoice number card looks like a label. */
+.shop .bib {
+  border: 0;
+  border-radius: 16px;
+  background: var(--label);
+  color: #fff;
+  overflow: hidden;
+}
+.shop .bib-main { padding: 22px 16px 20px; }
+.shop .bib-brand {
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.125rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.shop .bib-number {
+  margin: 12px auto 0;
+  padding: 14px 8px;
+  max-width: 18rem;
+  border-radius: 10px;
+  background: #fff;
+  color: #0d2240;
+  font-family: var(--font-display);
+  font-weight: 900;
+}
+.shop .bib-caption { color: #fff; }
+.shop .bib-tear {
+  border-top: 2px dashed rgba(255, 255, 255, 0.45);
+  color: #fff;
+  font-weight: 600;
+}
+.shop .pay { border-color: var(--line); border-radius: 14px; background: var(--paper); }
+
+/* ---------- Footer ---------- */
+
+.foot {
+  margin-top: 40px;
+  background: var(--label-deep);
+  color: #fff;
+}
+.foot-inner {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding: 32px max(16px, env(safe-area-inset-left)) calc(32px + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 8px;
+}
+.foot-mark {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.5rem;
+}
+.foot-text { color: #fff; max-width: 46ch; }
+.foot a { color: #fff; text-underline-offset: 3px; font-weight: 600; }
+.foot a:focus-visible { outline-color: #fff; }

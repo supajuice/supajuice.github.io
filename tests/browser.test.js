@@ -96,8 +96,8 @@ function noErrors(errors) {
 test('order page: shows the shop, the price and a total that follows the quantity', async (t) => {
   const { page, errors } = await openKiosk(t, { mode: 'ready' });
   await page.waitForSelector('#order-form:not([hidden])');
-  assert.equal(await text(page, '#brand'), 'Supa Juice');
-  assert.equal(await text(page, '#lede'), 'Order below. Pay by bank transfer. We deliver, or you can collect.');
+  assert.equal(await page.textContent('#brand'), 'Supa Juice');
+  assert.equal(await text(page, '#lede'), 'Collect in Sea Point, or we send them to you. Pay by bank transfer.');
   assert.doesNotMatch(await page.locator('#order-form').innerText(), /Cape Town/, 'no delivery area is shown to customers');
   await choose(page, 'deliver');
   assert.match(await text(page, '.qty-item'), /Running gel sachet, R40 each/);
@@ -2074,7 +2074,7 @@ test('admin: saving settings changes what customers see and what the invoices sa
   const customer = await page.context().newPage();
   await customer.goto(dev.siteUrl + '/');
   await customer.waitForSelector('#order-form:not([hidden])');
-  assert.equal(await customer.locator('#brand').innerText(), 'Supa Juice Co');
+  assert.equal(await customer.locator('#brand').textContent(), 'Supa Juice Co');
   assert.equal(await page.locator('#s-delivery_area').count(), 0, 'there is no area for Maps any more');
   await choose(customer, 'deliver');
   assert.equal(await customer.locator('#submit').innerText(), 'Place order for R45');
