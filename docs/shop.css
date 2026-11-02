@@ -13,8 +13,8 @@
 */
 
 .shop {
-  --label: #1d6fd3;      /* the pouch label */
-  --label-deep: #1557ad;
+  --label: #3e78d2;      /* the pouch label */
+  --label-deep: #2f66c4;
   --juice: #b8241c;      /* the gel */
   --spark: #f7c948;      /* the sparks around the logo */
   --ink: #0d2240;
@@ -167,8 +167,7 @@ html:has(body.shop) {
   padding: 28px 22px 24px;
   border-radius: 18px;
   background:
-    radial-gradient(120% 80% at 50% 0%, rgba(255, 255, 255, 0.16), transparent 60%),
-    var(--label);
+    radial-gradient(circle at 35% 0%, #5a90de 0%, #3e78d2 45%, #2f66c4 100%);
   color: #fff;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 24px 48px -28px rgba(13, 34, 64, 0.65);
 }
@@ -176,7 +175,7 @@ html:has(body.shop) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: clamp(10px, 3vw, 22px);
 }
 .logo {
   font-family: var(--font-logo);
@@ -189,25 +188,41 @@ html:has(body.shop) {
   text-align: center;
   width: min-content;   /* one word per line: SUPA over JUICE, like the pouch */
 }
-/* Three straight dashes each side, with gaps, pointing in at the logo.
-   As on the sticker, the left set sits higher than the right. */
+/* Three straight dashes each side, well spaced, pointing in at the logo
+   and centred on it (both sets at the same height). */
 .spark {
   flex: none;
-  width: clamp(28px, 8vw, 44px);
+  width: clamp(22px, 6.5vw, 40px);
   height: auto;
   fill: none;
   stroke: var(--spark);
-  stroke-width: 5.5;
+  stroke-width: 6.5;
   stroke-linecap: round;
 }
-.spark--l { transform: translateY(-16%); }
-.spark--r { transform: translateY(36%); }
 .label-sub {
   margin-top: 10px;
   text-align: center;
   font-family: var(--font-logo); font-style: italic;
   font-weight: 900;
   font-size: 1.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.label-facts {
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.label-facts span {
+  padding: 6px 18px;
+  border-radius: 999px;
+  background: var(--spark);
+  color: #1e3f7a;
+  font-family: var(--font-logo); font-style: italic;
+  font-weight: 900;
+  font-size: 1.25rem;
 }
 .label-box {
   margin-top: 22px;
@@ -228,13 +243,6 @@ html:has(body.shop) {
   margin-top: 10px;
   color: #34476a;
   max-width: 40ch;
-}
-.hero-facts {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1.5px solid #0d2240;
-  font-weight: 700;
-  font-size: 0.9375rem;
 }
 .hero-actions {
   margin-top: 20px;
