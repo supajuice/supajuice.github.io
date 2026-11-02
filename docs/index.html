@@ -4,151 +4,251 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Supa Juice</title>
-  <meta name="description" content="Order running gel sachets and pay by bank transfer.">
-  <meta name="theme-color" content="#f7f7f7" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
-  <meta property="og:title" content="Order from Supa Juice">
-  <meta property="og:description" content="Order running gel sachets and pay by bank transfer.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111111'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='Arial,sans-serif' font-weight='700' font-size='28' fill='%23ffffff'%3ESJ%3C/text%3E%3C/svg%3E">
+  <meta name="description" content="Trail running gels made in small batches in Cape Town from juice, syrup and jam. Tasty, easy on the stomach, simple.">
+  <meta name="theme-color" content="#f2f6fb" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0a1628" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="Supa Juice trail gels">
+  <meta property="og:description" content="Tasty gels made from juice, syrup and jam. Easy on the stomach, no nutrition degree required.">
+  <meta property="og:image" content="img/share.jpg">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231d6fd3'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='Arial Rounded MT Bold,Arial,sans-serif' font-weight='900' font-size='30' fill='%23ffffff'%3ESJ%3C/text%3E%3Cpath d='M9 14l6 4M7 26h7M51 14l-6 4M57 26h-7' stroke='%23f7c948' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preload" as="image" href="img/gels.jpg">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="shop.css">
 </head>
-<body>
-  <main class="page stack-lg" id="app">
-    <header>
-      <h1 class="wordmark" id="brand">Supa Juice</h1>
-      <p class="lede" id="lede">Order below. Pay by bank transfer.</p>
-    </header>
+<body class="shop">
+  <a class="skip" href="#order">Skip to the order form</a>
 
-    <figure id="photo" class="photo" hidden><img id="photo-img" alt=""></figure>
+  <header class="bar">
+    <div class="bar-inner">
+      <a class="bar-mark" href="#top" aria-label="Supa Juice, back to top">
+        <span class="bar-badge" aria-hidden="true">SJ</span>
+        <span class="bar-name">Supa Juice</span>
+      </a>
+      <nav class="bar-nav" aria-label="Page">
+        <a class="bar-link" href="#how">How to use</a>
+        <a class="btn btn-primary btn-small bar-cta" href="#order">Order gels</a>
+      </nav>
+    </div>
+  </header>
 
-    <p id="view-loading" class="fine" role="status">Loading prices&hellip;</p>
-
-    <form id="order-form" class="stack-lg" novalidate hidden>
-      <fieldset class="choose" id="choose">
-        <legend class="choose-legend">How would you like your order?</legend>
-        <div class="choose-row choose-row--three">
-          <button type="button" class="choose-btn" id="choose-collect" aria-pressed="false">
-            <span class="choose-title">Collect</span>
-            <span class="choose-sub" id="choose-collect-sub">Free</span>
-          </button>
-          <button type="button" class="choose-btn" id="choose-deliver" aria-pressed="false">
-            <span class="choose-title" id="choose-deliver-title">To your door</span>
-            <span class="choose-sub" id="choose-deliver-sub"></span>
-          </button>
-          <button type="button" class="choose-btn" id="choose-locker" aria-pressed="false">
-            <span class="choose-title">To a Pudo locker</span>
-            <span class="choose-sub" id="choose-locker-sub"></span>
-          </button>
-        </div>
-      </fieldset>
-
-      <div class="chosen" id="chosen" hidden>
-        <p class="chosen-text" id="chosen-text" tabindex="-1"></p>
-        <button type="button" class="btn btn-quiet btn-small" id="choose-change">Change</button>
-      </div>
-
-      <div class="stack-lg" id="order-rest" hidden>
-        <fieldset class="field choice" id="collect-time" hidden>
-          <legend>Collection time</legend>
-          <div class="slot-pickers">
-            <div class="field">
-              <label for="collect-day">Day</label>
-              <select id="collect-day" class="select"></select>
-            </div>
-            <div class="field">
-              <label for="collect-hour">Time</label>
-              <select id="collect-hour" class="select"></select>
-            </div>
+  <main id="top">
+    <section class="hero landing" aria-labelledby="brand">
+      <div class="hero-inner">
+        <div class="label">
+          <div class="label-logo">
+            <svg class="spark spark--l" viewBox="0 0 40 60" aria-hidden="true"><path d="M30 10L14 20M28 30H8M30 50L14 40"/></svg>
+            <h1 class="logo" id="brand">Supa Juice</h1>
+            <svg class="spark spark--r" viewBox="0 0 40 60" aria-hidden="true"><path d="M10 10l16 10M12 30h20M10 50l16-10"/></svg>
           </div>
-          <p class="hint" id="collect-hint"></p>
-        </fieldset>
-
-        <div id="qty-slot"></div>
-
-        <div class="field">
-          <label for="name">Your name</label>
-          <input id="name" type="text" autocomplete="name" maxlength="80">
-        </div>
-
-        <div class="field">
-          <label for="email">Email</label>
-          <input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="email-hint">
-          <p class="hint" id="email-hint">We email your invoice here as a PDF.</p>
-        </div>
-
-        <div class="field">
-          <label for="contact">Phone number</label>
-          <input id="contact" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" aria-describedby="contact-hint">
-          <p class="hint" id="contact-hint">So we can reach you about your order.</p>
-        </div>
-
-        <div class="field" id="address-field">
-          <label for="address" id="address-label">Delivery address</label>
-          <textarea id="address" autocomplete="street-address" rows="3" maxlength="300" aria-describedby="locker-hint"></textarea>
-          <p class="hint" id="locker-hint" hidden>We send it to the Pudo locker nearest to you. You get an SMS with a code to open it.</p>
-        </div>
-
-        <div class="field">
-          <label for="notes">Notes (optional)</label>
-          <input id="notes" type="text" maxlength="300">
-        </div>
-
-        <div class="field" id="code-field" hidden>
-          <label for="code">Discount code (optional)</label>
-          <div class="code-row">
-            <input id="code" type="text" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="code-msg">
-            <button type="button" class="btn btn-quiet" id="code-apply">Apply</button>
+          <p class="label-sub">Juice &bull; Syrup &bull; Jam</p>
+          <div class="label-box">
+            <p class="hero-title">Trail gels that taste good and sit easy.</p>
+            <p class="hero-text">Made in small batches in Cape Town. No nutrition degree required.</p>
+            <p class="hero-facts">Each sachet: 40&nbsp;g carbs, 180&nbsp;kcal.</p>
           </div>
-          <p class="hint" id="code-msg" role="status"></p>
+          <div class="hero-actions">
+            <a class="btn btn-sun" href="#order">Order gels</a>
+            <a class="hero-link" href="#how">How to use them</a>
+          </div>
         </div>
-
-        <div class="hp" aria-hidden="true">
-          <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
-        </div>
-
-        <hr class="tear">
-        <dl class="summary" id="summary"></dl>
-
-        <div class="alert alert-bad" id="form-error" role="alert" hidden></div>
-        <button type="submit" class="btn btn-primary btn-block" id="submit">Place order</button>
-        <p class="fine" id="next-note">Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.</p>
+        <figure class="hero-photo">
+          <img src="img/gels.jpg" width="900" height="1125" alt="A cluster of Supa Juice pouches filled with red gel, standing on a brick wall in a Cape Town garden.">
+        </figure>
       </div>
-    </form>
-
-    <section id="view-done" class="stack-lg" hidden>
-      <div>
-        <h2 class="done-title" id="done-title" tabindex="-1">Order received</h2>
-        <p class="lede" id="done-sub"></p>
-        <p class="fine" id="done-email" hidden></p>
-        <p class="fine" id="done-collect" hidden></p>
-      </div>
-      <div class="bib" id="bib"></div>
-      <div class="stack" id="card-section" hidden>
-        <button type="button" class="btn btn-primary btn-block" id="pay-card">Pay by card</button>
-        <p class="fine">Card, Apple Pay or instant EFT, on Paystack's secure page. You come straight back here.</p>
-        <div class="alert alert-bad" id="card-error" role="alert" hidden></div>
-      </div>
-      <div class="stack" id="pay-section">
-        <h3 class="section-title" id="pay-title">Pay by bank transfer</h3>
-        <div class="pay" id="pay"></div>
-        <p class="fine" id="pay-note"></p>
-      </div>
-      <div class="actions actions--pair">
-        <button type="button" class="btn btn-quiet" id="copy-invoice">Copy invoice</button>
-        <button type="button" class="btn btn-quiet" id="new-order">Place another order</button>
-      </div>
-      <p class="fine" id="done-keep">Take a screenshot of this page to keep your invoice number.</p>
     </section>
 
-    <section id="view-closed" class="closed stack" hidden>
-      <h2 id="closed-title">Ordering is closed</h2>
-      <p id="closed-text"></p>
-      <button type="button" class="btn btn-primary" id="closed-retry" hidden>Try again</button>
-      <div id="closed-dm"></div>
+    <section class="why landing" aria-labelledby="why-title">
+      <div class="wrap">
+        <h2 class="h-display" id="why-title">Fuel without the fuss</h2>
+        <ul class="why-list">
+          <li>
+            <svg class="why-icon" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="23" r="12"/><path d="M20 11c0-4 2-6 6-7"/></svg>
+            <h3>It tastes like fruit</h3>
+            <p>Real juice and jam, made fresh every week. Something you actually look forward to at the halfway mark.</p>
+          </li>
+          <li>
+            <svg class="why-icon" viewBox="0 0 40 40" aria-hidden="true"><path d="M10 30C10 16 18 9 31 9c0 13-7 21-21 21z"/><path d="M10 30l11-11"/></svg>
+            <h3>Kind to your stomach</h3>
+            <p>Simple ingredients your gut already knows. Less time looking for a bush at 20&nbsp;km.</p>
+          </li>
+          <li>
+            <svg class="why-icon" viewBox="0 0 40 40" aria-hidden="true"><path d="M10 20l7 7 13-14"/></svg>
+            <h3>Nothing to study</h3>
+            <p>No charts, no milligram maths. Have one when you need one, then get back to enjoying the run.</p>
+          </li>
+        </ul>
+      </div>
     </section>
 
-    <noscript><p class="alert alert-bad">This page needs JavaScript to take orders.</p></noscript>
+    <section class="how landing" id="how" aria-labelledby="how-title">
+      <div class="wrap">
+        <div class="how-card">
+          <h2 class="how-head" id="how-title">How to use</h2>
+          <dl class="how-list">
+            <div class="how-row">
+              <dt>Easy pace</dt>
+              <dd><strong>1 to 1&frac12; gels an hour.</strong> Or one and a couple of wine gums.</dd>
+            </div>
+            <div class="how-row">
+              <dt>Going hard</dt>
+              <dd><strong>1&frac12; to 2 gels an hour.</strong> Or one and a half and a handful of wine gums.</dd>
+            </div>
+          </dl>
+          <p class="how-tip">Keep a few in the freezer. They are best served frozen.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="order-panel" id="order" aria-labelledby="order-title">
+      <div class="page stack-lg" id="app">
+        <header class="order-intro">
+          <h2 class="h-display" id="order-title">Order gels</h2>
+          <p class="lede" id="lede">Order below. Pay by bank transfer.</p>
+        </header>
+
+        <figure id="photo" class="photo" hidden><img id="photo-img" alt=""></figure>
+
+        <p id="view-loading" class="fine" role="status">Loading prices&hellip;</p>
+
+        <form id="order-form" class="stack-lg" novalidate hidden>
+          <fieldset class="choose" id="choose">
+            <legend class="choose-legend">How would you like your order?</legend>
+            <div class="choose-row choose-row--three">
+              <button type="button" class="choose-btn" id="choose-collect" aria-pressed="false">
+                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>
+                <span class="choose-title">Collect</span>
+                <span class="choose-sub" id="choose-collect-sub">Free</span>
+              </button>
+              <button type="button" class="choose-btn" id="choose-deliver" aria-pressed="false">
+                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg>
+                <span class="choose-title" id="choose-deliver-title">To your door</span>
+                <span class="choose-sub" id="choose-deliver-sub"></span>
+              </button>
+              <button type="button" class="choose-btn" id="choose-locker" aria-pressed="false">
+                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M12 3.5v17M4 12h16"/><path d="M9 7.5v1.5M15 7.5v1.5"/></svg>
+                <span class="choose-title">To a Pudo locker</span>
+                <span class="choose-sub" id="choose-locker-sub"></span>
+              </button>
+            </div>
+          </fieldset>
+
+          <div class="chosen" id="chosen" hidden>
+            <p class="chosen-text" id="chosen-text" tabindex="-1"></p>
+            <button type="button" class="btn btn-quiet btn-small" id="choose-change">Change</button>
+          </div>
+
+          <div class="stack-lg" id="order-rest" hidden>
+            <fieldset class="field choice" id="collect-time" hidden>
+              <legend>Collection time</legend>
+              <div class="slot-pickers">
+                <div class="field">
+                  <label for="collect-day">Day</label>
+                  <select id="collect-day" class="select"></select>
+                </div>
+                <div class="field">
+                  <label for="collect-hour">Time</label>
+                  <select id="collect-hour" class="select"></select>
+                </div>
+              </div>
+              <p class="hint" id="collect-hint"></p>
+            </fieldset>
+
+            <div id="qty-slot"></div>
+
+            <div class="field">
+              <label for="name">Your name</label>
+              <input id="name" type="text" autocomplete="name" maxlength="80">
+            </div>
+
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="email-hint">
+              <p class="hint" id="email-hint">We email your invoice here as a PDF.</p>
+            </div>
+
+            <div class="field">
+              <label for="contact">Phone number</label>
+              <input id="contact" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" aria-describedby="contact-hint">
+              <p class="hint" id="contact-hint">So we can reach you about your order.</p>
+            </div>
+
+            <div class="field" id="address-field">
+              <label for="address" id="address-label">Delivery address</label>
+              <textarea id="address" autocomplete="street-address" rows="3" maxlength="300" aria-describedby="locker-hint"></textarea>
+              <p class="hint" id="locker-hint" hidden>We send it to the Pudo locker nearest to you. You get an SMS with a code to open it.</p>
+            </div>
+
+            <div class="field">
+              <label for="notes">Notes (optional)</label>
+              <input id="notes" type="text" maxlength="300">
+            </div>
+
+            <div class="field" id="code-field" hidden>
+              <label for="code">Discount code (optional)</label>
+              <div class="code-row">
+                <input id="code" type="text" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="code-msg">
+                <button type="button" class="btn btn-quiet" id="code-apply">Apply</button>
+              </div>
+              <p class="hint" id="code-msg" role="status"></p>
+            </div>
+
+            <div class="hp" aria-hidden="true">
+              <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
+            </div>
+
+            <hr class="tear">
+            <dl class="summary" id="summary"></dl>
+
+            <div class="alert alert-bad" id="form-error" role="alert" hidden></div>
+            <button type="submit" class="btn btn-primary btn-block" id="submit">Place order</button>
+            <p class="fine" id="next-note">Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.</p>
+          </div>
+        </form>
+
+        <section id="view-done" class="stack-lg" hidden>
+          <div>
+            <h2 class="done-title" id="done-title" tabindex="-1">Order received</h2>
+            <p class="lede" id="done-sub"></p>
+            <p class="fine" id="done-email" hidden></p>
+            <p class="fine" id="done-collect" hidden></p>
+          </div>
+          <div class="bib" id="bib"></div>
+          <div class="stack" id="card-section" hidden>
+            <button type="button" class="btn btn-primary btn-block" id="pay-card">Pay by card</button>
+            <p class="fine">Card, Apple Pay or instant EFT, on Paystack's secure page. You come straight back here.</p>
+            <div class="alert alert-bad" id="card-error" role="alert" hidden></div>
+          </div>
+          <div class="stack" id="pay-section">
+            <h3 class="section-title" id="pay-title">Pay by bank transfer</h3>
+            <div class="pay" id="pay"></div>
+            <p class="fine" id="pay-note"></p>
+          </div>
+          <div class="actions actions--pair">
+            <button type="button" class="btn btn-quiet" id="copy-invoice">Copy invoice</button>
+            <button type="button" class="btn btn-quiet" id="new-order">Place another order</button>
+          </div>
+          <p class="fine" id="done-keep">Take a screenshot of this page to keep your invoice number.</p>
+        </section>
+
+        <section id="view-closed" class="closed stack" hidden>
+          <h2 id="closed-title">Ordering is closed</h2>
+          <p id="closed-text"></p>
+          <button type="button" class="btn btn-primary" id="closed-retry" hidden>Try again</button>
+          <div id="closed-dm"></div>
+        </section>
+
+        <noscript><p class="alert alert-bad">This page needs JavaScript to take orders.</p></noscript>
+      </div>
+    </section>
   </main>
+
+  <footer class="foot">
+    <div class="foot-inner">
+      <p class="foot-mark">Supa Juice</p>
+      <p class="foot-text">Small-batch trail gels from Cape Town. Collect in Sea Point, or we send them to you.</p>
+      <p class="foot-text" id="foot-ig" hidden></p>
+    </div>
+  </footer>
 
   <script src="config.js"></script>
   <script src="shared.js"></script>

@@ -28,6 +28,8 @@
     // "Order below..." and the photo only make sense above the form.
     $('lede').hidden = id !== 'order-form';
     $('photo').hidden = !photo || id !== 'order-form';
+    // After ordering (or while a card payment is checked) the invoice takes over the page.
+    document.body.classList.toggle('shop--done', id === 'view-done' || (id === 'view-loading' && !!returnedReference()));
   }
 
   // ---------- Photo ----------
@@ -304,7 +306,8 @@
     config = c;
     $('brand').textContent = c.brand;
     document.title = c.brand;
-    $('lede').textContent = 'Order below. Pay by bank transfer. We deliver, or you can collect.';
+    $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you. ' : 'We send them to you, or you can collect. ') +
+      (c.cardPay ? 'Pay by card or bank transfer.' : 'Pay by bank transfer.');
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
     stepper.setItem(SJ.itemLine(c));
@@ -332,7 +335,9 @@
     if (!busy) $('submit').textContent = (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
     $('next-note').textContent = quote
       ? 'Next we work out the delivery fee for your address and email your invoice with the bank details. There is nothing to pay yet.'
-      : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
+      : config.cardPay
+        ? 'Next you get your invoice number and can pay by card, or by bank transfer with the invoice number as your reference.'
+        : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
   }
 
   function readForm() {
@@ -591,9 +596,10 @@
     return o.status === 'Paid' || o.status === 'Delivered';
   }
 
-  // Collection orders waiting for payment can be paid by card, once Greg has switched it on.
+  // Orders waiting for payment (collection or delivery) can be paid by card, once Greg has
+  // switched it on. A delivery request has no fee yet, so it waits for the emailed invoice.
   function cardOn(o) {
-    return !!(config && config.cardPay) && !!o.collect && o.status === 'Awaiting payment' && !!o.email;
+    return !!(config && config.cardPay) && o.status === 'Awaiting payment' && !!o.email;
   }
 
   function syncCard() {
@@ -782,6 +788,15 @@
     showView('view-loading');
     init();
   });
+
+  // The Instagram handle from config.js, in the footer.
+  (function footerInstagram() {
+    var link = dmLink();
+    if (!link) return;
+    link.textContent = 'Say hi on Instagram';
+    $('foot-ig').appendChild(link);
+    $('foot-ig').hidden = false;
+  })();
 
   init();
 })();
