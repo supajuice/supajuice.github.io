@@ -360,7 +360,6 @@ html:has(body.shop) {
 }
 @media (min-width: 52rem) {
   .why { padding-top: 72px; }
-  .why .h-display { text-align: center; }
   .why-list { grid-template-columns: repeat(3, 1fr); gap: 32px; }
 }
 
@@ -580,6 +579,25 @@ html:has(body.shop) {
   font-weight: 600;
 }
 .shop .pay { border-color: var(--line); border-radius: 14px; background: var(--paper); }
+
+/* ---------- Why + How to use, side by side on wide screens ---------- */
+
+@media (min-width: 52rem) {
+  .info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    align-items: start;
+    max-width: var(--wrap);
+    margin: 0 auto;
+    padding: 72px max(16px, env(safe-area-inset-left)) 8px;
+  }
+  .info > .why,
+  .info > .how { padding: 0; }
+  .info .wrap { padding-inline: 0; max-width: none; }
+  .info .why-list { grid-template-columns: 1fr; gap: 24px; }
+  .info .how-card { max-width: none; margin-top: 6px; }
+}
 
 /* ---------- Footer ---------- */
 
