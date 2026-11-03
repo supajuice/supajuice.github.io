@@ -67,13 +67,30 @@ async function pickTime(page, time) {
   return day + ' ' + await page.inputValue('#collect-hour');
 }
 
+// Sets how many of each flavour, on the order page (prefix 'qty') or Greg's DM form ('n-qty').
+async function setFlavours(page, counts, prefix) {
+  for (const key of ['orange', 'cranberry']) {
+    const box = page.locator('#' + (prefix || 'qty') + '-' + key);
+    await box.fill(String(counts[key] || 0));
+    await box.blur();
+  }
+}
+
+async function flavourTotal(page, prefix) {
+  let n = 0;
+  for (const key of ['orange', 'cranberry']) n += Number(await page.inputValue('#' + (prefix || 'qty') + '-' + key));
+  return n;
+}
+
 async function fillKiosk(page, over) {
   const d = Object.assign({
     name: 'Jane Doe', email: 'jane@example.com', contact: '082 123 4567', address: '12 Beach Rd, Sea Point', notes: '', more: 0
   }, over);
   await choose(page, d.collect ? 'collect' : 'deliver');
   if (d.collect) await pickTime(page, d.time);
-  for (let i = 0; i < d.more; i++) await page.click('[aria-label="One more"]');
+  if (d.flavours) await setFlavours(page, d.flavours);
+  else if (await flavourTotal(page) === 0) await setFlavours(page, { orange: 1 + d.more });
+  else for (let i = 0; i < d.more; i++) await page.click('[aria-label="One more Orange"]');
   await page.fill('#name', d.name);
   await page.fill('#email', d.email);
   await page.fill('#contact', d.contact);
@@ -100,43 +117,68 @@ test('order page: shows the shop, the price and a total that follows the quantit
   assert.equal(await text(page, '#lede'), 'Collect in Sea Point, or we send them to you. Pay by bank transfer.');
   assert.doesNotMatch(await page.locator('#order-form').innerText(), /Cape Town/, 'no delivery area is shown to customers');
   await choose(page, 'deliver');
-  assert.match(await text(page, '.qty-item'), /Running gel sachet, R40 each/);
+  assert.match(await text(page, '.flavours-item'), /Running gel sachet, R40 each/);
+  // Nothing is chosen until the customer picks flavours.
+  assert.equal(await page.inputValue('#qty-orange'), '0');
+  assert.equal(await page.inputValue('#qty-cranberry'), '0');
+  assert.equal(await text(page, '#submit'), 'Choose at least 1 gel');
+  await page.click('[aria-label="One more Orange"]');
   assert.equal(await text(page, '#submit'), 'Place order for R70');
-  await page.click('[aria-label="One more"]');
-  await page.click('[aria-label="One more"]');
-  assert.equal(await page.inputValue('#qty'), '3');
+  await page.click('[aria-label="One more Orange"]');
+  await page.click('[aria-label="One more Cranberry"]');
+  assert.equal(await page.inputValue('#qty-orange'), '2');
+  assert.equal(await page.inputValue('#qty-cranberry'), '1');
+  assert.equal(await text(page, '#qty-count'), '3 gels: 2 Orange, 1 Cranberry.');
   assert.equal(await text(page, '#submit'), 'Place order for R150');
-  assert.match(await text(page, '#summary'), /3 x Running gel sachet\s+R120/);
+  assert.match(await text(page, '#summary'), /3 x Running gel sachet\s+2 Orange, 1 Cranberry\s+R120/);
   assert.match(await text(page, '#summary'), /Delivery\s+R30/);
   noErrors(errors);
 });
 
-test('order page: with a minimum order the quantity starts there and cannot go below it', async (t) => {
+test('order page: the flavours are saved on the order and in the invoice', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
+  await fillKiosk(page, { flavours: { orange: 1, cranberry: 3 } });
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  const row = orderRows(dev)[0];
+  assert.equal(row.Qty, 4);
+  assert.equal(row.Orange, 1);
+  assert.equal(row.Cranberry, 3);
+  assert.equal(row.Notes, '', 'the flavours are not put in the notes');
+  assert.match(dev.gas.mail.find((m) => m.to === 'jane@example.com').body, /Flavours: 1 Orange, 3 Cranberry/);
+  noErrors(errors);
+});
+
+test('order page: with a minimum order, the flavours must add up to at least the minimum', async (t) => {
   const { dev, page, errors } = await open(t, { mode: 'ready' });
   dev.gas.call({ action: 'saveSettings', key: dev.key, values: { min_quantity: '3' } });
   await page.goto(kioskUrl(dev));
   await choose(page, 'deliver');
-  assert.equal(await page.inputValue('#qty'), '3');
-  assert.equal(await page.locator('[aria-label="One fewer"]').isDisabled(), true);
-  assert.match(await text(page, '.qty-item'), /Running gel sachet, R40 each\. Minimum order 3\./);
-  assert.equal(await text(page, '#submit'), 'Place order for R150');
+  assert.match(await text(page, '.flavours-item'), /Running gel sachet, R40 each\. Minimum order 3\./);
+  assert.equal(await text(page, '#submit'), 'Choose at least 3 gels');
+  await page.click('[aria-label="One more Orange"]');
+  await page.click('[aria-label="One more Cranberry"]');
+  assert.match(await text(page, '#qty-count'), /2 chosen\. Choose 1 more/);
 
-  // Typing a smaller number is corrected to the minimum.
-  await page.fill('#qty', '1');
-  await page.locator('#qty').blur();
-  assert.equal(await page.inputValue('#qty'), '3');
-
-  await page.click('[aria-label="One more"]');
-  assert.equal(await page.locator('[aria-label="One fewer"]').isDisabled(), false);
+  // Too few is caught before anything is sent.
   await fillKiosk(page);
   await page.click('#submit');
-  await page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(orderRows(dev)[0].Qty, 4);
+  assert.match(await text(page, '#form-error'), /minimum order is 3 gels\. Add 1 more/);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'qty-orange');
+  assert.equal(orderRows(dev).length, 0);
 
-  // Another order starts at the minimum again.
+  await page.click('[aria-label="One more Cranberry"]');
+  assert.equal(await text(page, '#submit'), 'Place order for R150');
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(orderRows(dev)[0].Qty, 3);
+  assert.equal(orderRows(dev)[0].Cranberry, 2);
+
+  // Another order starts with nothing chosen again.
   await page.click('#new-order');
   await choose(page, 'deliver');
-  assert.equal(await page.inputValue('#qty'), '3');
+  assert.equal(await page.inputValue('#qty-orange'), '0');
+  assert.equal(await page.inputValue('#qty-cranberry'), '0');
   noErrors(errors);
 });
 
@@ -183,6 +225,7 @@ test('order page: the customer first picks Collect, their door or a Pudo locker,
 test('order page: a customer can collect at a time they pick, and the delivery fee comes off', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
   await choose(page, 'collect');
+  await page.click('[aria-label="One more Orange"]');
   assert.match(await text(page, '#summary'), /Collection\s+Free/);
   assert.equal(await text(page, '#submit'), 'Place order for R40');
 
@@ -195,7 +238,7 @@ test('order page: a customer can collect at a time they pick, and the delivery f
   assert.deepEqual(await page.locator('#collect-hour option').allInnerTexts(), ['Choose a time', '17:00', '17:30', '18:00', '18:30']);
   await page.selectOption('#collect-hour', '17:30');
 
-  await page.click('[aria-label="One more"]');
+  await page.click('[aria-label="One more Orange"]');
   await page.fill('#name', 'Sam Collect');
   await page.fill('#email', 'sam@example.com');
   await page.fill('#contact', '072 555 0101');
@@ -225,6 +268,7 @@ test('order page: a customer can collect at a time they pick, and the delivery f
   await page.click('#choose-change');
   await page.click('#choose-deliver');
   assert.equal(await page.locator('#address-field').isHidden(), false);
+  await page.click('[aria-label="One more Orange"]');
   assert.equal(await text(page, '#submit'), 'Place order for R70');
   noErrors(errors);
 });
@@ -232,6 +276,7 @@ test('order page: a customer can collect at a time they pick, and the delivery f
 test('order page: a collection needs a day and a time before anything is sent', async (t) => {
   const { dev, page } = await openKiosk(t, { mode: 'ready' });
   await choose(page, 'collect');
+  await page.click('[aria-label="One more Orange"]');
   await page.fill('#name', 'Sam');
   await page.fill('#email', 'sam@example.com');
   const before = dev.calls.length;
@@ -277,6 +322,7 @@ test('order page: with every time booked, the customer is told to choose deliver
   await choose(page, 'collect');
   assert.match(await text(page, '#collect-hint'), /No collection times are free in the next 30 days\. Choose delivery, or send us a DM\./);
   assert.equal(await page.locator('#collect-day').isDisabled(), true);
+  await page.click('[aria-label="One more Orange"]');
   await page.fill('#name', 'Sam');
   await page.fill('#email', 'sam@example.com');
   await page.click('#submit');
@@ -289,6 +335,7 @@ test('order page: with fees confirmed per order, a delivery is sent as a request
   assert.equal(await text(page, '#choose-deliver-sub'), "From R30 (we'll contact you with the final price)");
   assert.equal(await text(page, '#choose-locker-sub'), "From R30 (we'll contact you with the final price)");
   await choose(page, 'deliver');
+  await page.click('[aria-label="One more Orange"]');
   assert.match(await text(page, '#summary'), /Delivery\s+From R30 \(we'll contact you with the final price\)/);
   assert.match(await text(page, '#summary'), /Total before delivery\s+R40/);
   assert.equal(await text(page, '#submit'), 'Send order for R40 + delivery');
@@ -317,7 +364,9 @@ test('order page: with fees confirmed per order, a delivery is sent as a request
   // Collection is not a request: it is priced and paid straight away.
   await page.click('#new-order');
   await choose(page, 'collect');
-  assert.equal(await text(page, '#submit'), 'Place order for R40', 'a new order starts at 1, with no fee');
+  assert.equal(await text(page, '#submit'), 'Choose at least 1 gel', 'a new order starts with nothing chosen');
+  await page.click('[aria-label="One more Orange"]');
+  assert.equal(await text(page, '#submit'), 'Place order for R40', 'with no fee');
   noErrors(errors);
 });
 
@@ -326,6 +375,7 @@ test('order page: free delivery is shown as Free', async (t) => {
   await page.waitForSelector('#order-form:not([hidden])');
   assert.equal(await text(page, '#choose-deliver-sub'), 'Free');
   await choose(page, 'deliver');
+  await page.click('[aria-label="One more Orange"]');
   assert.match(await text(page, '#summary'), /Delivery\s+Free/);
   assert.equal(await text(page, '#submit'), 'Place order for R40');
 });
@@ -361,7 +411,7 @@ test('order page: placing an order shows the invoice number and bank details, an
 
   // Greg is emailed, and so is the customer, with the invoice PDF.
   assert.equal(dev.gas.mail.length, 2);
-  assert.match(dev.gas.mail[0].subject, /New order SJ-0001: 3 x Running gel sachet \(R150\)/);
+  assert.match(dev.gas.mail[0].subject, /New order SJ-0001: 3 Orange \(R150\)/);
   assert.equal(dev.gas.mail[1].to, 'jane@example.com');
   assert.equal(dev.gas.mail[1].attachments[0].getName(), 'SJ-0001.pdf');
   assert.match(await text(page, '#done-email'), /We have emailed your invoice to jane@example.com/);
@@ -389,7 +439,7 @@ test('order page: copy buttons put the right text on the clipboard', async (t) =
   await page.click('#copy-invoice');
   const invoice = (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n');
   assert.match(invoice, /^SUPA JUICE\nInvoice SJ-0001\nDate: 28 Oct 2026\n/);
-  assert.match(invoice, /2 x Running gel sachet @ R40 = R80\nDelivery: R30\nTotal due: R110/);
+  assert.match(invoice, /2 x Running gel sachet @ R40 = R80\nFlavours: 2 Orange\nDelivery: R30\nTotal due: R110/);
   assert.match(invoice, /Account number: 0012345678\n/);
   assert.match(invoice, /Reference: SJ-0001\n/);
   assert.equal(await text(page, '#copy-invoice'), 'Copied');
@@ -408,7 +458,7 @@ test('order page: the confirmation survives a reload, and Place another order st
 
   await page.click('#new-order');
   await page.waitForSelector('#order-form:not([hidden])');
-  assert.equal(await page.inputValue('#qty'), '1');
+  assert.equal(await page.inputValue('#qty-orange'), '0');
   await page.reload();
   await page.waitForSelector('#order-form:not([hidden])');
 });
@@ -417,6 +467,11 @@ test('order page: missing details are caught before anything is sent', async (t)
   const { dev, page } = await openKiosk(t, { mode: 'ready' });
   await choose(page, 'deliver');
   const before = dev.calls.length;
+
+  await page.click('#submit');
+  assert.match(await text(page, '#form-error'), /Choose how many of each flavour/);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'qty-orange');
+  await page.click('[aria-label="One more Cranberry"]');
 
   await page.click('#submit');
   assert.match(await text(page, '#form-error'), /Enter your name/);
@@ -468,8 +523,9 @@ test('order page: with Pudo on, door and locker fees follow the number of sachet
 
   await page.click('#choose-deliver');
   assert.equal(await text(page, '#chosen-text'), 'Deliver to your door');
+  await page.click('[aria-label="One more Orange"]');
   assert.match(await text(page, '#summary'), /Delivery\s+R90/);
-  for (let i = 0; i < 12; i++) await page.click('[aria-label="One more"]');
+  for (let i = 0; i < 12; i++) await page.click('[aria-label="One more Orange"]');
   assert.match(await text(page, '#summary'), /Delivery\s+R99/, '13 sachets need the Small box');
 
   await page.click('#choose-change');
@@ -685,6 +741,8 @@ test('order page: when the service is down the page can be retried', async (t) =
   down = false;
   await page.click('#closed-retry');
   await page.waitForSelector('#order-form:not([hidden])');
+  await choose(page, 'deliver');
+  await page.click('[aria-label="One more Orange"]');
   assert.equal(await text(page, '#submit'), 'Place order for R70');
 });
 
@@ -719,10 +777,16 @@ async function openSettings(page) {
 }
 
 // The DM form, like the order page, starts with Collect or Get delivered.
-async function openNew(page, what) {
+// Opens the DM form. Like a quick DM order, it starts with 1 Orange unless flavours are given
+// (or some are already chosen); pass { flavours: false } to leave nothing chosen.
+async function openNew(page, what, opts) {
+  opts = opts || {};
   await page.click('.tab[data-tab="new"]');
   if (await page.locator('#n-choose').isVisible()) await page.click(what === 'collect' ? '#n-choose-collect' : '#n-choose-deliver');
   await page.waitForSelector('#n-rest:not([hidden])');
+  if (opts.flavours === false) return;
+  if (opts.flavours) await setFlavours(page, opts.flavours, 'n-qty');
+  else if (await flavourTotal(page, 'n-qty') === 0) await setFlavours(page, { orange: 1 }, 'n-qty');
 }
 
 async function chip(page, id) {
@@ -919,6 +983,7 @@ test('admin: the paid invoice and the unpaid invoice copy as the text Greg paste
     '',
     'For: Pieter van der Merwe',
     '5 x Running gel sachet @ R40 = R200',
+    'Flavours: 3 Orange, 2 Cranberry',
     'Delivery: R30',
     'Total due: R230',
     '',
@@ -945,6 +1010,7 @@ test('admin: the paid invoice and the unpaid invoice copy as the text Greg paste
     '',
     'For: Liam Peters',
     '1 x Running gel sachet @ R40 = R40',
+    'Flavours: 1 Cranberry',
     'Delivery: R30',
     'Total paid: R70',
     '',
@@ -1116,8 +1182,8 @@ test('admin: a DM order is created, shows the invoice to send, and appears in th
   assert.equal(await page.evaluate(() => document.querySelector('.tab[aria-current="page"]').dataset.tab), 'new');
   assert.match(await text(page, '#n-summary'), /Total\s+R70/);
 
-  await page.click('[aria-label="One more"]');
-  await page.click('[aria-label="One more"]');
+  await page.click('[aria-label="One more Orange"]');
+  await page.click('[aria-label="One more Orange"]');
   assert.match(await text(page, '#n-summary'), /Total\s+R150/);
   await page.fill('#n-name', 'Zanele Dlamini');
   await page.fill('#n-contact', '@zanele_d');
@@ -1128,7 +1194,7 @@ test('admin: a DM order is created, shows the invoice to send, and appears in th
   assert.equal(await text(page, '#created-title'), 'SJ-0006 created');
   const shown = await text(page, '#new-result .preview');
   assert.match(shown, /^SUPA JUICE\nInvoice SJ-0006\nDate: 28 Oct 2026\n/);
-  assert.match(shown, /For: Zanele Dlamini\n3 x Running gel sachet @ R40 = R120\nDelivery: R30\nTotal due: R150/);
+  assert.match(shown, /For: Zanele Dlamini\n3 x Running gel sachet @ R40 = R120\nFlavours: 3 Orange\nDelivery: R30\nTotal due: R150/);
   assert.match(shown, /Account number: 0012345678/);
   assert.match(shown, /Reference: SJ-0006/);
 
@@ -1154,7 +1220,7 @@ test('admin: a DM order is created, shows the invoice to send, and appears in th
   await openNew(page);
   await page.getByRole('button', { name: 'New order' }).last().click();
   assert.equal(await page.inputValue('#n-name'), '');
-  assert.equal(await page.inputValue('#n-qty'), '1');
+  assert.equal(await page.inputValue('#n-qty-orange'), '1');
   noErrors(errors);
 });
 
@@ -1220,10 +1286,14 @@ test('admin: Greg sets a minimum order and the DM form starts from it', async (t
   await page.click('#settings-save');
   await toast(page, 'Settings saved.');
 
-  await openNew(page);
-  assert.equal(await page.inputValue('#n-qty'), '2');
+  await openNew(page, 'deliver', { flavours: false });
+  assert.match(await text(page, '.flavours-item'), /Minimum order 2\./);
+  await page.click('#panel-new [aria-label="One more Orange"]');
+  await page.fill('#n-name', 'Min Order');
+  await page.click('#n-submit');
+  assert.match(await text(page, '#n-error'), /at least 2 gels/);
+  await page.click('#panel-new [aria-label="One more Cranberry"]');
   assert.match(await text(page, '#n-summary'), /Total\s+R110/);
-  assert.equal(await page.locator('#panel-new [aria-label="One fewer"]').isDisabled(), true);
   noErrors(errors);
 });
 
@@ -1362,7 +1432,14 @@ test('admin: Greg edits an unpaid order completely, and the customer gets the ne
   assert.equal(await page.isChecked('#e-send'), true, 'emailing the new invoice is ticked');
   assert.match(await c5.innerText(), /Email the updated invoice to pieter@example\.com/);
 
+  assert.equal(await page.inputValue('#e-fl_orange'), '3');
+  assert.equal(await page.inputValue('#e-fl_cranberry'), '2');
   await page.fill('#e-qty', '6');
+  // The flavours must still add up: Greg is told before anything is sent.
+  await c5.locator('[data-role="edit-save"]').click();
+  await page.waitForSelector('article.order[aria-label="Order SJ-0005"] .alert-bad');
+  assert.match(await c5.locator('.alert-bad').innerText(), /flavours add up to 5 but the quantity is 6/);
+  await page.fill('#e-fl_orange', '4');
   await page.fill('#e-price', '35');
   await page.check('#e-collect');
   assert.equal(await page.locator('#e-fee').isHidden(), true);
@@ -1382,8 +1459,10 @@ test('admin: Greg edits an unpaid order completely, and the customer gets the ne
 
   const row = serverStatus(dev, 'SJ-0005');
   assert.deepEqual([row.Qty, row['Unit price'], row['Delivery fee'], row.Total, row.Collect, row.Notes], [6, 35, 0, 210, 'yes', 'Collecting Saturday']);
+  assert.deepEqual([row.Orange, row.Cranberry], [4, 2]);
+  assert.match(await after.innerText(), /Flavours4 Orange, 2 Cranberry|Flavours\s*4 Orange, 2 Cranberry/);
   assert.equal(dev.gas.mail.length, mailBefore + 1);
-  assert.match(dev.gas.mail[mailBefore].body, /6 x Running gel sachet @ R35 = R210\nCollection: free\nTotal due: R210/);
+  assert.match(dev.gas.mail[mailBefore].body, /6 x Running gel sachet @ R35 = R210\nFlavours: 4 Orange, 2 Cranberry\nCollection: free\nTotal due: R210/);
 
   // Once paid, the next step reads "Mark collected", and editing is no longer offered.
   await after.locator('[data-role="mark-paid"]').click();
@@ -1419,6 +1498,7 @@ test('admin: an edit can be cancelled, a mistake is explained, and unticking ski
 
   const mailBefore = dev.gas.mail.length;
   await page.fill('#e-qty', '7');
+  await page.fill('#e-fl_orange', '5');
   await page.uncheck('#e-send');
   await c5.locator('[data-role="edit-save"]').click();
   await toast(page, 'SJ-0005 updated.');
@@ -1433,6 +1513,7 @@ test('admin: an order paid on another phone while being edited is not overwritte
   const c5 = card(page, 'SJ-0005');
   await c5.locator('[data-role="edit"]').click();
   await page.fill('#e-qty', '9');
+  await page.fill('#e-fl_orange', '7');
   dev.gas.call({ action: 'setStatus', key: dev.key, invoice: 'SJ-0005', status: 'Paid' });
   await c5.locator('[data-role="edit-save"]').click();
   await toast(page, /SJ-0005 is Paid\. Only new requests and orders waiting for payment can be edited/);
@@ -1460,6 +1541,9 @@ test('admin: a DM order can be a collection, with no delivery fee', async (t) =>
   assert.equal(await text(page, '#n-error'), 'Pick a time to collect, or set the day back to No time yet.');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'n-collect-hour');
   await page.selectOption('#n-collect-hour', '17:30');
+  await page.click('#n-submit');
+  assert.equal(await text(page, '#n-error'), 'Choose the flavours: at least 1 gel.');
+  await page.click('#panel-new [aria-label="One more Cranberry"]');
   assert.match(await text(page, '#n-summary'), /Collection\s+Free/);
   assert.match(await text(page, '#n-summary'), /Total\s+R40/);
   await page.click('#n-submit');
@@ -1584,13 +1668,13 @@ test('admin: a hand-over list of ticked paid orders is copied for a driver', asy
     'SUPA JUICE: 2 orders to hand over',
     '',
     '1. Liam Peters (SJ-0003)',
-    '   1 x Running gel sachet',
+    '   1 x Running gel sachet: 1 Cranberry',
     '   Deliver to: 3 Kloof Nek Rd, Tamboerskloof',
     '   Contact: 082 555 0147',
     '   Note: Leave with the guard',
     '',
     '2. Jess Adams (SJ-0007)',
-    '   2 x Running gel sachet',
+    '   2 x Running gel sachet: 1 Orange, 1 Cranberry',
     '   Collecting: Thu 29 Oct, 18:00',
     '   Contact: @jessruns'
   ].join('\n'));
@@ -1958,6 +2042,7 @@ test('admin: unticking "Confirm the delivery fee" charges the fee straight away 
   await customer.waitForSelector('#order-form:not([hidden])');
   assert.equal(await customer.locator('#choose-deliver-sub').innerText(), 'R30');
   await choose(customer, 'deliver');
+  await customer.click('[aria-label="One more Orange"]');
   assert.equal(await customer.locator('#submit').innerText(), 'Place order for R70');
   noErrors(errors);
 });
@@ -2063,7 +2148,7 @@ test('admin: saving settings changes what customers see and what the invoices sa
 
   // The DM form uses them.
   await openNew(page);
-  assert.match(await text(page, '.qty-item'), /R45 each/);
+  assert.match(await text(page, '.flavours-item'), /R45 each/);
   await page.fill('#n-name', 'New Price');
   await page.click('#n-submit');
   await page.waitForSelector('#new-result:not([hidden])');
@@ -2077,6 +2162,7 @@ test('admin: saving settings changes what customers see and what the invoices sa
   assert.equal(await customer.locator('#brand').textContent(), 'Supa Juice Co');
   assert.equal(await page.locator('#s-delivery_area').count(), 0, 'there is no area for Maps any more');
   await choose(customer, 'deliver');
+  await customer.click('[aria-label="One more Orange"]');
   assert.equal(await customer.locator('#submit').innerText(), 'Place order for R45');
   noErrors(errors);
 });

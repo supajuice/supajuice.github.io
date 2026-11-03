@@ -79,7 +79,8 @@ test('orders are refused until price and bank details are set', () => {
 test('public config shows the price but no bank details', () => {
   const { gas } = ready();
   const cfg = gas.call({ action: 'config' }).config;
-  const { collectSlots, ...rest } = cfg;
+  const { collectSlots, flavours, ...rest } = cfg;
+  assert.deepEqual(flavours, [{ key: 'orange', name: 'Orange' }, { key: 'cranberry', name: 'Cranberry' }]);
   assert.deepEqual(rest, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R',
     collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, ship: null, cardPay: false, codesOn: false, ready: true
@@ -1941,4 +1942,77 @@ test('accepting a request keeps its discount', () => {
 test('setup adds the discount columns to the orders tab', () => {
   const { gas } = ready();
   assert.equal(gas.sheet('Orders').getRange(1, 21, 1, 3).getValues()[0].join('|'), 'Discount code|Discount %|Free delivery');
+});
+
+// ---------- Flavours ----------
+
+test('flavours are stored in their own columns and shown on the order, alert and invoice', () => {
+  const { gas } = ready();
+  const r = gas.call(order({ qty: 5, expectedTotal: 230, flavours: { orange: 3, cranberry: 2 } }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.order.flavours, { orange: 3, cranberry: 2 });
+  const row = gas.rows('Orders')[0];
+  assert.equal(row.Orange, 3);
+  assert.equal(row.Cranberry, 2);
+  const mails = gas.mail;
+  const alert = mails.find((m) => m.to === 'greg@example.com');
+  assert.match(alert.subject, /3 Orange, 2 Cranberry/);
+  assert.match(alert.body, /Flavours: 3 Orange, 2 Cranberry/);
+  const invoice = mails.find((m) => m.to === 'jane@example.com');
+  assert.match(invoice.body, /Flavours: 3 Orange, 2 Cranberry/);
+});
+
+test('one flavour only leaves the other at 0 and out of the text', () => {
+  const { gas } = ready();
+  const r = gas.call(order({ qty: 5, expectedTotal: 230, flavours: { cranberry: 5 } }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.order.flavours, { orange: 0, cranberry: 5 });
+  assert.equal(gas.rows('Orders')[0].Orange, 0);
+  assert.match(gas.mail.find((m) => m.to === 'jane@example.com').body, /Flavours: 5 Cranberry\n/);
+});
+
+test('flavours that do not add up to the quantity are refused', () => {
+  const { gas } = ready();
+  const r = gas.call(order({ qty: 5, expectedTotal: 230, flavours: { orange: 3, cranberry: 1 } }));
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'invalid');
+  assert.match(r.message, /add up to 4/);
+  for (const bad of [{ orange: -1, cranberry: 6 }, { orange: 2.5, cranberry: 2.5 }, { orange: 'x' }, [5]]) {
+    const b = gas.call(order({ qty: 5, expectedTotal: 230, flavours: bad }));
+    assert.equal(b.error, 'invalid', JSON.stringify(bad));
+  }
+  assert.equal(gas.rows('Orders').length, 0);
+});
+
+test('an order from an older page, without flavours, is still taken with the flavours blank', () => {
+  const { gas } = ready();
+  const r = gas.call(order());
+  assert.equal(r.ok, true);
+  assert.equal(r.order.flavours, null);
+  assert.equal(gas.rows('Orders')[0].Orange, '');
+  assert.match(gas.mail.find((m) => m.to === 'greg@example.com').body, /Flavours: not chosen/);
+});
+
+test('editing an order changes, keeps or drops its flavours', () => {
+  const { gas, key } = ready();
+  const inv = gas.call(dm(key, { qty: 4, flavours: { orange: 2, cranberry: 2 } })).order.invoice;
+  const base = { action: 'editOrder', key, invoice: inv, name: 'Sam', price: '40', fee: '30' };
+  // New flavours.
+  let r = gas.call(Object.assign({}, base, { qty: 6, flavours: { orange: 1, cranberry: 5 } }));
+  assert.deepEqual(r.order.flavours, { orange: 1, cranberry: 5 });
+  // An older admin page sends none: kept while the quantity is the same.
+  r = gas.call(Object.assign({}, base, { qty: 6 }));
+  assert.deepEqual(r.order.flavours, { orange: 1, cranberry: 5 });
+  // ...and dropped when the quantity changes, so the counts are never wrong.
+  r = gas.call(Object.assign({}, base, { qty: 7 }));
+  assert.equal(r.order.flavours, null);
+  // Wrong sums are refused.
+  r = gas.call(Object.assign({}, base, { qty: 7, flavours: { orange: 1 } }));
+  assert.equal(r.error, 'invalid');
+});
+
+test('setup adds the flavour columns to an older orders tab', () => {
+  const { gas } = ready();
+  const header = gas.sheet('Orders').getRange(1, 24, 1, 2).getValues()[0];
+  assert.deepEqual(header, ['Orange', 'Cranberry']);
 });

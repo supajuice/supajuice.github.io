@@ -13,7 +13,7 @@
   var PHOTO_KEY = 'sj_photo';
 
   var config = null;     // prices and settings, without bank details
-  var stepper = null;
+  var stepper = null;    // the flavour picker: how many of each flavour. The quantity is their total.
   var pending = null;    // { sig, id }: a retry of the same order reuses one request id
   var busy = false;
   var current = null;    // the order response being shown on the done view
@@ -75,7 +75,7 @@
   // ---------- Form ----------
 
   function buildForm() {
-    stepper = SJ.qtyStepper({ id: 'qty', label: 'Quantity', max: 20 });
+    stepper = SJ.flavourPicker({ id: 'qty', list: SJ.flavoursFor(config), legend: 'Choose your flavours' });
     $('qty-slot').appendChild(stepper.node);
     stepper.onChange(renderTotals);
     $('order-form').addEventListener('submit', onSubmit);
@@ -206,7 +206,7 @@
 
   // The fee for the current choice and quantity, or null when it is too many to send.
   function pudoFee() {
-    var t = pudoTier(stepper.get());
+    var t = pudoTier(Math.max(1, stepper.total()));
     if (!t) return null;
     return choice === 'collect' ? t.collect : choice === 'locker' ? t.locker : t.door;
   }
@@ -331,8 +331,13 @@
       opts.feeText = quoteFromText(choice === 'locker' ? 'locker' : 'door');
     }
     opts.discount = discount;
-    var total = SJ.renderSummary($('summary'), config, stepper.get(), opts);
-    if (!busy) $('submit').textContent = (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
+    opts.flavours = SJ.flavourText(stepper.get(), stepper.list);
+    var qty = stepper.total();
+    var total = SJ.renderSummary($('summary'), config, qty, opts);
+    if (!busy) {
+      $('submit').textContent = qty < stepper.min() ? 'Choose at least ' + (stepper.min() === 1 ? '1 gel' : stepper.min() + ' gels')
+        : (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
+    }
     $('next-note').textContent = quote
       ? 'Next we work out the delivery fee for your address and email your invoice with the bank details. There is nothing to pay yet.'
       : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
@@ -347,7 +352,8 @@
       ship: choice === 'locker' ? 'locker' : 'door',
       locker: '',
       notes: $('notes').value.trim(),
-      qty: stepper.get(),
+      qty: stepper.total(),
+      flavours: stepper.get(),
       collect: collecting(),
       collectAt: collecting() && $('collect-day').value && $('collect-hour').value
         ? $('collect-day').value + ' ' + $('collect-hour').value : '',
@@ -363,18 +369,25 @@
   }
 
   function validate(d) {
+    var first = stepper.firstInput().id;
     if (d.collect && slotsOn()) {
       if (!config.collectSlots.length) return { id: 'choose-change', message: 'No collection times are free right now. Choose delivery, or send us a DM.' };
       if (!$('collect-day').value) return { id: 'collect-day', message: 'Pick a day to collect.' };
       if (!d.collectAt) return { id: 'collect-hour', message: 'Pick a time to collect.' };
     }
+    // The flavours come next on the form, under the collection time.
+    if (d.qty < stepper.min()) {
+      return { id: first, message: d.qty === 0 ? 'Choose how many of each flavour you would like.'
+        : 'The minimum order is ' + stepper.min() + ' gels. Add ' + (stepper.min() - d.qty) + ' more.' };
+    }
+    if (d.qty > stepper.max()) return { id: first, message: 'The most one order can include is ' + stepper.max() + ' gels.' };
     if (!d.name) return { id: 'name', message: 'Enter your name.' };
     if (!d.email) return { id: 'email', message: 'Enter your email address so we can send your invoice.' };
     if (!SJ.isEmail(d.email)) return { id: 'email', message: 'Check your email address. It should look like name@example.com.' };
     if (!d.contact) return { id: 'contact', message: 'Enter your phone number.' };
     if (!isPhone(d.contact)) return { id: 'contact', message: 'Check your phone number. It should look like 082 123 4567.' };
     if (pudoOn() && pudoFee() === null) {
-      return { id: 'qty', message: 'For more than ' + pudoMax() + ' sachets, please send us a DM and we will arrange delivery.' };
+      return { id: first, message: 'For more than ' + pudoMax() + ' sachets, please send us a DM and we will arrange delivery.' };
     }
     if (d.collect) return null;
     if (d.ship === 'locker') return d.address ? null : { id: 'address', message: 'Enter your address so we can pick the Pudo locker nearest to you.' };
@@ -440,7 +453,12 @@
     if (data.collect) data.address = '';
     // Sent as the locker too, for an order service from before lockers used the address.
     data.locker = data.ship === 'locker' ? data.address : '';
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.locker, data.ship, data.notes, data.qty, data.collect, data.collectAt, data.code]);
+    // An order service from before flavours does not store them, so they go in the notes.
+    if (!Array.isArray(config.flavours)) {
+      var picked = 'Flavours: ' + SJ.flavourText(data.flavours, stepper.list);
+      data.notes = (picked + (data.notes ? '. ' + data.notes : '')).slice(0, 300);
+    }
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.locker, data.ship, data.notes, data.qty, data.flavours, data.collect, data.collectAt, data.code]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 
     setSubmitting(true);

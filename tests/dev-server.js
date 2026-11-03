@@ -59,7 +59,7 @@ function seed(gas, key) {
   const move = (invoice, status) => expectOk(gas.call({ action: 'setStatus', key, invoice, status }));
 
   at(gas, '2026-10-26T06:12:00Z');
-  kiosk({ name: 'Thandi Mokoena', email: 'thandi@example.com', contact: '@thandi.runs', address: '14 Beach Rd, Sea Point', qty: 3 });
+  kiosk({ name: 'Thandi Mokoena', email: 'thandi@example.com', contact: '@thandi.runs', address: '14 Beach Rd, Sea Point', qty: 3, flavours: { orange: 2, cranberry: 1 } });
   at(gas, '2026-10-26T08:03:00Z');
   move('SJ-0001', 'Paid');
   at(gas, '2026-10-26T15:30:00Z');
@@ -71,7 +71,7 @@ function seed(gas, key) {
   move('SJ-0002', 'Cancelled');
 
   at(gas, '2026-10-27T17:40:00Z');
-  kiosk({ name: 'Liam Peters', email: 'liam@example.com', contact: '082 555 0147', address: '3 Kloof Nek Rd, Tamboerskloof', qty: 1, notes: 'Leave with the guard' });
+  kiosk({ name: 'Liam Peters', email: 'liam@example.com', contact: '082 555 0147', address: '3 Kloof Nek Rd, Tamboerskloof', qty: 1, flavours: { cranberry: 1 }, notes: 'Leave with the guard' });
   at(gas, '2026-10-27T19:05:00Z');
   move('SJ-0003', 'Paid');
 
@@ -80,7 +80,7 @@ function seed(gas, key) {
 
   at(gas, '2026-10-28T05:30:00Z');
   kiosk({
-    name: 'Pieter van der Merwe', email: 'pieter@example.com', contact: '0719876543', address: '22 Main Rd, Claremont', qty: 5,
+    name: 'Pieter van der Merwe', email: 'pieter@example.com', contact: '0719876543', address: '22 Main Rd, Claremont', qty: 5, flavours: { orange: 3, cranberry: 2 },
     notes: 'Gate code 4412. Please call on arrival.'
   });
 
@@ -97,9 +97,9 @@ function seedCollections(gas, key) {
     return r.order.invoice;
   };
   at(gas, '2026-10-28T07:20:00Z');
-  collect({ name: 'Sipho Ndlovu', email: 'sipho@example.com', contact: '@sipho.runs', qty: 4, collectAt: '2026-10-29 17:00' });
+  collect({ name: 'Sipho Ndlovu', email: 'sipho@example.com', contact: '@sipho.runs', qty: 4, flavours: { orange: 4 }, collectAt: '2026-10-29 17:00' });
   at(gas, '2026-10-28T09:45:00Z');
-  const paid = collect({ name: 'Jess Adams', email: 'jess@example.com', contact: '@jessruns', qty: 2, collectAt: '2026-10-29 18:00' });
+  const paid = collect({ name: 'Jess Adams', email: 'jess@example.com', contact: '@jessruns', qty: 2, flavours: { orange: 1, cranberry: 1 }, collectAt: '2026-10-29 18:00' });
   at(gas, '2026-10-28T11:02:00Z');
   expectOk(gas.call({ action: 'setStatus', key, invoice: paid, status: 'Paid' }));
   at(gas, '2026-10-28T13:41:00Z');

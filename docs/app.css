@@ -583,6 +583,65 @@ a {
   font-size: 0.875rem;
 }
 
+/* ---------- Flavours: one stepper per flavour ---------- */
+
+.flavours {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.flavours-legend {
+  padding: 0;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+.flavours-item {
+  margin: var(--s1) 0 var(--s2);
+}
+.flavours .qty + .qty {
+  border-top: 0;
+}
+.qty-label[data-flavour] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 1.0625rem;
+}
+.qty-label[data-flavour]::before {
+  content: '';
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--flavour, var(--line-strong));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.qty-label[data-flavour='orange'] { --flavour: #f28a1e; }
+.qty-label[data-flavour='cranberry'] { --flavour: #b3123c; }
+.qty--flavour .qty-item:empty {
+  display: none;
+}
+.qty--flavour .qty-controls {
+  grid-row: auto;
+}
+.flavours-count {
+  margin-top: var(--s2);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.flavours-count--short {
+  color: var(--muted);
+  font-weight: 400;
+}
+.summary-flavours {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
 /* ---------- Order summary ---------- */
 
 .tear {
@@ -1328,4 +1387,44 @@ details.more[open] > summary {
   grid-column: 2;
   color: var(--muted);
   font-size: 0.875rem;
+}
+
+/* ---------- Flavours on Greg's page ---------- */
+
+.flavour-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+.flavour-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--tint);
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+.flavour-chip strong {
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+.flavour-chip[data-flavour]::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--flavour, var(--line-strong));
+}
+.flavour-chip[data-flavour='orange'] { --flavour: #f28a1e; }
+.flavour-chip[data-flavour='cranberry'] { --flavour: #b3123c; }
+.flavour-chip--none {
+  color: var(--muted);
+}
+.edit-flavours {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: var(--s3, 12px);
 }

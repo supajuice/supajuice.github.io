@@ -48,21 +48,32 @@ const MAX_KIOSK_ORDERS_PER_HOUR = 12;
 // How many of the newest rows the admin page loads.
 const MAX_ORDERS_LISTED = 500;
 
+// The flavours customers choose from. Each has its own column in the Orders tab with how
+// many of that flavour the order has. To add a flavour later, add it at the END of this list
+// and run setup again: it adds the column. Blank in every flavour column: none was chosen
+// (orders from before flavours, or a DM order where Greg left them out).
+const FLAVOURS = [
+  { key: 'orange', name: 'Orange' },
+  { key: 'cranberry', name: 'Cranberry' }
+];
+
 const HEADERS = [
   'Invoice', 'Created', 'Source', 'Name', 'Contact', 'Address', 'Notes',
   'Qty', 'Unit price', 'Delivery fee', 'Total', 'Status', 'Paid on', 'Delivered on', 'Request ID',
   'Email', 'Invoice emailed', 'Collect', 'Edited on', 'Collect at',
   'Discount code', 'Discount %', 'Free delivery'
-];
+].concat(FLAVOURS.map(function (f) { return f.name; }));
 // New columns go at the end, so rows written by an older version still line up.
 const COL = {
   INVOICE: 0, CREATED: 1, SOURCE: 2, NAME: 3, CONTACT: 4, ADDRESS: 5, NOTES: 6,
   QTY: 7, PRICE: 8, FEE: 9, TOTAL: 10, STATUS: 11, PAID: 12, DELIVERED: 13, REQUEST: 14,
   EMAIL: 15, EMAILED: 16, COLLECT: 17, EDITED: 18, COLLECT_AT: 19,
-  CODE: 20, DISCOUNT: 21, FREE_DELIVERY: 22
+  CODE: 20, DISCOUNT: 21, FREE_DELIVERY: 22,
+  FLAVOUR: 23 // the first flavour column; the others follow in the order of FLAVOURS
 };
 // Text columns are stored as plain text so Sheets never turns input into a formula or a date.
-const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@', '@', '@', '@', '@', '0', '@'];
+const FORMATS = ['@', '@', '@', '@', '@', '@', '@', '0', '0.00', '0.00', '0.00', '@', '@', '@', '@', '@', '@', '@', '@', '@', '@', '0', '@']
+  .concat(FLAVOURS.map(function () { return '0'; }));
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -245,6 +256,8 @@ function createOrder_(body, source) {
   if (kiosk && !collect && !toLocker && !address) throw fail_('invalid', 'Please enter your delivery address.');
   if (kiosk && collect && !collectAt) throw fail_('invalid', 'Please pick a collection time.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
+  // How many of each flavour. An older page sends none: the order is kept without flavours.
+  const flavours = readFlavours_(body.flavours, qty);
   // Greg can set the delivery fee for a DM order himself. Customers never can.
   const customFee = !kiosk && body.fee !== undefined && body.fee !== null && body.fee !== '' ? parseNumber_(body.fee, NaN) : null;
   if (customFee !== null && (!isFinite(customFee) || customFee < 0 || customFee > 100000)) {
@@ -316,7 +329,7 @@ function createOrder_(body, source) {
       request ? STATUS.REQUESTED : STATUS.AWAITING, '', '', requestId,
       safe_(email), '', collect ? 'yes' : '', '', collectAt,
       code ? code.code : '', percent, freeDelivery ? 'yes' : ''
-    ];
+    ].concat(flavourCells_(flavours));
     writeRow_(sheet, sheet.getLastRow() + 1, row);
     SpreadsheetApp.flush();
     order = rowToOrder_(row);
@@ -454,6 +467,9 @@ function editOrder_(body) {
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
   if (!isFinite(price) || price < 0 || price > 100000) throw fail_('invalid', 'Price per sachet must be a number, for example 40.');
+  // Left out by an older admin page: the flavours stay as they are, if they still add up.
+  const keepFlavours = body.flavours === undefined;
+  const flavours = keepFlavours ? null : readFlavours_(body.flavours, qty);
 
   const settings = readTypedSettings_();
   if (qty < settings.minQty) throw fail_('invalid', 'The smallest order is ' + settings.minQty + '.');
@@ -496,6 +512,9 @@ function editOrder_(body) {
     row[COL.EMAIL] = safe_(email);
     row[COL.COLLECT] = collect ? 'yes' : '';
     row[COL.COLLECT_AT] = collect ? (keepTime ? str_(row[COL.COLLECT_AT]) : collectAt) : '';
+    const kept = keepFlavours ? flavoursOf_(row) : null;
+    flavourCells_(keepFlavours ? (kept && flavourSum_(kept) === qty ? kept : null) : flavours)
+      .forEach(function (v, i) { row[COL.FLAVOUR + i] = v; });
     row[COL.EDITED] = nowString_();
     // The whole row is written back with its formats, which also fills in columns older rows lack.
     sheet.getRange(rowNum, 1, 1, HEADERS.length).setNumberFormats([FORMATS]).setValues([row]);
@@ -754,8 +773,64 @@ function rowToOrder_(r) {
     collectAt: str_(r[COL.COLLECT_AT]),
     code: str_(r[COL.CODE]),
     discountPct: Number(r[COL.DISCOUNT]) || 0,
-    freeDelivery: str_(r[COL.FREE_DELIVERY]).toLowerCase() === 'yes'
+    freeDelivery: str_(r[COL.FREE_DELIVERY]).toLowerCase() === 'yes',
+    flavours: flavoursOf_(r) // { orange: 3, cranberry: 2 }, or null when none were chosen
   };
+}
+
+// ---------------------------------------------------------------------------
+// Flavours
+// ---------------------------------------------------------------------------
+
+// What a page sent, checked: { orange: 3, cranberry: 2 } adding up to qty, or null for none.
+// Missing or all zero means no flavours were chosen.
+function readFlavours_(raw, qty) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw fail_('invalid', 'Please choose your flavours again.');
+  const out = {};
+  let sum = 0;
+  FLAVOURS.forEach(function (f) {
+    const v = raw[f.key];
+    const n = v === undefined || v === null || v === '' ? 0 : Number(v);
+    if (!isFinite(n) || Math.floor(n) !== n || n < 0 || n > 10000) {
+      throw fail_('invalid', 'The number of ' + f.name + ' gels must be a whole number.');
+    }
+    out[f.key] = n;
+    sum += n;
+  });
+  if (sum === 0) return null;
+  if (sum !== qty) {
+    throw fail_('invalid', 'The flavours add up to ' + sum + ' but the order is for ' + qty + '. Please check them.');
+  }
+  return out;
+}
+
+// The flavour columns of a row: the counts, or blanks when none were chosen.
+function flavourCells_(flavours) {
+  return FLAVOURS.map(function (f) { return flavours ? flavours[f.key] || 0 : ''; });
+}
+
+// The flavours stored in a row, or null when every flavour column is blank.
+function flavoursOf_(r) {
+  let any = false;
+  const out = {};
+  FLAVOURS.forEach(function (f, i) {
+    const v = r[COL.FLAVOUR + i];
+    if (v !== '' && v !== null && v !== undefined) any = true;
+    out[f.key] = Number(v) || 0;
+  });
+  return any ? out : null;
+}
+
+function flavourSum_(flavours) {
+  return FLAVOURS.reduce(function (n, f) { return n + (flavours[f.key] || 0); }, 0);
+}
+
+// "3 Orange, 2 Cranberry", leaving out flavours with none. '' when none were chosen.
+function flavourText_(o) {
+  if (!o.flavours) return '';
+  return FLAVOURS.filter(function (f) { return o.flavours[f.key] > 0; })
+    .map(function (f) { return o.flavours[f.key] + ' ' + f.name; }).join(', ');
 }
 
 function findRow_(sheet, invoice) {
@@ -822,7 +897,7 @@ function sendAlert_(order, s) {
   try {
     const request = order.status === STATUS.REQUESTED;
     if (request) {
-      MailApp.sendEmail(s.alertEmail, 'New request ' + order.invoice + ': ' + order.qty + ' x ' + s.product + ', set the delivery fee', [
+      MailApp.sendEmail(s.alertEmail, 'New request ' + order.invoice + ': ' + (flavourText_(order) || order.qty + ' x ' + s.product) + ', set the delivery fee', [
         order.invoice + ' needs a delivery fee before the customer can pay.',
         '',
         'Name: ' + order.name,
@@ -831,13 +906,14 @@ function sendAlert_(order, s) {
         'Address: ' + order.address,
         'Notes: ' + (order.notes || '-'),
         'Order: ' + order.qty + ' x ' + s.product + ' at ' + money_(order.price, s.currency) + ' = ' + money_(order.total, s.currency),
+        'Flavours: ' + (flavourText_(order) || 'not chosen'),
         order.code ? 'Code: ' + order.code + ' (' + order.discountPct + '% off)' : '',
         '',
         'Open the admin page, set the delivery fee for this address and accept the request. The customer is then emailed the invoice.'
       ].join('\n'));
       return;
     }
-    const subject = 'New order ' + order.invoice + ': ' + order.qty + ' x ' + s.product + ' (' + money_(order.total, s.currency) + ')';
+    const subject = 'New order ' + order.invoice + ': ' + (flavourText_(order) || order.qty + ' x ' + s.product) + ' (' + money_(order.total, s.currency) + ')';
     const lines = [
       order.invoice + ' is waiting for payment.',
       '',
@@ -846,6 +922,7 @@ function sendAlert_(order, s) {
       order.collect ? 'Collects: ' + collectLine_(order, s) : 'Address: ' + order.address,
       'Notes: ' + (order.notes || '-'),
       'Order: ' + order.qty + ' x ' + s.product + ' at ' + money_(order.price, s.currency),
+      'Flavours: ' + (flavourText_(order) || 'not chosen'),
       order.code ? 'Code: ' + order.code + (order.freeDelivery ? ' (free delivery)' : ' (' + order.discountPct + '% off, -' + money_(discountOf_(order), s.currency) + ')') : '',
       order.collect ? 'Collection: ' + (order.fee > 0 ? money_(order.fee, s.currency) : 'free') : 'Delivery: ' + money_(order.fee, s.currency),
       'Total: ' + money_(order.total, s.currency),
@@ -918,6 +995,7 @@ function invoiceText_(o, s) {
   if (paid && o.paidOn) lines.push('Paid: ' + formatDay_(o.paidOn));
   lines.push('', 'For: ' + o.name);
   lines.push(o.qty + ' x ' + s.product + ' @ ' + money_(o.price, s.currency) + ' = ' + money_(lineTotal_(o), s.currency));
+  if (o.flavours) lines.push('Flavours: ' + flavourText_(o));
   if (o.discountPct > 0) lines.push(discountLine_(o, s));
   lines.push(o.collect ? 'Collection: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free') : 'Delivery: ' + (o.fee > 0 ? money_(o.fee, s.currency) : 'free' + (o.freeDelivery && o.code ? ' (' + o.code + ')' : '')));
   lines.push((paid ? 'Total paid: ' : 'Total due: ') + money_(o.total, s.currency));
@@ -964,6 +1042,7 @@ function invoiceHtml_(o, s) {
     'h2{font-size:13pt;margin:24px 0 4px}',
     'p{margin:4px 0}',
     '.note{color:#555555;font-size:10pt;margin-top:16px}',
+    '.fl{color:#555555;font-size:9.5pt}',
     '</style></head><body>'
   );
   parts.push(
@@ -978,7 +1057,7 @@ function invoiceHtml_(o, s) {
   else if (o.address) parts.push('<p><strong>Deliver to:</strong> ' + esc_(o.address) + '</p>');
   parts.push(
     '<table><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>',
-    '<tr><td>' + esc_(s.product) + '</td><td class="r">' + o.qty + '</td><td class="r">' + m(o.price) + '</td><td class="r">' + m(lineTotal_(o)) + '</td></tr>',
+    '<tr><td>' + esc_(s.product) + (o.flavours ? '<br><span class="fl">' + esc_(flavourText_(o)) + '</span>' : '') + '</td><td class="r">' + o.qty + '</td><td class="r">' + m(o.price) + '</td><td class="r">' + m(lineTotal_(o)) + '</td></tr>',
     o.discountPct > 0 ? '<tr><td>Discount (' + esc_(o.code) + ', ' + o.discountPct + '% off)</td><td></td><td></td><td class="r">-' + m(discountOf_(o)) + '</td></tr>' : '',
     '<tr><td>' + (o.collect ? 'Collection' : 'Delivery' + (o.freeDelivery && o.code ? ' (' + esc_(o.code) + ')' : '')) + '</td><td></td><td></td><td class="r">' + (o.fee > 0 ? m(o.fee) : 'Free') + '</td></tr>',
     '<tr class="total"><td>' + (paid ? 'Total paid' : 'Total due') + '</td><td></td><td></td><td class="r">' + m(o.total) + '</td></tr>',
@@ -1303,6 +1382,7 @@ function publicConfig_(s, slots) {
     ship: s.ship.on ? { tiers: s.ship.tiers.map(function (t) { return { upTo: t.upTo, door: t.door, locker: t.locker, collect: t.collect }; }) } : null,
     minQty: s.minQty,
     maxQty: s.maxQty,
+    flavours: FLAVOURS.map(function (f) { return { key: f.key, name: f.name }; }), // customers choose how many of each
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
     collectSlots: slots, // [{ date, label, times }], the free collection times
     collectAhead: COLLECT_WINDOW_DAYS,
@@ -2146,7 +2226,7 @@ function setup() {
   FORMATS.forEach(function (format, i) {
     orders.getRange(2, i + 1, orders.getMaxRows() - 1, 1).setNumberFormat(format);
   });
-  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130, 70, 130, 130, 110, 80, 90].forEach(function (w, i) {
+  [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130, 70, 130, 130, 110, 80, 90].concat(FLAVOURS.map(function () { return 80; })).forEach(function (w, i) {
     orders.setColumnWidth(i + 1, w);
   });
 

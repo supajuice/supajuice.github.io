@@ -138,6 +138,7 @@
     lines.push('');
     lines.push('For: ' + order.name);
     lines.push(order.qty + ' x ' + c.product + ' @ ' + money(order.price, sym) + ' = ' + money(totalFor(order.qty, order.price, 0), sym));
+    if (flavourText(order.flavours, flavoursFor(c))) lines.push('Flavours: ' + flavourText(order.flavours, flavoursFor(c)));
     if (order.discountPct > 0) {
       lines.push('Discount (' + order.code + ', ' + order.discountPct + '% off): -' + money(discountFor(order.qty, order.price, order.discountPct), sym));
     }
@@ -274,20 +275,23 @@
 
   // ---------- Quantity stepper (used on both pages) ----------
 
+  // opts.zero: the count can go down to 0 (one flavour of several).
   function qtyStepper(opts) {
     var id = opts.id;
-    var min = opts.min || 1;
+    var floor = opts.zero ? 0 : 1;
+    var min = opts.min === undefined ? floor : opts.min;
     var max = opts.max || 20;
     var listeners = [];
     var input = el('input', {
       id: id, class: 'qty-input', type: 'number', inputmode: 'numeric', min: String(min), max: String(max), value: String(min),
       'aria-describedby': id + '-item'
     });
-    var down = el('button', { type: 'button', class: 'qty-btn', 'aria-label': 'One fewer' }, '−');
-    var up = el('button', { type: 'button', class: 'qty-btn', 'aria-label': 'One more' }, '+');
+    var what = opts.flavour ? ' ' + opts.label : '';
+    var down = el('button', { type: 'button', class: 'qty-btn', 'aria-label': 'One fewer' + what }, '−');
+    var up = el('button', { type: 'button', class: 'qty-btn', 'aria-label': 'One more' + what }, '+');
     var item = el('p', { id: id + '-item', class: 'qty-item' });
     var node = el('div', { class: 'qty' },
-      el('label', { class: 'qty-label', for: id }, opts.label || 'Quantity'),
+      el('label', { class: 'qty-label', for: id, 'data-flavour': opts.flavour || null }, opts.label || 'Quantity'),
       el('div', { class: 'qty-controls' }, down, input, up),
       item
     );
@@ -325,12 +329,99 @@
       // Sets both limits. A count that was sitting at the old minimum moves to the new one.
       setRange: function (lo, hi) {
         var wasAtMin = read() === min;
-        min = Math.max(1, lo || 1);
+        min = Math.max(floor, lo || floor);
         max = Math.max(min, hi || min);
         input.min = String(min);
         input.max = String(max);
         set(wasAtMin ? min : read());
       },
+      setItem: function (text) { item.textContent = text; },
+      onChange: function (fn) { listeners.push(fn); }
+    };
+  }
+
+  // ---------- Flavours (used on both pages) ----------
+
+  // Used when the order service is older and does not send its flavours.
+  var FLAVOURS = [{ key: 'orange', name: 'Orange' }, { key: 'cranberry', name: 'Cranberry' }];
+
+  function flavoursFor(c) {
+    return c && Array.isArray(c.flavours) && c.flavours.length ? c.flavours : FLAVOURS;
+  }
+
+  // "3 Orange, 2 Cranberry" from { orange: 3, cranberry: 2 }, leaving out flavours with none.
+  // '' when no flavours were chosen.
+  function flavourText(counts, list) {
+    if (!counts) return '';
+    return (list || FLAVOURS).filter(function (f) { return counts[f.key] > 0; })
+      .map(function (f) { return counts[f.key] + ' ' + f.name; }).join(', ');
+  }
+
+  // One stepper per flavour, each from 0. The order's quantity is what they add up to.
+  //   opts.id      a prefix for the ids: 'qty' gives qty-orange, qty-cranberry
+  //   opts.list    the flavours, [{ key, name }]
+  //   opts.legend  the heading
+  function flavourPicker(opts) {
+    var list = opts.list || FLAVOURS;
+    var listeners = [];
+    var steppers = {};
+    var min = 1;
+    var max = opts.max || 20;
+    var item = el('p', { class: 'hint flavours-item', id: opts.id + '-item' });
+    var count = el('p', { class: 'flavours-count', id: opts.id + '-count', role: 'status' });
+    var node = el('fieldset', { class: 'flavours', id: opts.id },
+      el('legend', { class: 'flavours-legend' }, opts.legend || 'Choose your flavours'),
+      item);
+    list.forEach(function (f) {
+      var s = qtyStepper({ id: opts.id + '-' + f.key, label: f.name, flavour: f.key, zero: true, max: max });
+      s.node.classList.add('qty--flavour');
+      s.onChange(changed);
+      steppers[f.key] = s;
+      node.appendChild(s.node);
+    });
+    node.appendChild(count);
+
+    function get() {
+      var out = {};
+      list.forEach(function (f) { out[f.key] = steppers[f.key].get(); });
+      return out;
+    }
+    function total() {
+      return list.reduce(function (n, f) { return n + steppers[f.key].get(); }, 0);
+    }
+    function sync() {
+      var n = total();
+      count.textContent = n === 0 ? 'Choose at least ' + (min === 1 ? '1 gel.' : min + ' gels.')
+        : n < min ? n + ' chosen. Choose ' + (min - n) + ' more: the minimum order is ' + min + '.'
+        : n > max ? n + ' chosen. The most one order can include is ' + max + '.'
+        : n + (n === 1 ? ' gel' : ' gels') + ': ' + flavourText(get(), list) + '.';
+      count.classList.toggle('flavours-count--short', n < min || n > max);
+    }
+    function changed() {
+      sync();
+      listeners.forEach(function (fn) { fn(total()); });
+    }
+    sync();
+
+    return {
+      node: node,
+      list: list,
+      get: get,
+      total: total,
+      // The first stepper's number box, to focus when the flavours need attention.
+      firstInput: function () { return steppers[list[0].key].input; },
+      set: function (counts) {
+        list.forEach(function (f) { steppers[f.key].set((counts && counts[f.key]) || 0); });
+      },
+      reset: function () { list.forEach(function (f) { steppers[f.key].set(0); }); },
+      setRange: function (lo, hi) {
+        min = Math.max(1, lo || 1);
+        max = Math.max(min, hi || min);
+        list.forEach(function (f) { steppers[f.key].setRange(0, max); });
+        sync();
+      },
+      min: function () { return min; },
+      max: function () { return max; },
       setItem: function (text) { item.textContent = text; },
       onChange: function (fn) { listeners.push(fn); }
     };
@@ -376,6 +467,7 @@
   //   opts.quote    the fee is confirmed later, so the total covers the sachets only
   //   opts.fee      a fee to use instead of the usual one (Greg's DM orders)
   //   opts.discount a discount code: { code, percent, delivery }. Free delivery leaves a collection as it is.
+  //   opts.flavours "3 Orange, 2 Cranberry", shown under the sachets
   function renderSummary(dl, c, qty, opts) {
     opts = opts || {};
     var sym = c.currency;
@@ -392,7 +484,8 @@
       : opts.feeText || (quote ? (c.fee > 0 ? 'From ' + money(c.fee, sym) : 'Confirmed later') : (fee > 0 ? money(fee, sym) : 'Free'));
     clear(dl);
     dl.appendChild(el('div', { class: 'summary-row' },
-      el('dt', null, qty + ' x ' + c.product),
+      el('dt', null, qty + ' x ' + c.product,
+        opts.flavours ? el('span', { class: 'summary-flavours' }, opts.flavours) : null),
       el('dd', null, money(totalFor(qty, c.price, 0), sym))));
     if (percent > 0) {
       dl.appendChild(el('div', { class: 'summary-row summary-discount' },
@@ -429,6 +522,10 @@
     toast: toast,
     store: store,
     qtyStepper: qtyStepper,
+    FLAVOURS: FLAVOURS,
+    flavoursFor: flavoursFor,
+    flavourText: flavourText,
+    flavourPicker: flavourPicker,
     itemLine: itemLine,
     fillSlotDays: fillSlotDays,
     fillSlotTimes: fillSlotTimes,

@@ -174,6 +174,15 @@
 
   // ---------- Small helpers ----------
 
+  function flavourList() {
+    return SJ.flavoursFor(state.config);
+  }
+
+  // "3 Orange, 2 Cranberry", or '' when the order has no flavours.
+  function flavoursOf(o) {
+    return SJ.flavourText(o.flavours, flavourList());
+  }
+
   function plural(n, one, many) {
     return n + ' ' + (n === 1 ? one : (many || one + 's'));
   }
@@ -556,14 +565,20 @@
     return weekOf(dateText(new Date())).key;
   }
 
-  // [{ key, year, week, monday, orders, gels, paid, collect, deliver }], oldest first.
+  // [{ key, year, week, monday, orders, gels, paid, collect, deliver, flavours, unflavoured }], oldest first.
+  // flavours: how many of each flavour, { orange: 12, cranberry: 5 }. unflavoured: gels with none chosen.
   function weekGroups(list) {
     var byKey = {};
     list.forEach(function (o) {
       var w = weekOf(weekDay(o));
-      var g = byKey[w.key] || (byKey[w.key] = Object.assign(w, { orders: [], gels: 0, paid: 0, collect: 0, deliver: 0 }));
+      var g = byKey[w.key] || (byKey[w.key] = Object.assign(w, { orders: [], gels: 0, paid: 0, collect: 0, deliver: 0, flavours: {}, unflavoured: 0 }));
       g.orders.push(o);
       g.gels += o.qty;
+      if (o.flavours) {
+        flavourList().forEach(function (f) { g.flavours[f.key] = (g.flavours[f.key] || 0) + (o.flavours[f.key] || 0); });
+      } else {
+        g.unflavoured += o.qty;
+      }
       if (o.status === PAID || o.status === DELIVERED) g.paid += o.qty;
       if (o.collect) g.collect += o.qty; else g.deliver += o.qty;
     });
@@ -592,6 +607,17 @@
     return row;
   }
 
+  // How many of each flavour to make that week: "Orange 12 · Cranberry 5".
+  function flavourTally(g) {
+    var row = el('div', { class: 'flavour-tally', 'aria-label': 'Flavours to make' });
+    flavourList().forEach(function (f) {
+      row.appendChild(el('span', { class: 'flavour-chip', 'data-flavour': f.key },
+        el('strong', null, String(g.flavours[f.key] || 0)), ' ' + f.name));
+    });
+    if (g.unflavoured) row.appendChild(el('span', { class: 'flavour-chip flavour-chip--none' }, el('strong', null, String(g.unflavoured)), ' no flavour chosen'));
+    return row;
+  }
+
   function weekCard(g, current) {
     var open = !!state.weekOpen[g.key];
     var unpaid = g.gels - g.paid;
@@ -609,6 +635,7 @@
     });
     var box = el('div', { class: 'week' + (current ? ' week--now' : '') },
       toggle,
+      flavourTally(g),
       el('p', { class: 'week-detail' }, split + plural(g.orders.length, 'order') + ' · ' + g.paid + ' paid' + (unpaid ? ', ' + unpaid + ' not paid yet' : '')));
     if (open) {
       var ul = el('ul', { class: 'week-orders' });
@@ -616,7 +643,7 @@
         var when = o.collect ? (o.collectAt ? 'Collect ' + SJ.formatWhen(o.collectAt) : 'Collect, no time yet') : 'Deliver, ordered ' + SJ.formatDay(o.created);
         ul.appendChild(el('li', null,
           el('span', { class: 'week-order-qty' }, String(o.qty)),
-          el('span', { class: 'week-order-who' }, o.name + ' · ' + o.invoice),
+          el('span', { class: 'week-order-who' }, o.name + ' · ' + o.invoice + (flavoursOf(o) ? ' · ' + flavoursOf(o) : '')),
           el('span', { class: 'week-order-when' }, when + ' · ' + o.status)));
       });
       box.appendChild(ul);
@@ -957,7 +984,7 @@
     var n = 0;
     function add(o, where) {
       n++;
-      lines.push('', n + '. ' + o.name + ' (' + o.invoice + ')', '   ' + o.qty + ' x ' + c.product, '   ' + where);
+      lines.push('', n + '. ' + o.name + ' (' + o.invoice + ')', '   ' + o.qty + ' x ' + c.product + (flavoursOf(o) ? ': ' + flavoursOf(o) : ''), '   ' + where);
       if (o.contact) lines.push('   Contact: ' + o.contact);
       if (o.notes) lines.push('   Note: ' + o.notes);
     }
@@ -1069,6 +1096,8 @@
       o.qty + ' x ' + c.product + ' at ' + SJ.money(o.price, sym) + ', ' +
       (o.collect ? 'collection' : request ? 'delivery fee to be set'
         : (o.fee > 0 ? 'delivery ' + SJ.money(o.fee, sym) : 'free delivery'))));
+
+    card.appendChild(labelled('Flavours', flavoursOf(o) || 'Not chosen'));
 
     if (awaiting) {
       card.appendChild(el('p', { class: 'order-match' },
@@ -1488,6 +1517,7 @@
       qty: String(o.qty), collect: o.collect, price: String(o.price), fee: String(o.fee), sendInvoice: true,
       collectDate: SJ.dayOf(o.collectAt), collectTime: String(o.collectAt || '').slice(11)
     };
+    flavourList().forEach(function (f) { state.editDraft['fl_' + f.key] = String(o.flavours ? o.flavours[f.key] || 0 : 0); });
     state.editError = null;
     state.confirm = null;
     state.preview = null;
@@ -1573,6 +1603,10 @@
       input('email', 'Email', { type: 'email', max: 120 }),
       input('contact', 'Instagram handle or phone'),
       input('qty', 'Quantity', { mode: 'numeric', max: 3 }),
+      el('div', { class: 'edit-flavours' }, flavourList().map(function (f) {
+        return input('fl_' + f.key, f.name, { mode: 'numeric', max: 3 });
+      })),
+      el('p', { class: 'hint' }, 'The flavours must add up to the quantity. Leave them all at 0 if not chosen.'),
       input('price', 'Price per sachet', { mode: 'decimal', max: 12 }),
       el('label', { class: 'check' }, collect, el('span', null, 'Customer collects (no delivery fee)')),
       timeField,
@@ -1608,6 +1642,22 @@
       renderOrders();
       return;
     }
+    var flavours = {};
+    var flavourSum = 0;
+    var flavourBad = false;
+    flavourList().forEach(function (f) {
+      var n = Number(String(d['fl_' + f.key]).trim() || 0);
+      if (!isFinite(n) || Math.floor(n) !== n || n < 0) flavourBad = true;
+      flavours[f.key] = n;
+      flavourSum += n;
+    });
+    if (flavourBad || (flavourSum > 0 && flavourSum !== Number(d.qty))) {
+      state.editError = flavourBad ? 'The flavours must be whole numbers.'
+        : 'The flavours add up to ' + flavourSum + ' but the quantity is ' + d.qty + '. Change one of them.';
+      state.focus = { invoice: o.invoice, role: 'edit-fl_' + flavourList()[0].key };
+      renderOrders();
+      return;
+    }
     var collectAt = d.collect ? joinSlot(d.collectDate, d.collectTime) : '';
     if (collectAt === null) {
       state.editError = 'Pick both a date and a time to collect, or leave both empty.';
@@ -1624,7 +1674,7 @@
         key: state.key, invoice: o.invoice,
         name: d.name.trim(), email: email, contact: d.contact.trim(),
         address: d.collect ? '' : d.address.trim(), notes: d.notes.trim(),
-        qty: Number(d.qty), collect: d.collect, collectAt: collectAt, price: d.price, fee: d.collect || o.status === REQUESTED ? '0' : d.fee,
+        qty: Number(d.qty), flavours: flavours, collect: d.collect, collectAt: collectAt, price: d.price, fee: d.collect || o.status === REQUESTED ? '0' : d.fee,
         sendInvoice: !!(email && d.sendInvoice && o.status === AWAITING)
       });
       state.version++;
@@ -1685,7 +1735,7 @@
   // ---------- New order tab ----------
 
   function initNewForm() {
-    newStepper = SJ.qtyStepper({ id: 'n-qty', label: 'Quantity', max: 20 });
+    newStepper = SJ.flavourPicker({ id: 'n-qty', list: flavourList(), legend: 'Flavours' });
     $('new-qty-slot').appendChild(newStepper.node);
     newStepper.onChange(renderNewTotals);
     $('new-form').addEventListener('submit', onCreate);
@@ -1763,7 +1813,9 @@
     $('n-fee-field').hidden = collect;
     $('n-time-field').hidden = !collect;
     var fee = feeNumber($('n-fee').value);
-    SJ.renderSummary($('n-summary'), state.config, newStepper.get(), { collect: collect, fee: fee === null ? undefined : fee });
+    SJ.renderSummary($('n-summary'), state.config, newStepper.total(), {
+      collect: collect, fee: fee === null ? undefined : fee, flavours: SJ.flavourText(newStepper.get(), newStepper.list)
+    });
   }
 
   function showNewError(message) {
@@ -1791,7 +1843,8 @@
       contact: $('n-contact').value.trim(),
       address: collect ? '' : $('n-address').value.trim(),
       notes: $('n-notes').value.trim(),
-      qty: newStepper.get(),
+      qty: newStepper.total(),
+      flavours: newStepper.get(),
       collect: collect,
       collectAt: collect ? joinSlot(day, $('n-collect-hour').value) : '',
       fee: collect ? '' : $('n-fee').value.trim()
@@ -1811,8 +1864,15 @@
       $('n-collect-hour').focus();
       return;
     }
+    if (data.qty < newStepper.min() || data.qty > newStepper.max()) {
+      showNewError(data.qty < newStepper.min()
+        ? 'Choose the flavours: at least ' + (newStepper.min() === 1 ? '1 gel.' : newStepper.min() + ' gels in total.')
+        : 'The most one order can include is ' + newStepper.max() + ' gels.');
+      newStepper.firstInput().focus();
+      return;
+    }
 
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.collect, data.collectAt, data.fee]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.notes, data.qty, data.flavours, data.collect, data.collectAt, data.fee]);
     if (!newPending || newPending.sig !== sig) newPending = { sig: sig, id: SJ.newRequestId() };
 
     setNewBusy(true);
