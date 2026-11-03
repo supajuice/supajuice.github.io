@@ -327,6 +327,7 @@ html:has(body.shop) {
 .why-list li {
   display: grid;
   grid-template-columns: 44px 1fr;
+  grid-template-rows: auto 1fr;
   column-gap: 14px;
   align-items: start;
 }
@@ -580,23 +581,33 @@ html:has(body.shop) {
 }
 .shop .pay { border-color: var(--line); border-radius: 14px; background: var(--paper); }
 
-/* ---------- Why + How to use, side by side on wide screens ---------- */
+/* ---------- Why + How to use, stacked full width on wide screens ---------- */
 
 @media (min-width: 52rem) {
-  .info {
+  /* Fuel without the fuss: one row, three columns */
+  .why-list { gap: 40px; }
+  .why-list p { max-width: none; }
+
+  /* How to use: its own section, one row with two columns */
+  .how { padding-top: 56px; }
+  .how-card { max-width: none; }
+  .how-list {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 56px;
-    align-items: start;
-    max-width: var(--wrap);
-    margin: 0 auto;
-    padding: 72px max(16px, env(safe-area-inset-left)) 8px;
+    padding: 0;
   }
-  .info > .why,
-  .info > .how { padding: 0; }
-  .info .wrap { padding-inline: 0; max-width: none; }
-  .info .why-list { grid-template-columns: 1fr; gap: 24px; }
-  .info .how-card { max-width: none; margin-top: 6px; }
+  .how-row,
+  .how-row + .how-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 22px 28px;
+    border-top: 0;
+  }
+  .how-row + .how-row { border-left: 1px solid var(--line); }
+  .how-row dt { font-size: 1rem; }
+  .how-row dd strong { font-size: 1.1875rem; }
+  .how-head { padding: 14px 28px; }
+  .how-tip { margin: 0 28px 22px; }
 }
 
 /* ---------- Footer ---------- */
