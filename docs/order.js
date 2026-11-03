@@ -813,5 +813,14 @@
     $('foot-ig').hidden = false;
   })();
 
+  // The floating Instagram button follows the handle in config.js.
+  (function floatingInstagram() {
+    var handle = String(SJ.cfg.instagram || '').replace(/^@/, '');
+    var btn = $('ig-float');
+    if (!btn) return;
+    if (!handle) { btn.hidden = true; return; }
+    btn.href = 'https://www.instagram.com/' + handle + '/';
+  })();
+
   init();
 })();

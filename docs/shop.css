@@ -610,6 +610,40 @@ html:has(body.shop) {
   .how-tip { margin: 0 28px 22px; }
 }
 
+/* ---------- Floating Instagram button ---------- */
+
+.ig-float {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--juice);
+  color: #fff;
+  box-shadow: 0 10px 24px -8px rgba(13, 34, 64, 0.55);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.ig-float[hidden] { display: none; }
+.ig-float svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.9;
+  stroke-linejoin: round;
+}
+.ig-float:hover { transform: translateY(-2px); box-shadow: 0 14px 28px -8px rgba(13, 34, 64, 0.6); }
+.ig-float:focus-visible { outline: 3px solid var(--label); outline-offset: 3px; }
+.shop--done .ig-float { display: grid; }
+@media (min-width: 52rem) {
+  .ig-float { width: 60px; height: 60px; right: 28px; bottom: 28px; }
+  .ig-float svg { width: 28px; height: 28px; }
+}
+
 /* ---------- Footer ---------- */
 
 .foot {
