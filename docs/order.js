@@ -808,7 +808,9 @@
   (function footerInstagram() {
     var link = dmLink();
     if (!link) return;
-    link.textContent = 'Say hi on Instagram';
+    link.textContent = '@' + String(SJ.cfg.instagram).replace(/^@/, '');
+    link.setAttribute('aria-label', 'Supa Juice on Instagram, @' + String(SJ.cfg.instagram).replace(/^@/, ''));
+    link.className = 'foot-ig-link';
     $('foot-ig').appendChild(link);
     $('foot-ig').hidden = false;
   })();
