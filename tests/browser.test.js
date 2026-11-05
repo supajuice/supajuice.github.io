@@ -675,7 +675,7 @@ test('order page: a failed connection keeps the details and offers a DM', async 
   await page.click('#submit');
   await page.waitForSelector('#form-error:not([hidden])');
   const link = page.locator('#form-error a');
-  assert.equal(await link.getAttribute('href'), 'https://www.instagram.com/gregbolus02/');
+  assert.equal(await link.getAttribute('href'), 'https://www.instagram.com/supajuice.co/');
   assert.equal(await page.inputValue('#address'), '12 Beach Rd, Sea Point');
   assert.equal(await page.locator('#submit').isDisabled(), false);
 });
@@ -716,7 +716,7 @@ test('order page: ordering is closed until the price and bank details are set', 
   assert.equal(await text(page, '#closed-title'), 'Ordering opens soon');
   assert.equal(await page.locator('#order-form').isHidden(), true);
   assert.equal(await page.locator('#lede').isHidden(), true);
-  assert.equal(await page.locator('#closed-dm a').getAttribute('href'), 'https://www.instagram.com/gregbolus02/');
+  assert.equal(await page.locator('#closed-dm a').getAttribute('href'), 'https://www.instagram.com/supajuice.co/');
   noErrors(errors);
 });
 

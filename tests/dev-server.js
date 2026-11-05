@@ -161,7 +161,7 @@ function listen(server, port) {
 async function startDevServer(opts) {
   opts = opts || {};
   let current = build(opts.mode || 'seeded', opts);
-  const settings = { latency: opts.latency || 0, instagram: 'gregbolus02', endpoint: null };
+  const settings = { latency: opts.latency || 0, instagram: 'supajuice.co', endpoint: null };
   const calls = []; // what the pages sent: { method, action, contentType }
   const echo = new Map();
   let apiPort = 0;

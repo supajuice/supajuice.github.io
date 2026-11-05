@@ -9,6 +9,6 @@
 //            entered on the admin page, the prices worked out from them are shown instead.
 window.SJ_CONFIG = {
   endpoint: 'https://script.google.com/macros/s/AKfycbxEIuI6sClunrjlo5O8raoGk67ue7txtJgD6OrLrAxlg90Qa99-1DoyqDZJWmQbX1or/exec',
-  instagram: 'gregbolus02',
+  instagram: 'supajuice.co',
   fromPrices: { door: 99, locker: 69 }
 };
