@@ -242,8 +242,9 @@ html:has(body.shop) {
   font-weight: 900;
   line-height: 0.9;
 }
-.badge b { font-size: 2.125rem; line-height: 0.8; margin-top: 4px; }
-.badge small { margin-top: 2px; }
+.badge { width: 100px; height: 100px; gap: 6px; padding-top: 2px; }
+.badge b { display: block; font-size: 2.125rem; line-height: 1; }
+.badge small { display: block; line-height: 1; }
 .badge small {
   font-weight: 800;
   font-size: 0.75rem;
@@ -383,7 +384,9 @@ html:has(body.shop) {
   align-items: center;
   justify-content: center;
 }
-.pouch-badge b { font-size: 29px; line-height: 0.85; text-transform: none; }
+.pouch-badge { gap: 4px; }
+.pouch-badge b { display: block; font-size: 27px; line-height: 1; text-transform: none; }
+.pouch-badge small { display: block; line-height: 1; }
 .pouch-badge small,
 .pouch-side small {
   font-family: var(--font-display);
