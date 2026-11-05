@@ -20,6 +20,8 @@
   --blue-deep: #0b2a8a;
   --navy: #0e1a3d;       /* small print */
   --cream: #fff8db;
+  --orange: #f7931e;     /* flavour colours, so each flavour looks like its fruit */
+  --cranberry: #a3102f;
 
   --ink: #0e1a3d;
   --ink-soft: #27325a;
@@ -371,6 +373,8 @@ html:has(body.shop) {
   font-size: 15px;
   transform: skewX(-8deg);
 }
+.pouch-flavour--orange { background: var(--orange); color: var(--navy); }
+.pouch-flavour--cranberry { background: var(--cranberry); color: #fff; }
 .pouch-facts { margin-top: 13px; display: flex; align-items: center; gap: 9px; }
 .pouch-badge {
   flex: none;
@@ -514,9 +518,10 @@ html:has(body.shop) {
   justify-content: space-between;
   gap: 16px;
 }
-.flav-card--sun { background: var(--sun); color: var(--blue); }
-.flav-card--sun .tag { background: var(--blue); color: var(--sun); }
-.flav-card--blue { background: var(--blue); color: var(--sun); }
+.flav-card--orange { background: var(--orange); color: var(--navy); }
+.flav-card--orange .tag { background: var(--navy); color: #fff; }
+.flav-card--cranberry { background: var(--cranberry); color: #fff; }
+.flav-card--cranberry .tag { background: #fff; color: var(--cranberry); }
 .flav-meta {
   font-weight: 800;
   font-size: 0.875rem;
@@ -725,8 +730,8 @@ html:has(body.shop) {
   font-weight: 900;
   font-size: 1.5rem;
 }
-.shop .qty-label[data-flavour='orange'] { --flavour: #f28a1e; }
-.shop .qty-label[data-flavour='cranberry'] { --flavour: #b3123c; }
+.shop .qty-label[data-flavour='orange'] { --flavour: var(--orange); }
+.shop .qty-label[data-flavour='cranberry'] { --flavour: var(--cranberry); }
 .shop .qty-btn {
   border: 0;
   background: var(--blue);
