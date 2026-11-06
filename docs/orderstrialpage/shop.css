@@ -490,6 +490,22 @@ html:has(body.shop) {
 }
 .strip span { display: inline-block; padding-left: 16px; }
 
+/* The moving ticker: the track slides left by half its width (one full copy of the words),
+   then starts again, so it never jumps. Still for people who ask for less motion. */
+.strip--moving { padding-left: 0; }
+.strip-track {
+  display: flex;
+  width: max-content;
+  animation: strip-slide 90s linear infinite;
+}
+.strip-track span { flex: none; padding: 0 0.35em 0 0; }
+@keyframes strip-slide {
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .strip-track { animation: none; }
+}
+
 /* ---------- Why ---------- */
 
 .why { background: var(--cream); padding: 64px 0; }
