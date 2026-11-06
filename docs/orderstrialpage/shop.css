@@ -41,13 +41,13 @@
   --radius: 12px;
   --wrap: 75rem;
   color-scheme: light;
-  scroll-padding-top: 76px;
+  scroll-padding-top: 112px;
 }
 
 html:has(body.shop) {
   color-scheme: light;
   scroll-behavior: smooth;
-  scroll-padding-top: 76px;
+  scroll-padding-top: 112px;
   background: var(--sun);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -115,6 +115,39 @@ html:has(body.shop) {
   border-bottom: 3px solid var(--blue);
   padding-top: env(safe-area-inset-top);
 }
+/* The offer ribbon: a blue band at the very top, part of the sticky header so it stays in view. */
+.shop a.promo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
+  min-height: 36px;
+  padding: 6px max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
+  background: var(--blue);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+}
+.shop a.promo:hover,
+.shop a.promo:focus-visible {
+  background: var(--blue-deep);
+}
+.shop a.promo:focus-visible {
+  outline: 3px solid var(--sun);
+  outline-offset: -3px;
+}
+.shop .promo-code {
+  padding: 1px 8px;
+  border: 1.5px dashed var(--sun);
+  border-radius: 6px;
+  color: var(--sun);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
 .bar-inner {
   max-width: var(--wrap);
   margin: 0 auto;
