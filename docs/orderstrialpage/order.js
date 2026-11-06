@@ -267,7 +267,7 @@
     $('choose-deliver-title').textContent = 'To your door';
     if (config) {
       var collectFree = !pudo || pudoFrom('collect') === 0;
-      $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? '\n' + place : '') : (place || 'Collect');
+      $('choose-collect-sub').textContent = collectFree ? 'Free collection' + (place ? '\n' + place : '') : (place || 'Collect');
       $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
       $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : quoteFromText('locker') || deliveryText(config);
     }
@@ -307,7 +307,8 @@
     config = c;
     $('brand').textContent = c.brand;
     document.title = c.brand + ' (trial)';
-    $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you. ' : 'We send them to you, or you can collect. ') +
+    // Trial page: each sentence on its own line (the lede keeps line breaks, see shop.css).
+    $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you.\n' : 'We send them to you, or you can collect.\n') +
       'Pay by bank transfer.';
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);

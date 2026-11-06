@@ -650,7 +650,7 @@ html:has(body.shop) {
   background: transparent;
 }
 .order-intro { display: grid; gap: 10px; }
-.order-intro .lede { max-width: 40ch; color: var(--ink); }
+.order-intro .lede { max-width: 40ch; color: var(--ink); white-space: pre-line; }
 .order-panel #order-form,
 .order-panel #view-done,
 .order-panel #view-closed {
@@ -687,16 +687,6 @@ html:has(body.shop) {
     position: sticky;
     top: 136px;
   }
-  .shop .order-panel .page:has(> #photo:not([hidden])) .choose-row.choose-row--three { grid-template-columns: 1fr; }
-  /* Stacked, each choice is one row with its icon on the left, as on a phone. */
-  .shop .order-panel .page:has(> #photo:not([hidden])) .choose-btn {
-    min-height: 72px;
-    display: grid;
-    grid-template-columns: 30px 1fr;
-    align-items: center;
-    column-gap: 12px;
-  }
-  .shop .order-panel .page:has(> #photo:not([hidden])) .choose-icon { grid-row: span 2; margin: 0; }
 }
 
 /* Fields sit on white with a clear edge. */
@@ -775,17 +765,17 @@ html:has(body.shop) {
 }
 .shop .choose-sub { color: var(--ink); font-size: 0.875rem; font-weight: 600; line-height: 1.3; white-space: pre-line; }
 .shop .choose-btn[aria-pressed='true'] .choose-sub { color: #fff; }
-@media (max-width: 400px) {
-  .shop .choose-row.choose-row--three { grid-template-columns: 1fr; }
-  .shop .choose-btn {
-    min-height: 64px;
-    display: grid;
-    grid-template-columns: 30px 1fr;
-    align-items: center;
-    column-gap: 10px;
-  }
-  .shop .choose-icon { grid-row: span 2; margin: 0; }
+/* Trial page: the ordering choices are always stacked, one per row with the icon on the left,
+   on every screen size. */
+.shop .choose-row.choose-row--three { grid-template-columns: 1fr; }
+.shop .choose-btn {
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  align-items: center;
+  column-gap: 12px;
 }
+.shop .choose-icon { grid-row: span 2; margin: 0; }
 .shop .chosen {
   border: 3px solid var(--blue);
   background: var(--sun);
