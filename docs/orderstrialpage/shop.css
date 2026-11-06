@@ -921,8 +921,20 @@ html:has(body.shop) {
 .shop .ig-float img { filter: brightness(0) invert(1); transition: filter 0.25s ease; }
 .shop .ig-float.ig-float--on-dark { background: var(--sun); }
 .shop .ig-float.ig-float--on-dark img { filter: brightness(0); }
+/* The button is as tall as the footer's @supajuice.co pill (48px), so both have the same
+   round ends. On wide screens it floats as high as the footer's bottom padding, so at the end
+   of the page it lines up with the pill and the last line of the footer, beside the pill. */
+.shop .ig-float,
+.shop .ig-float:hover { width: 48px; height: 48px; padding: 11px; }
+/* On a phone the pill is the footer's last row, at the button's height from the bottom, with
+   the button to its right. */
+@media (max-width: 51.99rem) {
+  .shop .foot-inner { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .shop .foot-ig { margin-right: 64px; }
+}
 @media (min-width: 52rem) {
-  .shop .ig-float { padding: 14px; }
+  .shop .ig-float { bottom: calc(48px + env(safe-area-inset-bottom)); }
+  .shop .foot-ig { margin-right: 64px; }
 }
 
 /* ---------- Footer ---------- */
@@ -975,7 +987,7 @@ html:has(body.shop) {
 .demo-tag {
   position: fixed;
   left: max(12px, env(safe-area-inset-left));
-  bottom: max(12px, env(safe-area-inset-bottom));
+  top: calc(112px + env(safe-area-inset-top)); /* just under the header, clear of the footer */
   z-index: 50;
   margin: 0;
   padding: 6px 12px;
