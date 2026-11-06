@@ -241,7 +241,8 @@
   }
 
   // While the fee is confirmed after the order, a starting price says so.
-  var QUOTE_NOTE = ' (we\'ll contact you with the final price)';
+  // Trial page: each part of a choice's small text goes on its own line (see .choose-sub in shop.css).
+  var QUOTE_NOTE = '\n(we\'ll contact you with the final price)';
 
   // The starting price for door or locker, with the note, or '' when there is none.
   function quoteFromText(kind) {
@@ -266,7 +267,7 @@
     $('choose-deliver-title').textContent = 'To your door';
     if (config) {
       var collectFree = !pudo || pudoFrom('collect') === 0;
-      $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? ' · ' + place : '') : (place || 'Collect');
+      $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? '\n' + place : '') : (place || 'Collect');
       $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
       $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : quoteFromText('locker') || deliveryText(config);
     }

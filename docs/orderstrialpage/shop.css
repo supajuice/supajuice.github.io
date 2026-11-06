@@ -669,6 +669,38 @@ html:has(body.shop) {
   .order-panel #view-closed { padding: 32px 32px 36px; }
 }
 
+/* Trial page: on wide screens, the photo on the left and the order form beside it, with the
+   delivery choices stacked. The photo stays in view while the form grows. Without a photo,
+   or on a phone, it stays one column. */
+@media (min-width: 60rem) {
+  .order-panel .page:has(> #photo:not([hidden])) {
+    max-width: 68rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 48px;
+    row-gap: 32px;
+    align-items: start;
+  }
+  .order-panel .page:has(> #photo:not([hidden])) > * { margin-top: 0; grid-column: 2; }
+  .order-panel .page:has(> #photo:not([hidden])) > .order-intro { grid-column: 1 / -1; }
+  .order-panel .page:has(> #photo:not([hidden])) > #photo {
+    grid-column: 1;
+    grid-row: 2 / span 3;
+    position: sticky;
+    top: 136px;
+  }
+  .shop .order-panel .page:has(> #photo:not([hidden])) .choose-row.choose-row--three { grid-template-columns: 1fr; }
+  /* Stacked, each choice is one row with its icon on the left, as on a phone. */
+  .shop .order-panel .page:has(> #photo:not([hidden])) .choose-btn {
+    min-height: 72px;
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    align-items: center;
+    column-gap: 12px;
+  }
+  .shop .order-panel .page:has(> #photo:not([hidden])) .choose-icon { grid-row: span 2; margin: 0; }
+}
+
 /* Fields sit on white with a clear edge. */
 .shop .order-panel .field input[type='text'],
 .shop .order-panel .field input[type='email'],
@@ -743,7 +775,7 @@ html:has(body.shop) {
   font-size: 1.375rem;
   line-height: 1;
 }
-.shop .choose-sub { color: var(--ink); font-size: 0.875rem; font-weight: 600; line-height: 1.3; }
+.shop .choose-sub { color: var(--ink); font-size: 0.875rem; font-weight: 600; line-height: 1.3; white-space: pre-line; }
 .shop .choose-btn[aria-pressed='true'] .choose-sub { color: #fff; }
 @media (max-width: 400px) {
   .shop .choose-row.choose-row--three { grid-template-columns: 1fr; }
