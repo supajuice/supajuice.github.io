@@ -491,7 +491,8 @@ html:has(body.shop) {
 .strip span { display: inline-block; padding-left: 16px; }
 
 /* The moving ticker: the track slides left by half its width (one full copy of the words),
-   then starts again, so it never jumps. Still for people who ask for less motion. */
+   then starts again, so it never jumps. It moves for everyone, also when the device asks
+   for less motion: it is slow, and it only runs in this one strip. */
 .strip--moving { padding-left: 0; }
 .strip-track {
   display: flex;
@@ -501,9 +502,6 @@ html:has(body.shop) {
 .strip-track span { flex: none; padding: 0 0.35em 0 0; }
 @keyframes strip-slide {
   to { transform: translateX(-50%); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .strip-track { animation: none; }
 }
 
 /* ---------- Why ---------- */
