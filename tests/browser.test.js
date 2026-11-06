@@ -702,6 +702,13 @@ test('trial page: a demo copy of the order page that orders, sends and saves not
   // The shared images and fonts load from the main site.
   await page.waitForFunction(() => document.querySelector('#ig-float img') && document.querySelector('#ig-float img').naturalWidth > 0);
   assert.ok(await page.evaluate(() => document.fonts.check('900 italic 16px "Barlow Condensed"') || document.fonts.check('16px "Public Sans"')));
+  // The Instagram button is blue over light parts of the page and yellow over the dark footer.
+  const onDark = () => page.evaluate(() => document.getElementById('ig-float').classList.contains('ig-float--on-dark'));
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await page.waitForFunction(() => !document.getElementById('ig-float').classList.contains('ig-float--on-dark'));
+  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+  await page.waitForFunction(() => document.getElementById('ig-float').classList.contains('ig-float--on-dark'));
+  assert.equal(await onDark(), true);
   // Nothing is kept in the browser, so a reload starts afresh and the real page is untouched.
   assert.deepEqual(await page.evaluate(() => Object.keys(localStorage)), []);
   await page.reload();

@@ -920,6 +920,23 @@ html:has(body.shop) {
   .ig-float { width: 60px; height: 60px; right: 28px; bottom: 28px; border-radius: 15px; }
 }
 
+/* Trial page: the button takes the brand colours of what it floats over (see ig-colour.js).
+   Instagram's rules allow its glyph only in black, white or its own gradient, so the glyph
+   stays white or black and the circle behind it changes: blue over light parts of the page,
+   yellow over blue and dark parts. */
+.shop .ig-float {
+  border-radius: 50%;
+  padding: 13px;
+  background: var(--blue);
+  transition: transform 0.15s ease, background-color 0.25s ease;
+}
+.shop .ig-float img { filter: brightness(0) invert(1); transition: filter 0.25s ease; }
+.shop .ig-float.ig-float--on-dark { background: var(--sun); }
+.shop .ig-float.ig-float--on-dark img { filter: brightness(0); }
+@media (min-width: 52rem) {
+  .shop .ig-float { padding: 14px; }
+}
+
 /* ---------- Footer ---------- */
 
 .foot {
