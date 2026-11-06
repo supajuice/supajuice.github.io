@@ -19,6 +19,7 @@ Instagram bio  ->  Order page (GitHub Pages)  ->  Apps Script web app  ->  Googl
 | `docs/index.html` | The shop page customers use: the label hero, how to use, and the order form |
 | `docs/shop.css` | The shop page's look (brand colours, label hero). `app.css` is shared with Greg's page |
 | `docs/img/` | The shop page photo (`gels.jpg`) and the link preview picture (`share.jpg`) |
+| `docs/orderstrialpage/` | A trial copy of the shop page, at `/orderstrialpage/`, for trying out changes. Its page, styles and scripts are its own copies, so changing them never touches the real page. It shares `docs/img/`, `docs/fonts/` and `config.js`, and it places **real orders** through the same order service. Hidden from search engines and not linked from anywhere |
 | `docs/admin.html` | Greg's page: orders, new DM order, settings |
 | `docs/config.js` | The one file you edit on the website side: the web app address |
 | `apps-script/Code.gs` | The backend. Pasted into the Google Sheet's script editor |

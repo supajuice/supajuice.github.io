@@ -668,6 +668,28 @@ test('order page: a dropped connection after the order was saved does not create
   assert.equal(orderRows(dev).length, 1, 'still one order');
 });
 
+test('trial page: a full copy of the order page that keeps its own saved data', async (t) => {
+  const { dev, page, errors } = await open(t, { mode: 'ready' });
+  await page.goto(dev.siteUrl + '/orderstrialpage/');
+  assert.equal(await page.title(), 'Supa Juice (trial)');
+  assert.equal(await page.locator('meta[name="robots"]').getAttribute('content'), 'noindex, nofollow');
+  await fillKiosk(page);
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await text(page, '#bib .bib-number'), 'SJ-0001');
+  assert.equal(orderRows(dev).length, 1, 'it places orders through the same order service');
+  // The shared images and fonts load from the main site.
+  await page.waitForFunction(() => document.querySelector('#ig-float img') && document.querySelector('#ig-float img').naturalWidth > 0);
+  assert.ok(await page.evaluate(() => document.fonts.check('900 italic 16px "Barlow Condensed"') || document.fonts.check('16px "Public Sans"')));
+  // Its saved order is its own, so the real order page does not pick it up.
+  const keys = await page.evaluate(() => Object.keys(localStorage));
+  assert.ok(keys.includes('sjt_last_order'));
+  assert.ok(!keys.some((k) => /^sj_/.test(k)), keys.join(', '));
+  await page.goto(kioskUrl(dev));
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.deepEqual(errors, []);
+});
+
 test('order page: a failed connection keeps the details and offers a DM', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(page);
