@@ -267,7 +267,9 @@
     $('choose-deliver-title').textContent = 'To your door';
     if (config) {
       var collectFree = !pudo || pudoFrom('collect') === 0;
-      $('choose-collect-sub').textContent = collectFree ? 'Free collection' + (place ? '\n' + place : '') : (place || 'Collect');
+      // Trial page: the heading says it is free (only when it is), the small text says where.
+      $('choose-collect-title').textContent = collectFree ? 'Free collection' : 'Collect';
+      $('choose-collect-sub').textContent = place ? 'From ' + place : '';
       $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
       $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : quoteFromText('locker') || deliveryText(config);
     }
