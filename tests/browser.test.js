@@ -668,23 +668,44 @@ test('order page: a dropped connection after the order was saved does not create
   assert.equal(orderRows(dev).length, 1, 'still one order');
 });
 
-test('trial page: a full copy of the order page that keeps its own saved data', async (t) => {
-  const { dev, page, errors } = await open(t, { mode: 'ready' });
+test('trial page: a demo copy of the order page that orders, sends and saves nothing', async (t) => {
+  const { dev, page, errors } = await open(t, { mode: 'ready', cardPay: true });
   await page.goto(dev.siteUrl + '/orderstrialpage/');
   assert.equal(await page.title(), 'Supa Juice (trial)');
   assert.equal(await page.locator('meta[name="robots"]').getAttribute('content'), 'noindex, nofollow');
-  await fillKiosk(page);
+  assert.equal(await text(page, '.demo-tag'), 'Demo page: nothing is ordered or saved');
+  const mailBefore = dev.gas.mail.length;
+
+  // A delivery order: the confirmation looks real, but nothing reaches the order service.
+  await fillKiosk(page, { more: 1 });
   await page.click('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(await text(page, '#bib .bib-number'), 'SJ-0001');
-  assert.equal(orderRows(dev).length, 1, 'it places orders through the same order service');
+  assert.equal(await text(page, '#bib .bib-number'), 'DEMO-01');
+  assert.match(await text(page, '#view-done'), /R110/, 'the total the page showed: 2 x R40 + R30');
+  assert.equal(orderRows(dev).length, 0, 'no order in the Sheet');
+  assert.equal(dev.gas.mail.length, mailBefore, 'no email');
+  assert.ok(!dev.calls.some((c) => c.action === 'order' || c.action === 'startPayment'), 'nothing was sent to place an order');
+  assert.ok(dev.calls.some((c) => c.action === 'config'), 'the live prices and times are read');
+
+  // A collection, then card payment, which is switched off on the demo.
+  await page.click('#new-order');
+  await fillKiosk(page, { collect: true });
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await text(page, '#bib .bib-number'), 'DEMO-02');
+  await page.click('#pay-card');
+  await page.waitForSelector('#card-error:not([hidden])');
+  assert.match(await text(page, '#card-error'), /trial page[\s\S]*Nothing was charged/);
+  assert.equal(dev.gas.paystack.requests.length, 0, 'Paystack is never asked');
+  assert.equal(orderRows(dev).length, 0);
+
   // The shared images and fonts load from the main site.
   await page.waitForFunction(() => document.querySelector('#ig-float img') && document.querySelector('#ig-float img').naturalWidth > 0);
   assert.ok(await page.evaluate(() => document.fonts.check('900 italic 16px "Barlow Condensed"') || document.fonts.check('16px "Public Sans"')));
-  // Its saved order is its own, so the real order page does not pick it up.
-  const keys = await page.evaluate(() => Object.keys(localStorage));
-  assert.ok(keys.includes('sjt_last_order'));
-  assert.ok(!keys.some((k) => /^sj_/.test(k)), keys.join(', '));
+  // Nothing is kept in the browser, so a reload starts afresh and the real page is untouched.
+  assert.deepEqual(await page.evaluate(() => Object.keys(localStorage)), []);
+  await page.reload();
+  await page.waitForSelector('#order-form:not([hidden])');
   await page.goto(kioskUrl(dev));
   await page.waitForSelector('#order-form:not([hidden])');
   assert.deepEqual(errors, []);

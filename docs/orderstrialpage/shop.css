@@ -883,3 +883,19 @@ html:has(body.shop) {
 @media (min-width: 52rem) {
   .foot-inner { padding-bottom: 48px; }
 }
+
+/* ---------- Trial page only: the demo label (see demo.js) ---------- */
+
+.demo-tag {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 50;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #111111;
+  color: #ffffff;
+  font: 600 0.8125rem/1.3 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  pointer-events: none;
+}
