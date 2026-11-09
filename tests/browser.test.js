@@ -679,6 +679,13 @@ test('trial page: a demo copy of the order page that orders, sends and saves not
   assert.equal(await text(page, '.demo-tag'), 'Demo page: nothing is ordered or saved');
   const mailBefore = dev.gas.mail.length;
 
+  // The mountain photos come from the main site's image folder.
+  const photos = page.locator('.trail-photo img');
+  assert.equal(await photos.count(), 2);
+  await photos.first().scrollIntoViewIfNeeded();
+  await photos.last().scrollIntoViewIfNeeded();
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.trail-photo img')).every((i) => i.complete && i.naturalWidth > 0));
+
   // A delivery order: the confirmation looks real, but nothing reaches the order service.
   await fillKiosk(page, { more: 1 });
   await page.click('#submit');

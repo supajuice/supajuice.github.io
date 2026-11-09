@@ -537,6 +537,36 @@ html:has(body.shop) {
   .why-list { grid-template-columns: repeat(3, 1fr); gap: 20px; }
 }
 
+/* ---------- Photos from the mountain ---------- */
+
+.trail { background: var(--sun); padding: 64px 0 72px; }
+.trail-inner { display: grid; gap: 32px; align-items: center; }
+.trail-copy { display: grid; gap: 12px; }
+.trail-copy p { color: var(--ink); font-size: 1.125rem; }
+.trail-photos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  gap: 14px;
+  padding: 0 4px;
+}
+.trail-photo {
+  margin: 0;
+  border: 3px solid var(--blue);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--blue);
+  box-shadow: 6px 6px 0 var(--blue);
+}
+.trail-photo img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; object-fit: cover; }
+.trail-photo--left { transform: rotate(-2deg); }
+.trail-photo--right { transform: rotate(2deg); margin-top: 28px; }
+@media (min-width: 52rem) {
+  .trail { padding: 88px 0 96px; }
+  .trail-inner { grid-template-columns: 1fr 1.1fr; gap: 48px; }
+  .trail-photos { gap: 24px; }
+}
+
 /* ---------- Flavours ---------- */
 
 .flav {
