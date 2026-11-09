@@ -686,6 +686,16 @@ test('trial page: a demo copy of the order page that orders, sends and saves not
   await photos.last().scrollIntoViewIfNeeded();
   await page.waitForFunction(() => Array.from(document.querySelectorAll('.trail-photo img')).every((i) => i.complete && i.naturalWidth > 0));
 
+  // Tapping a flavour card shows its ingredients, and tapping again hides them.
+  const more = page.locator('.flav-card--orange .flav-more');
+  const ingredients = page.locator('#ingr-orange');
+  await more.click();
+  assert.equal(await more.getAttribute('aria-expanded'), 'true');
+  await page.waitForFunction(() => getComputedStyle(document.getElementById('ingr-orange')).opacity === '1');
+  assert.match(await ingredients.innerText(), /Orange juice/);
+  await more.click();
+  assert.equal(await more.getAttribute('aria-expanded'), 'false');
+
   // A delivery order: the confirmation looks real, but nothing reaches the order service.
   await fillKiosk(page, { more: 1 });
   await page.click('#submit');

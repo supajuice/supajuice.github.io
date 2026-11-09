@@ -819,6 +819,16 @@
     $('foot-ig').hidden = false;
   })();
 
+  // Tapping a flavour card shows its ingredients; tapping again hides them.
+  Array.prototype.forEach.call(document.querySelectorAll('.flav-more'), function (btn) {
+    btn.addEventListener('click', function () {
+      var card = btn.closest('.flav-card');
+      var open = !card.classList.contains('is-open');
+      card.classList.toggle('is-open', open);
+      btn.setAttribute('aria-expanded', String(open));
+    });
+  });
+
   // The floating Instagram button follows the handle in config.js.
   (function floatingInstagram() {
     var handle = String(SJ.cfg.instagram || '').replace(/^@/, '');
