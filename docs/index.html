@@ -13,8 +13,8 @@
   <link rel="icon" type="image/png" sizes="32x32" href="img/icon-32.png">
   <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=20261105e">
-  <link rel="stylesheet" href="shop.css?v=20261105e">
+  <link rel="stylesheet" href="app.css?v=20261109a">
+  <link rel="stylesheet" href="shop.css?v=20261109a">
 </head>
 <body class="shop">
   <a class="skip" href="#order">Skip to the order form</a>
@@ -96,6 +96,23 @@
       </div>
     </section>
 
+    <section class="trail landing" aria-labelledby="trail-title">
+      <div class="wrap trail-inner">
+        <div class="trail-copy">
+          <h2 class="h-display" id="trail-title">Tested on Table Mountain</h2>
+          <p>Made in Cape Town and taken up its mountains.</p>
+        </div>
+        <div class="trail-photos">
+          <figure class="trail-photo trail-photo--left">
+            <img src="img/run-table-mountain-600.jpg" srcset="img/run-table-mountain-600.jpg 600w, img/run-table-mountain-1000.jpg 1000w" sizes="(min-width: 52rem) 300px, 46vw" width="600" height="800" loading="lazy" decoding="async" alt="An orange Supa Juice gel held up in front of Table Mountain at dusk">
+          </figure>
+          <figure class="trail-photo trail-photo--right">
+            <img src="img/run-city-bowl-600.jpg" srcset="img/run-city-bowl-600.jpg 600w, img/run-city-bowl-1000.jpg 1000w" sizes="(min-width: 52rem) 300px, 46vw" width="600" height="800" loading="lazy" decoding="async" alt="An orange Supa Juice gel held up on the mountain above the Cape Town city bowl and harbour">
+          </figure>
+        </div>
+      </div>
+    </section>
+
     <section class="flav landing" aria-labelledby="flav-title">
       <div class="wrap flav-inner">
         <div class="flav-copy">
@@ -103,8 +120,24 @@
           <p>Mix and match in one order. Minimum 5 gels.</p>
         </div>
         <ul class="flav-list">
-          <li class="flav-card flav-card--orange"><span class="tag tag--big">Orange</span><span class="flav-meta">40g carbs &middot; 180 kcal</span></li>
-          <li class="flav-card flav-card--cranberry"><span class="tag tag--big">Cranberry</span><span class="flav-meta">40g carbs &middot; 180 kcal</span></li>
+          <li class="flav-card flav-card--orange">
+            <span class="tag tag--big">Orange</span>
+            <span class="flav-meta">40g carbs &middot; 180 kcal</span>
+            <button type="button" class="flav-more" aria-expanded="false" aria-controls="ingr-orange"><span class="flav-more-word">Ingredients</span><span class="sr-only"> of Orange</span> <span class="flav-plus" aria-hidden="true">+</span></button>
+            <div class="flav-ingr" id="ingr-orange">
+              <p class="flav-ingr-title">Ingredients</p>
+              <p>Orange juice, maple-flavoured golden syrup, mixed berry jam.</p>
+            </div>
+          </li>
+          <li class="flav-card flav-card--cranberry">
+            <span class="tag tag--big">Cranberry</span>
+            <span class="flav-meta">40g carbs &middot; 180 kcal</span>
+            <button type="button" class="flav-more" aria-expanded="false" aria-controls="ingr-cranberry"><span class="flav-more-word">Ingredients</span><span class="sr-only"> of Cranberry</span> <span class="flav-plus" aria-hidden="true">+</span></button>
+            <div class="flav-ingr" id="ingr-cranberry">
+              <p class="flav-ingr-title">Ingredients</p>
+              <p>Cranberry juice, maple-flavoured golden syrup, mixed berry jam.</p>
+            </div>
+          </li>
         </ul>
       </div>
     </section>
@@ -158,10 +191,11 @@
               </button>
               <button type="button" class="choose-btn" id="choose-locker" aria-pressed="false">
                 <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M12 3.5v17M4 12h16"/><path d="M9 7.5v1.5M15 7.5v1.5"/></svg>
-                <span class="choose-title">To a Pudo locker</span>
+                <span class="choose-title" id="choose-locker-title">To a Pudo locker</span>
                 <span class="choose-sub" id="choose-locker-sub"></span>
               </button>
             </div>
+            <p class="choose-note" id="choose-note" hidden>*Location dependent</p>
           </fieldset>
 
           <div class="chosen" id="chosen" hidden>
@@ -288,8 +322,8 @@
     <img src="img/instagram.png" alt="" width="54" height="54">
   </a>
 
-  <script src="config.js?v=20261105e"></script>
-  <script src="shared.js?v=20261105e"></script>
-  <script src="order.js?v=20261105e"></script>
+  <script src="config.js?v=20261109a"></script>
+  <script src="shared.js?v=20261109a"></script>
+  <script src="order.js?v=20261109a"></script>
 </body>
 </html>

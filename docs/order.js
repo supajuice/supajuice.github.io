@@ -240,15 +240,14 @@
     return c.fee > 0 ? SJ.money(c.fee, c.currency) : 'Free';
   }
 
-  // While the fee is confirmed after the order, a starting price says so.
-  var QUOTE_NOTE = ' (we\'ll contact you with the final price)';
-
-  // The starting price for door or locker, with the note, or '' when there is none.
+  // The starting price for door or locker, or '' when there is none. A starting price is
+  // marked with an asterisk on the choice buttons: the final price depends on where it goes.
   function quoteFromText(kind) {
     if (!config || !config.quote || pudoOn()) return '';
-    var text = fixedFromText(kind) || (config.fee > 0 ? 'From ' + SJ.money(config.fee, config.currency) : '');
-    return text ? text + QUOTE_NOTE : '';
+    return fixedFromText(kind) || (config.fee > 0 ? 'From ' + SJ.money(config.fee, config.currency) : '');
   }
+
+  var LOCATION_NOTE = ' (depends on your location)';
 
   function syncFulfil() {
     var collect = collecting();
@@ -263,13 +262,19 @@
     // Door and locker are always offered. Without Pudo prices both use the delivery fee.
     $('choose-locker').hidden = false;
     $('choose').querySelector('.choose-row').classList.add('choose-row--three');
-    $('choose-deliver-title').textContent = 'To your door';
+
     if (config) {
       var collectFree = !pudo || pudoFrom('collect') === 0;
       $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? ' · ' + place : '') : (place || 'Collect');
       $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
       $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : quoteFromText('locker') || deliveryText(config);
     }
+    // "From R99" prices get an asterisk and the note under the buttons.
+    var deliverFrom = /^From /.test($('choose-deliver-sub').textContent);
+    var lockerFrom = /^From /.test($('choose-locker-sub').textContent);
+    $('choose-deliver-title').textContent = 'To your door' + (deliverFrom ? '*' : '');
+    $('choose-locker-title').textContent = 'To a Pudo locker' + (lockerFrom ? '*' : '');
+    $('choose-note').hidden = !(deliverFrom || lockerFrom);
     $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '')
       : choice === 'locker' ? 'Send to a Pudo locker'
       : 'Deliver to your door';
@@ -328,7 +333,7 @@
     }
     if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
     if (choice && !collecting() && quoteFromText(choice === 'locker' ? 'locker' : 'door')) {
-      opts.feeText = quoteFromText(choice === 'locker' ? 'locker' : 'door');
+      opts.feeText = quoteFromText(choice === 'locker' ? 'locker' : 'door') + LOCATION_NOTE;
     }
     opts.discount = discount;
     opts.flavours = SJ.flavourText(stepper.get(), stepper.list);
@@ -814,6 +819,16 @@
     $('foot-ig').appendChild(link);
     $('foot-ig').hidden = false;
   })();
+
+  // Tapping a flavour card shows its ingredients; tapping again hides them.
+  Array.prototype.forEach.call(document.querySelectorAll('.flav-more'), function (btn) {
+    btn.addEventListener('click', function () {
+      var card = btn.closest('.flav-card');
+      var open = !card.classList.contains('is-open');
+      card.classList.toggle('is-open', open);
+      btn.setAttribute('aria-expanded', String(open));
+    });
+  });
 
   // The floating Instagram button follows the handle in config.js.
   (function floatingInstagram() {

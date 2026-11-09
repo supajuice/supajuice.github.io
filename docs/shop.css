@@ -343,7 +343,7 @@ html:has(body.shop) {
 .pouch-face {
   position: relative;
   width: 212px;
-  height: 312px;
+  min-height: 312px;
   padding: 30px 16px 0;
   border-radius: 5px 5px 14px 14px;
   overflow: hidden;
@@ -375,7 +375,7 @@ html:has(body.shop) {
 }
 .pouch-flavour--orange { background: var(--orange); color: var(--navy); }
 .pouch-flavour--cranberry { background: var(--cranberry); color: #fff; }
-.pouch-facts { margin-top: 13px; display: flex; align-items: center; gap: 9px; }
+.pouch-facts { margin-top: 13px; margin-bottom: 18px; display: flex; align-items: center; gap: 9px; }
 .pouch-badge {
   flex: none;
   width: 70px;
@@ -402,10 +402,10 @@ html:has(body.shop) {
 .pouch-side { display: flex; flex-direction: column; gap: 2px; }
 .pouch-side b { font-size: 19px; line-height: 1; }
 .pouch-band {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  /* Sits under the content, never on top of it, so nothing on the label gets cut off
+     when a phone shows the text larger. */
+  flex: none;
+  margin: auto -16px 0;
   height: 60px;
   padding: 0 16px;
   display: flex;
@@ -490,6 +490,36 @@ html:has(body.shop) {
   .why-list { grid-template-columns: repeat(3, 1fr); gap: 20px; }
 }
 
+/* ---------- Photos from the mountain ---------- */
+
+.trail { background: var(--sun); padding: 64px 0 72px; }
+.trail-inner { display: grid; gap: 32px; align-items: center; }
+.trail-copy { display: grid; gap: 12px; }
+.trail-copy p { color: var(--ink); font-size: 1.125rem; }
+.trail-photos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  gap: 14px;
+  padding: 0 4px;
+}
+.trail-photo {
+  margin: 0;
+  border: 3px solid var(--blue);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--blue);
+  box-shadow: 6px 6px 0 var(--blue);
+}
+.trail-photo img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; object-fit: cover; }
+.trail-photo--left { transform: rotate(-2deg); }
+.trail-photo--right { transform: rotate(2deg); margin-top: 28px; }
+@media (min-width: 52rem) {
+  .trail { padding: 88px 0 96px; }
+  .trail-inner { grid-template-columns: 1fr 1.1fr; gap: 48px; }
+  .trail-photos { gap: 24px; }
+}
+
 /* ---------- Flavours ---------- */
 
 .flav {
@@ -527,6 +557,68 @@ html:has(body.shop) {
   font-size: 0.875rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/* Ingredients: shown on hover with a mouse, or by tapping the card on a phone.
+   The button stretches over the whole card, so anywhere on the card works. */
+.flav-card { position: relative; overflow: hidden; }
+.flav-more {
+  position: static;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin: -12px 0 -12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.8125rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.flav-more-word { text-decoration: underline; text-underline-offset: 3px; }
+.flav-more::after { content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; }
+.flav-more:focus-visible { outline: none; }
+.flav-more:focus-visible::after { outline: 3px solid var(--blue); outline-offset: -3px; }
+.flav-plus { display: inline-block; text-decoration: none; transition: transform 200ms ease; }
+.flav-ingr {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  background: inherit;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(12px);
+  transition: opacity 200ms ease, transform 200ms ease, visibility 0s linear 200ms;
+  pointer-events: none;
+}
+.flav-ingr p { margin: 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.4; }
+.flav-ingr .flav-ingr-title {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 1.5rem;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.flav-card.is-open .flav-ingr { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.flav-card.is-open .flav-plus { transform: rotate(45deg); }
+@media (hover: hover) {
+  .flav-card:hover .flav-ingr { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+  .flav-card:hover .flav-plus { transform: rotate(45deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flav-ingr, .flav-plus { transition: none; }
 }
 @media (min-width: 52rem) {
   .flav { padding: 80px 0; }
@@ -695,6 +787,7 @@ html:has(body.shop) {
   line-height: 1;
 }
 .shop .choose-sub { color: var(--ink); font-size: 0.875rem; font-weight: 600; line-height: 1.3; }
+.shop .choose-note { margin: 12px 0 0; color: var(--ink); font-size: 0.875rem; font-weight: 600; }
 .shop .choose-btn[aria-pressed='true'] .choose-sub { color: #fff; }
 @media (max-width: 400px) {
   .shop .choose-row.choose-row--three { grid-template-columns: 1fr; }

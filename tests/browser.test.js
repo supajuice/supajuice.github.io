@@ -332,11 +332,14 @@ test('order page: with every time booked, the customer is told to choose deliver
 test('order page: with fees confirmed per order, a delivery is sent as a request with nothing to pay yet', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true });
   await page.waitForSelector('#order-form:not([hidden])');
-  assert.equal(await text(page, '#choose-deliver-sub'), "From R30 (we'll contact you with the final price)");
-  assert.equal(await text(page, '#choose-locker-sub'), "From R30 (we'll contact you with the final price)");
+  assert.equal(await text(page, '#choose-deliver-sub'), 'From R30');
+  assert.equal(await text(page, '#choose-locker-sub'), 'From R30');
+  assert.equal(await text(page, '#choose-deliver-title'), 'To your door*');
+  assert.equal(await text(page, '#choose-locker-title'), 'To a Pudo locker*');
+  assert.equal(await text(page, '#choose-note'), '*Location dependent');
   await choose(page, 'deliver');
   await page.click('[aria-label="One more Orange"]');
-  assert.match(await text(page, '#summary'), /Delivery\s+From R30 \(we'll contact you with the final price\)/);
+  assert.match(await text(page, '#summary'), /Delivery\s+From R30 \(depends on your location\)/);
   assert.match(await text(page, '#summary'), /Total before delivery\s+R40/);
   assert.equal(await text(page, '#submit'), 'Send order for R40 + delivery');
   assert.match(await text(page, '#next-note'), /There is nothing to pay yet/);
