@@ -695,6 +695,9 @@ html:has(body.shop) {
   background: transparent;
 }
 .order-intro { display: grid; gap: 10px; }
+/* The picture above the form (set on Greg's page) stays small, so the form is close by. */
+.order-panel .photo { width: 140px; max-height: none; }
+@media (min-width: 52rem) { .order-panel .photo { width: 180px; } }
 .order-intro .lede { max-width: 40ch; color: var(--ink); }
 .order-panel #order-form,
 .order-panel #view-done,
