@@ -1088,3 +1088,6 @@ html:has(body.shop) {
   font: 600 0.8125rem/1.3 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   pointer-events: none;
 }
+
+.shop a.promo[hidden] { display: none; }
+.shop .promo-code { white-space: nowrap; }

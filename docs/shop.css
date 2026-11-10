@@ -115,6 +115,38 @@ html:has(body.shop) {
   border-bottom: 3px solid var(--blue);
   padding-top: env(safe-area-inset-top);
 }
+.shop a.promo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
+  min-height: 36px;
+  padding: 6px max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
+  background: var(--blue);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+}
+.shop a.promo:hover,
+.shop a.promo:focus-visible {
+  background: var(--blue-deep);
+}
+.shop a.promo:focus-visible {
+  outline: 3px solid var(--sun);
+  outline-offset: -3px;
+}
+.shop .promo-code {
+  padding: 1px 8px;
+  border: 1.5px dashed var(--sun);
+  border-radius: 6px;
+  color: var(--sun);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
 .bar-inner {
   max-width: var(--wrap);
   margin: 0 auto;
@@ -979,3 +1011,6 @@ html:has(body.shop) {
 @media (min-width: 52rem) {
   .foot-inner { padding-bottom: 48px; }
 }
+
+.shop a.promo[hidden] { display: none; }
+.shop .promo-code { white-space: nowrap; }

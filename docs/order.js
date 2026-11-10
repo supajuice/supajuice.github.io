@@ -23,6 +23,68 @@
   var discount = null;   // the applied discount code: { code, percent, delivery }, or null
   var checkingCode = false;
 
+  // ---------- Discount from an ad link ----------
+  // An ad links to the page with ?code=... on the end, for example ?code=FBVK5WRNRG.
+  // The code is applied by itself and never shown: the code box stays hidden and the
+  // address bar is tidied, so only people who tap the ad get the offer. The order still
+  // saves the code, so the Orders sheet shows which orders came from the ad.
+  var LINK_CODE_KEY = 'sj_link_code';
+  var linkCode = (function () {
+    var typed = '';
+    try { typed = new URLSearchParams(location.search).get('code') || ''; } catch (err) { /* old browser */ }
+    typed = typed.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+    try {
+      if (typed) sessionStorage.setItem(LINK_CODE_KEY, typed);
+      else typed = sessionStorage.getItem(LINK_CODE_KEY) || '';
+    } catch (err) { /* private browsing */ }
+    if (/[?&]code=/.test(location.search)) {
+      var q = new URLSearchParams(location.search);
+      q.delete('code');
+      var rest = q.toString();
+      try { history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash); } catch (err) { /* old browser */ }
+    }
+    return typed;
+  })();
+  var linkTried = false;
+
+  // True when the applied discount came from the ad link.
+  function viaLink() {
+    return !!(discount && linkCode && discount.code === linkCode);
+  }
+
+  // The blue strip at the top: says the ad offer is on, while it is.
+  function syncLinkPromo() {
+    var strip = $('link-promo');
+    if (!strip) return;
+    strip.hidden = !viaLink();
+    if (strip.hidden) return;
+    SJ.clear(strip);
+    strip.appendChild(el('strong', { class: 'promo-code' },
+      discount.delivery ? 'Free delivery' : discount.percent + '% off'));
+    strip.appendChild(el('span', null, 'applied. Order below'));
+    var other = document.querySelector('.promo:not(#link-promo)');
+    if (other) other.hidden = true;
+  }
+
+  // Applies the ad link's code once the prices have loaded.
+  async function applyLinkCode() {
+    if (!linkCode || linkTried || discount || !config) return;
+    linkTried = true;
+    $('code').value = linkCode;
+    if (await applyCode()) return;
+    var msg = $('code-msg').textContent;
+    $('code').value = '';
+    if (/^Could not check/.test(msg)) {
+      linkTried = false; // a network hiccup: try again when the page next loads prices
+      syncCode('');
+      return;
+    }
+    // The offer has been switched off. Order at the normal price, without a code.
+    try { sessionStorage.removeItem(LINK_CODE_KEY); } catch (err) { /* private browsing */ }
+    syncCode('');
+    showError('That ad offer has ended, sorry. You can still order below at the normal price.');
+  }
+
   function showView(id) {
     VIEWS.forEach(function (v) { $(v).hidden = v !== id; });
     // "Order below..." and the photo only make sense above the form.
@@ -113,7 +175,8 @@
 
   // Shows the code box when the shop has a live code, and what the applied code does.
   function syncCode(message) {
-    $('code-field').hidden = !(config && config.codesOn) && !discount;
+    $('code-field').hidden = (!(config && config.codesOn) && !discount) || viaLink();
+    syncLinkPromo();
     var msg = SJ.clear($('code-msg'));
     if (discount) {
       msg.appendChild(el('span', { class: 'code-ok' }, discount.code + ': ' +
@@ -789,6 +852,7 @@
       }
       applyConfig(res.config);
       syncCard();
+      applyLinkCode();
       if (!last && !reference && $('view-done').hidden) showView('order-form');
     } catch (err) {
       if (!config) showClosed('We could not load the order form', err.message, true);
