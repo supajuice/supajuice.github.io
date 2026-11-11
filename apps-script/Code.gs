@@ -82,17 +82,29 @@ const STATUS = {
   AWAITING: 'Awaiting payment',
   PAID: 'Paid',
   DELIVERED: 'Delivered',
+  UNPAID: 'Delivered, not paid',
   CANCELLED: 'Cancelled'
 };
 // Which status can follow which. Includes the "undo" moves.
 // A new request becomes "Awaiting payment" only through acceptOrder, which sets the delivery fee.
+// An order can be paid first and then delivered, or delivered first ("Delivered, not paid") and
+// then paid. Either way it ends as "Delivered": paid and handed over.
 const TRANSITIONS = {
   'New request': ['Cancelled'],
-  'Awaiting payment': ['Paid', 'Cancelled'],
+  'Awaiting payment': ['Paid', 'Delivered, not paid', 'Cancelled'],
   'Paid': ['Delivered', 'Awaiting payment', 'Cancelled'],
-  'Delivered': ['Paid'],
+  'Delivered, not paid': ['Delivered', 'Awaiting payment', 'Cancelled'],
+  'Delivered': ['Paid', 'Delivered, not paid'],
   'Cancelled': ['Awaiting payment']
 };
+
+// "Mark paid" and "Mark delivered" go to a different status depending on what already happened.
+function paidTarget_(status) {
+  return status === STATUS.UNPAID ? STATUS.DELIVERED : STATUS.PAID;
+}
+function deliveredTarget_(status) {
+  return status === STATUS.AWAITING ? STATUS.UNPAID : STATUS.DELIVERED;
+}
 
 const SETTING_DEFS = [
   { key: 'brand_name', value: 'Supa Juice', note: 'Shown at the top of the order page and on invoices.' },
@@ -386,6 +398,7 @@ function setStatus_(body) {
   }
   let order;
   let sendPaidInvoice = false;
+  let paidFirst = false;
   let sendCancel = false;
   try {
     const sheet = ordersSheet_();
@@ -408,13 +421,19 @@ function setStatus_(body) {
       if (current === STATUS.AWAITING) row[COL.PAID] = now; // back from Delivered keeps the original date
       row[COL.DELIVERED] = '';
     } else if (target === STATUS.DELIVERED) {
-      row[COL.DELIVERED] = now;
+      if (current === STATUS.UNPAID) row[COL.PAID] = now; // paid after delivery keeps the delivered date
+      else row[COL.DELIVERED] = now;
+    } else if (target === STATUS.UNPAID) {
+      if (current === STATUS.AWAITING) row[COL.DELIVERED] = now; // undoing "paid" keeps the delivered date
+      row[COL.PAID] = '';
     }
     sheet.getRange(rowNum, COL.STATUS + 1, 1, 3).setValues([[row[COL.STATUS], row[COL.PAID], row[COL.DELIVERED]]]);
     SpreadsheetApp.flush();
     order = rowToOrder_(row);
     // Only a fresh payment sends the paid invoice. Undoing "delivered" does not send it again.
-    sendPaidInvoice = current === STATUS.AWAITING && target === STATUS.PAID && !!order.email;
+    // Paid after delivery sends the paid invoice too, as a receipt.
+    paidFirst = current === STATUS.AWAITING && target === STATUS.PAID;
+    sendPaidInvoice = (paidFirst || (current === STATUS.UNPAID && target === STATUS.DELIVERED)) && !!order.email;
     // A paid collection already has an invite in the customer's calendar. Cancelling removes it.
     sendCancel = current === STATUS.PAID && target === STATUS.CANCELLED && !!order.email && hasInvite_(order);
   } finally {
@@ -423,7 +442,8 @@ function setStatus_(body) {
   const out = { ok: true, order: order };
   if (sendPaidInvoice) {
     const s = readTypedSettings_();
-    out.emailed = emailInvoice_(order, s, hasInvite_(order) ? [inviteBlob_(order, s, 'REQUEST')] : []);
+    // The calendar invite only helps before a collection, not once it is collected.
+    out.emailed = emailInvoice_(order, s, paidFirst && hasInvite_(order) ? [inviteBlob_(order, s, 'REQUEST')] : []);
   }
   if (sendCancel) out.emailed = emailInvite_(order, readTypedSettings_(), 'cancel');
   return out;
@@ -564,8 +584,12 @@ function bulk_(body) {
   const results = invoices.map(function (invoice) {
     try {
       let out;
-      if (op === 'paid') out = setStatus_({ invoice: invoice, status: STATUS.PAID });
-      else if (op === 'delivered') out = setStatus_({ invoice: invoice, status: STATUS.DELIVERED });
+      if (op === 'paid' || op === 'delivered') {
+        const rowNum = findRow_(sheet, invoice);
+        if (!rowNum) throw fail_('not_found', 'Order ' + invoice + ' was not found.');
+        const status = str_(sheet.getRange(rowNum, COL.STATUS + 1).getValue());
+        out = setStatus_({ invoice: invoice, status: op === 'paid' ? paidTarget_(status) : deliveredTarget_(status) });
+      }
       else if (op === 'cancel') out = setStatus_({ invoice: invoice, status: STATUS.CANCELLED });
       else if (op === 'reopen') out = setStatus_({ invoice: invoice, status: STATUS.AWAITING });
       else if (op === 'decline') out = declineOrder_({ invoice: invoice, reason: reason });
@@ -583,7 +607,7 @@ function bulk_(body) {
 // Whether an action sends this customer an email. The same rules as the single actions.
 function emailsFor_(op, o) {
   if (!EMAIL_PATTERN.test(o.email)) return false;
-  if (op === 'paid') return o.status === STATUS.AWAITING;
+  if (op === 'paid') return o.status === STATUS.AWAITING || o.status === STATUS.UNPAID;
   if (op === 'decline') return o.status === STATUS.REQUESTED;
   if (op === 'cancel') return o.status === STATUS.PAID && hasInvite_(o);
   if (op === 'email') return o.status !== STATUS.CANCELLED && o.status !== STATUS.REQUESTED;
@@ -2018,7 +2042,7 @@ function startPayment_(body) {
   const order = rowToOrder_(row);
   if (order.status === STATUS.PAID || order.status === STATUS.DELIVERED) return { ok: true, paid: true };
   if (!order.collect) throw fail_('invalid', 'Card payment is for collection orders. Please pay by bank transfer.');
-  if (order.status !== STATUS.AWAITING) throw fail_('invalid', 'Order ' + order.invoice + ' is ' + order.status + ' and cannot be paid.');
+  if (order.status !== STATUS.AWAITING && order.status !== STATUS.UNPAID) throw fail_('invalid', 'Order ' + order.invoice + ' is ' + order.status + ' and cannot be paid.');
 
   // Each try gets its own reference: Paystack never accepts the same one twice.
   const reference = order.invoice + '-' + Utilities.getUuid().replace(/-/g, '').slice(0, 10);
@@ -2082,7 +2106,7 @@ function confirmPayment_(body) {
     throw fail_('pay_mismatch', 'We received your payment, but it does not match the order total. We will be in touch to sort it out.');
   }
 
-  if (order.status === STATUS.AWAITING) {
+  if (order.status === STATUS.AWAITING || order.status === STATUS.UNPAID) {
     // Note the card payment on the order, then mark it paid. That sends the paid invoice
     // and, for a collection, the calendar invite.
     const lock = LockService.getScriptLock();
@@ -2099,7 +2123,7 @@ function confirmPayment_(body) {
     } finally {
       lock.releaseLock();
     }
-    const out = setStatus_({ invoice: order.invoice, status: STATUS.PAID });
+    const out = setStatus_({ invoice: order.invoice, status: paidTarget_(order.status) });
     order = out.order;
     return Object.assign(orderResponse_(order, s, out.emailed), { paid: true });
   }

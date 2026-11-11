@@ -414,6 +414,56 @@ test('marking paid emails the paid invoice once; undoing and other moves send no
   assert.equal(set('Delivered').emailed, undefined);
 });
 
+test('an order can be delivered first and paid later; paying then emails the paid invoice', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.mail.length = 0;
+  const set = (status) => gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status });
+
+  const delivered = set('Delivered, not paid');
+  assert.equal(delivered.order.status, 'Delivered, not paid');
+  assert.equal(delivered.order.paidOn, '');
+  assert.ok(delivered.order.deliveredOn);
+  assert.equal(delivered.emailed, undefined);
+  assert.equal(gas.mail.length, 0, 'delivering sends nothing');
+
+  // The invoice can still be sent, unpaid with the bank details.
+  assert.equal(gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0001' }).emailed, true);
+  assert.match(gas.mail[0].body, /0012345678/);
+  assert.doesNotMatch(gas.mail[0].subject, /paid/);
+
+  gas.clock.now += 3600 * 1000;
+  const paid = set('Delivered');
+  assert.equal(paid.order.status, 'Delivered');
+  assert.equal(paid.order.deliveredOn, delivered.order.deliveredOn, 'the delivered date stays');
+  assert.equal(paid.order.paidOn, '2026-10-28 16:41');
+  assert.equal(paid.emailed, true);
+  assert.equal(gas.mail[1].subject, 'Supa Juice invoice SJ-0001 (paid)');
+
+  // Undo paid goes back to delivered, not paid, and keeps the delivered date.
+  const undone = set('Delivered, not paid');
+  assert.equal(undone.order.paidOn, '');
+  assert.equal(undone.order.deliveredOn, delivered.order.deliveredOn);
+  // Undo delivered goes back to awaiting payment.
+  assert.equal(set('Awaiting payment').order.deliveredOn, '');
+  assert.equal(set('Paid').order.status, 'Paid', 'paying first still works');
+});
+
+test('ticking orders: mark delivered and mark paid work in either order', () => {
+  const { gas, key } = ready();
+  gas.call(order());
+  gas.call(order());
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0002', status: 'Paid' });
+  const bulk = (op) => gas.call({ action: 'bulk', key, op, invoices: ['SJ-0001', 'SJ-0002'] });
+  const status = (inv) => gas.call({ action: 'list', key }).orders.find((o) => o.invoice === inv).status;
+
+  bulk('delivered');
+  assert.equal(status('SJ-0001'), 'Delivered, not paid');
+  assert.equal(status('SJ-0002'), 'Delivered');
+  bulk('paid');
+  assert.equal(status('SJ-0001'), 'Delivered');
+});
+
 test('orders without an email are never emailed', () => {
   const { gas, key } = ready();
   gas.call(dm(key));
@@ -1536,9 +1586,10 @@ test('an order that cannot change does not stop the others', () => {
   assert.deepEqual(r.results.map((x) => [x.invoice, x.ok]), [['SJ-0001', true], ['SJ-0002', true], ['SJ-0099', false]]);
   assert.match(r.results[2].message, /not found/);
   gas.call({ action: 'setStatus', key, invoice: 'SJ-0002', status: 'Paid' });
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Cancelled' });
   const c = bulk(gas, key, 'delivered', ['SJ-0001', 'SJ-0002']);
   assert.deepEqual(c.results.map((x) => x.ok), [false, true]);
-  assert.match(c.results[0].message, /Awaiting payment cannot be changed to Delivered/);
+  assert.match(c.results[0].message, /Cancelled cannot be changed to Delivered/);
 });
 
 test('bulk cancel, decline, email and reopen follow the single-order rules', () => {

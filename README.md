@@ -104,7 +104,7 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Customer cannot find the email.** Tap **More** on the order, then **Email invoice**. It sends the invoice as it is now: unpaid with bank details, or paid. The order shows when the invoice was last emailed. To add or fix an email address, edit the **Email** column in the sheet.
 
-**Delivered.** Tap **Mark delivered** on the order under **Paid**. Tap an address to open it in Maps and a phone number to call.
+**Delivered.** Tap **Mark delivered** (or **Mark collected**). Under **Awaiting payment** this is the first button, because most orders are handed over before they are paid: the order moves to **Delivered, not paid**, so you can see at a glance who still owes you. When the money arrives, tap **Mark paid** there; the paid invoice is emailed and the order moves to **Delivered**. Customers who pay first still work as before: **Mark paid**, then **Mark delivered** under **Paid**. You can email or copy the unpaid invoice at any step. Tap an address to open it in Maps and a phone number to call.
 
 **Collection.** The order page always opens with two buttons, **Collect** and **Get delivered**, and shows the rest of the form once the customer picks one. Customers who collect choose a day and a time. Set these in **Settings > Collection**: the **Collection place** (for example Sea Point), the **usual times** (for example 17:00 to 19:00), the **length of each time** (15, 30 or 60 minutes), how many **customers per time**, and the **dates and times**: tap a date on the calendar of the next 30 days (from tomorrow), then set **From** and **To** for each time you are there that day. **+ Add another time** adds more, for example 07:00 to 08:00 and 17:00 to 19:00. Customers pick a time inside them, one length apart, and the line under the times shows which. Dates with times are filled in black, and **Use on all dates with times** copies a date's times to the others. Add new dates as the weeks go by: the Orders tab warns you when only a few are left, and customers cannot collect once they run out. A time that is full disappears from the order page, and a cancelled order frees its time again. Collection orders have no delivery fee and no address, and the button reads **Mark collected**. For a DM order, tap **Collect** and, if you like, pick a day and time. You see every time on your collection dates, with full ones marked **(full)**, and you can still book them.
 
@@ -116,7 +116,7 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Changing an order.** Tap **Edit** on an order under **Awaiting payment**. Everything can be changed: name, email, contact, quantity, collection, address, notes, and the price and delivery fee for that order (for example a discount). The invoice number stays the same and the total is worked out again. Leave **Email the updated invoice** ticked to send the customer the new PDF. Paid orders cannot be edited: tap **More > Undo paid** first.
 
-**Several orders at once.** Tick the box next to each order, or **Select all**, and a bar appears at the bottom with what suits that list: **Mark paid**, **Mark delivered** or **collected**, **Email invoices**, **Send a message**, **Cancel**, **Decline** or **Reopen**. It always asks first and shows how many orders and the total. Orders that could not be changed (for example, paid on another phone) stay ticked with the reason. Up to 50 at a time.
+**Several orders at once.** Tick the box next to each order, or **Select all**, and a bar appears at the bottom with what suits that list: **Mark delivered** or **collected**, **Mark paid**, **Email invoices**, **Send a message**, **Cancel**, **Decline** or **Reopen**. It always asks first and shows how many orders and the total. Orders that could not be changed (for example, paid on another phone) stay ticked with the reason. Up to 50 at a time.
 
 **Hand-over list.** Under **Paid**, tick the orders and tap **Copy hand-over list**: names, quantities, addresses or collection times, contacts and notes, ready to paste into WhatsApp for a driver.
 
@@ -128,16 +128,17 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 
 **Emails per day.** Google lets the shop send about 100 emails a day. The Orders tab warns you when fewer than 10 are left, and a bulk action that would need more than are left is held back.
 
-**Mistakes.** Tap **More** on an order: **Undo paid**, **Undo delivered**, **Cancel order**. A cancelled order can be reopened.
+**Mistakes.** Tap **More** on an order: **Undo paid**, **Undo delivered**, **Cancel order**. Undo always steps back the last thing you marked. A cancelled order can be reopened.
 
 **Underpaid.** Partial payments are not tracked. Leave the order under **Awaiting payment** until the full amount arrives.
 
 | Status | Meaning | Next step |
 | --- | --- | --- |
 | New request | A delivery order waiting for you to set the fee | Accept with a fee, Edit, or Decline |
-| Awaiting payment | Ordered, no money yet | Mark paid, or Cancel |
-| Paid | Money received | Mark delivered |
-| Delivered | Done | None |
+| Awaiting payment | Ordered, no money yet | Mark delivered, Mark paid, or Cancel |
+| Delivered, not paid | Handed over, no money yet | Mark paid |
+| Paid | Money received, not handed over yet | Mark delivered |
+| Delivered | Done: paid and handed over | None |
 | Cancelled | Will not happen | Reopen if needed |
 
 ## Changing things later

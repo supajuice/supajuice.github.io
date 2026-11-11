@@ -14,11 +14,13 @@
   var AWAITING = 'Awaiting payment';
   var PAID = 'Paid';
   var DELIVERED = 'Delivered';
+  var UNPAID = 'Delivered, not paid'; // handed over first, payment still to come
   var CANCELLED = 'Cancelled';
 
   var FILTERS = [
     { id: 'requests', status: REQUESTED, label: 'New requests' },
     { id: 'awaiting', status: AWAITING, label: 'Awaiting payment' },
+    { id: 'unpaid', status: UNPAID, label: 'Delivered, not paid' },
     { id: 'paid', status: PAID, label: 'Paid' },
     { id: 'delivered', status: DELIVERED, label: 'Delivered' },
     { id: 'cancelled', status: CANCELLED, label: 'Cancelled' },
@@ -42,6 +44,7 @@
   STATUS_CLASS[AWAITING] = 'awaiting';
   STATUS_CLASS[PAID] = 'paid';
   STATUS_CLASS[DELIVERED] = 'delivered';
+  STATUS_CLASS[UNPAID] = 'awaiting';
   STATUS_CLASS[CANCELLED] = 'cancelled';
 
   var SETTINGS_LAYOUT = [
@@ -394,7 +397,7 @@
       state.shown = true;
       // Open on whatever needs Greg first: requests to price, then payments to check, then deliveries.
       state.filter = countOf(REQUESTED) > 0 ? 'requests'
-        : countOf(AWAITING) > 0 ? 'awaiting' : (countOf(PAID) > 0 ? 'paid' : 'awaiting');
+        : countOf(AWAITING) > 0 ? 'awaiting' : countOf(UNPAID) > 0 ? 'unpaid' : (countOf(PAID) > 0 ? 'paid' : 'awaiting');
     }
     renderAll();
     showScreen('app');
@@ -849,7 +852,7 @@
   // The same rules as the service: which customers an action emails.
   function emailsFor(op, o) {
     if (!SJ.isEmail(o.email)) return false;
-    if (op === 'paid') return o.status === AWAITING;
+    if (op === 'paid') return o.status === AWAITING || o.status === UNPAID;
     if (op === 'decline') return o.status === REQUESTED;
     if (op === 'cancel') return o.status === PAID && o.collect && !!o.collectAt;
     if (op === 'email') return o.status !== CANCELLED && o.status !== REQUESTED;
@@ -867,10 +870,12 @@
     var collect = chosen.every(function (o) { return o.collect; });
     var deliver = chosen.every(function (o) { return !o.collect; });
     if (f.id === 'requests') return [{ op: 'decline', label: 'Decline', cls: 'btn-danger' }, msg];
-    if (f.id === 'awaiting') return [{ op: 'paid', label: 'Mark paid', cls: 'btn-primary' }, email, msg, cancel];
+    var handOver = collect ? 'Mark collected' : deliver ? 'Mark delivered' : 'Mark delivered or collected';
+    if (f.id === 'awaiting') return [{ op: 'delivered', label: handOver, cls: 'btn-primary' }, { op: 'paid', label: 'Mark paid' }, email, msg, cancel];
+    if (f.id === 'unpaid') return [{ op: 'paid', label: 'Mark paid', cls: 'btn-primary' }, email, msg];
     if (f.id === 'paid') {
       return [
-        { op: 'delivered', label: collect ? 'Mark collected' : deliver ? 'Mark delivered' : 'Mark delivered or collected', cls: 'btn-primary' },
+        { op: 'delivered', label: handOver, cls: 'btn-primary' },
         { op: 'copy', label: 'Copy hand-over list', run: function () { copyHandOver(chosen); } },
         email, msg, cancel];
     }
@@ -937,7 +942,8 @@
     var collect = chosen.every(function (o) { return o.collect; });
     var texts = {
       paid: 'Mark ' + plural(n, 'order') + ' paid (' + total + ')?' + (needed ? ' ' + plural(needed, 'customer') + ' with an email ' + (needed === 1 ? 'gets' : 'get') + ' the paid invoice.' : ''),
-      delivered: 'Mark ' + plural(n, 'order') + ' ' + (collect ? 'collected' : 'delivered') + '?',
+      delivered: 'Mark ' + plural(n, 'order') + ' ' + (collect ? 'collected' : 'delivered') + '?' +
+        (f.id === 'awaiting' ? ' They move to Delivered, not paid until you mark them paid.' : ''),
       cancel: 'Cancel ' + plural(n, 'order') + ' (' + total + ')?' + (needed ? ' ' + plural(needed, 'customer') + ' with a collection booked ' + (needed === 1 ? 'gets' : 'get') + ' a cancellation for the calendar invite.' : ''),
       reopen: 'Reopen ' + plural(n, 'order') + '? They go back to Awaiting payment.',
       decline: 'Decline ' + plural(n, 'request') + '? They are cancelled' + (needed ? ', and ' + plural(needed, 'customer') + ' with an email ' + (needed === 1 ? 'is' : 'are') + ' told.' : '.'),
@@ -1211,7 +1217,9 @@
 
   function primaryRole(o) {
     if (o.status === REQUESTED) return 'accept';
-    return o.status === AWAITING ? 'mark-paid' : (o.status === PAID ? 'mark-delivered' : 'copy');
+    if (o.status === AWAITING) return 'mark-delivered';
+    if (o.status === UNPAID) return 'mark-paid';
+    return o.status === PAID ? 'mark-delivered' : 'copy';
   }
 
   function askConfirm(o, kind) {
@@ -1222,8 +1230,9 @@
   }
 
   function dropConfirm(o) {
+    var kind = state.confirm && state.confirm.kind;
     state.confirm = null;
-    state.focus = { invoice: o.invoice, role: primaryRole(o) };
+    state.focus = { invoice: o.invoice, role: kind === 'paid' ? 'mark-paid' : primaryRole(o) };
     renderOrders();
   }
 
@@ -1281,7 +1290,7 @@
       return el('div', { class: 'confirm-row' },
         el('p', null, 'Is ' + SJ.money(o.total, sym) + ' with reference ', el('span', { class: 'nowrap' }, o.invoice), ' in your account?'),
         el('div', { class: 'order-actions' },
-          actionButton('Yes, mark paid', 'btn-primary', 'confirm', function () { setStatus(o, PAID); }),
+          actionButton('Yes, mark paid', 'btn-primary', 'confirm', function () { setStatus(o, o.status === UNPAID ? DELIVERED : PAID); }),
           actionButton('Not yet', 'btn-quiet', 'back', function () { dropConfirm(o); })));
     }
     if (asking === 'decline') {
@@ -1312,8 +1321,11 @@
     // Only orders with an email address can have the invoice emailed again.
     var resend = o.email ? [{ label: 'Email invoice', role: 'email', run: function () { emailInvoice(o); } }] : [];
     var row = el('div', { class: 'order-actions' });
+    var handOver = o.collect ? 'Mark collected' : 'Mark delivered';
     if (o.status === AWAITING) {
-      row.appendChild(actionButton(working ? saving : 'Mark paid', 'btn-primary', 'mark-paid', function () { askConfirm(o, 'paid'); }, working));
+      // Usually handed over first and paid later, so delivery comes first. Paying first still works.
+      row.appendChild(actionButton(working ? saving : handOver, 'btn-primary', 'mark-delivered', function () { setStatus(o, UNPAID); }, working));
+      row.appendChild(actionButton('Mark paid', 'btn-quiet', 'mark-paid', function () { askConfirm(o, 'paid'); }, working));
       row.appendChild(invoiceButton(o, working));
       row.appendChild(actionButton('Edit', 'btn-quiet', 'edit', function () { startEdit(o); }, working));
       row.appendChild(moreMenu(o, resend.concat([
@@ -1327,10 +1339,21 @@
         { label: 'Undo paid', role: 'undo-paid', run: function () { setStatus(o, AWAITING); } },
         { label: 'Cancel order', role: 'cancel', danger: true, run: function () { askConfirm(o, 'cancel'); } }
       ]), working));
-    } else if (o.status === DELIVERED) {
+    } else if (o.status === UNPAID) {
+      row.appendChild(actionButton(working ? saving : 'Mark paid', 'btn-primary', 'mark-paid', function () { askConfirm(o, 'paid'); }, working));
       row.appendChild(invoiceButton(o, working));
       row.appendChild(moreMenu(o, resend.concat([
-        { label: o.collect ? 'Undo collected' : 'Undo delivered', role: 'undo-delivered', run: function () { setStatus(o, PAID); } }
+        { label: o.collect ? 'Undo collected' : 'Undo delivered', role: 'undo-delivered', run: function () { setStatus(o, AWAITING); } },
+        { label: 'Cancel order', role: 'cancel', danger: true, run: function () { askConfirm(o, 'cancel'); } }
+      ]), working));
+    } else if (o.status === DELIVERED) {
+      // Paid last means undoing the payment; delivered last means undoing the delivery.
+      var paidLast = o.paidOn && o.deliveredOn && o.paidOn > o.deliveredOn;
+      row.appendChild(invoiceButton(o, working));
+      row.appendChild(moreMenu(o, resend.concat([
+        paidLast
+          ? { label: 'Undo paid', role: 'undo-paid', run: function () { setStatus(o, UNPAID); } }
+          : { label: o.collect ? 'Undo collected' : 'Undo delivered', role: 'undo-delivered', run: function () { setStatus(o, PAID); } }
       ]), working));
     } else if (o.status === CANCELLED) {
       row.appendChild(actionButton(working ? saving : 'Reopen order', 'btn-quiet', 'reopen', function () { setStatus(o, AWAITING); }, working));
@@ -1370,9 +1393,9 @@
       replaceOrder(res.order);
       state.working = null;
       var inv = res.order.invoice;
-      if (target === PAID && before === AWAITING) {
+      if ((target === PAID && before === AWAITING) || (target === DELIVERED && before === UNPAID)) {
         // The next job is sending the paid invoice, so show the order under Paid with its Copy button.
-        state.filter = 'paid';
+        state.filter = target === PAID ? 'paid' : 'delivered';
         state.focus = { invoice: inv, role: 'copy' };
         flashOrder(inv);
         if (res.emailed === true) SJ.toast(inv + ' marked paid. The paid invoice was emailed to ' + res.order.email + '.');
@@ -1381,6 +1404,8 @@
       } else {
         renderOrders();
         if (target === PAID) SJ.toast(inv + ' is back under Paid.');
+        else if (target === UNPAID && before === AWAITING) SJ.toast(inv + (res.order.collect ? ' marked collected' : ' marked delivered') + '. It waits under Delivered, not paid until you mark it paid.');
+        else if (target === UNPAID) SJ.toast(inv + ' is back under Delivered, not paid.');
         else if (target === DELIVERED) SJ.toast(inv + (res.order.collect ? ' marked collected.' : ' marked delivered.'));
         else if (target === CANCELLED) SJ.toast(inv + ' cancelled.');
         else SJ.toast(inv + ' is waiting for payment again.');
