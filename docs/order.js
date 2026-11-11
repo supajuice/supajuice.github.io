@@ -303,14 +303,16 @@
     return c.fee > 0 ? SJ.money(c.fee, c.currency) : 'Free';
   }
 
-  // The starting price for door or locker, or '' when there is none. A starting price is
-  // marked with an asterisk on the choice buttons: the final price depends on where it goes.
+  // While the fee is confirmed after the order, a starting price says so.
+  // Each part of a choice's small text goes on its own line (see .choose-sub in shop.css).
+  var QUOTE_NOTE = '\n(we\'ll contact you with the final price)';
+
+  // The starting price for door or locker, with the note, or '' when there is none.
   function quoteFromText(kind) {
     if (!config || !config.quote || pudoOn()) return '';
-    return fixedFromText(kind) || (config.fee > 0 ? 'From ' + SJ.money(config.fee, config.currency) : '');
+    var text = fixedFromText(kind) || (config.fee > 0 ? 'From ' + SJ.money(config.fee, config.currency) : '');
+    return text ? text + QUOTE_NOTE : '';
   }
-
-  var LOCATION_NOTE = ' (depends on your location)';
 
   function syncFulfil() {
     var collect = collecting();
@@ -325,19 +327,15 @@
     // Door and locker are always offered. Without Pudo prices both use the delivery fee.
     $('choose-locker').hidden = false;
     $('choose').querySelector('.choose-row').classList.add('choose-row--three');
-
+    $('choose-deliver-title').textContent = 'To your door';
     if (config) {
       var collectFree = !pudo || pudoFrom('collect') === 0;
-      $('choose-collect-sub').textContent = collectFree ? 'Free' + (place ? ' · ' + place : '') : (place || 'Collect');
+      // The heading says it is free (only when it is), the small text says where.
+      $('choose-collect-title').textContent = collectFree ? 'Free collection' : 'Collect';
+      $('choose-collect-sub').textContent = place ? 'From ' + place : '';
       $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
       $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : quoteFromText('locker') || deliveryText(config);
     }
-    // "From R99" prices get an asterisk and the note under the buttons.
-    var deliverFrom = /^From /.test($('choose-deliver-sub').textContent);
-    var lockerFrom = /^From /.test($('choose-locker-sub').textContent);
-    $('choose-deliver-title').textContent = 'To your door' + (deliverFrom ? '*' : '');
-    $('choose-locker-title').textContent = 'To a Pudo locker' + (lockerFrom ? '*' : '');
-    $('choose-note').hidden = !(deliverFrom || lockerFrom);
     $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '')
       : choice === 'locker' ? 'Send to a Pudo locker'
       : 'Deliver to your door';
@@ -374,7 +372,8 @@
     config = c;
     $('brand').textContent = c.brand;
     document.title = c.brand;
-    $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you. ' : 'We send them to you, or you can collect. ') +
+    // Each sentence on its own line (the lede keeps line breaks, see shop.css).
+    $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you.\n' : 'We send them to you, or you can collect.\n') +
       'Pay by bank transfer.';
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
@@ -396,7 +395,7 @@
     }
     if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
     if (choice && !collecting() && quoteFromText(choice === 'locker' ? 'locker' : 'door')) {
-      opts.feeText = quoteFromText(choice === 'locker' ? 'locker' : 'door') + LOCATION_NOTE;
+      opts.feeText = quoteFromText(choice === 'locker' ? 'locker' : 'door');
     }
     opts.discount = discount;
     opts.flavours = SJ.flavourText(stepper.get(), stepper.list);

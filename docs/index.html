@@ -13,14 +13,15 @@
   <link rel="icon" type="image/png" sizes="32x32" href="img/icon-32.png">
   <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=20261110a">
-  <link rel="stylesheet" href="shop.css?v=20261110a">
+  <link rel="stylesheet" href="app.css?v=20261111a">
+  <link rel="stylesheet" href="shop.css?v=20261111a">
 </head>
 <body class="shop">
   <a class="skip" href="#order">Skip to the order form</a>
 
   <header class="bar">
     <a class="promo" id="link-promo" href="#order" hidden></a>
+    <a class="promo" href="#order">Use <strong class="promo-code">SUPA15</strong> to get 15% off</a>
     <div class="bar-inner">
       <a class="bar-mark" href="#top" aria-label="Supa Juice, back to top"><span class="bar-name" id="brand">Supa Juice</span></a>
       <nav class="bar-nav" aria-label="Page">
@@ -72,7 +73,13 @@
       </div>
     </section>
 
-    <div class="strip landing" aria-hidden="true"><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot; Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot; Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot; Twist &middot; Sip &middot; Reseal</span></div>
+    <!-- A moving ticker. The track holds the same words twice, so sliding it by half loops with no jump. -->
+    <div class="strip strip--moving landing" aria-hidden="true">
+      <div class="strip-track">
+        <span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span>
+        <span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span><span>Twist &middot; Sip &middot; Reseal &middot; Store in the freezer &middot;</span>
+      </div>
+    </div>
 
     <section class="why landing" aria-labelledby="why-title">
       <div class="wrap">
@@ -91,7 +98,7 @@
           <li>
             <span class="tag" aria-hidden="true">03</span>
             <h3>Nothing to study</h3>
-            <p>No charts, no milligram maths. Have one when you need one, then get back to enjoying yourself.</p>
+            <p>No charts, no milligram maths.<br>Have one when you need one, then get back to enjoying yourself.</p>
           </li>
         </ul>
       </div>
@@ -117,7 +124,7 @@
       <div class="wrap flav-inner">
         <div class="flav-copy">
           <h2 class="h-display" id="flav-title">Pick your flavours</h2>
-          <p>Mix and match in one order. Minimum 5 gels.</p>
+          <p>Mix and match in one order.<br>Minimum 5 gels.</p>
         </div>
         <ul class="flav-list">
           <li class="flav-card flav-card--orange">
@@ -149,11 +156,11 @@
           <dl class="how-list">
             <div class="how-row">
               <dt>Easy effort</dt>
-              <dd><strong>1 to 1&frac12; gels an hour.</strong> Or one and a couple of Oreos.</dd>
+              <dd><strong>1 to 1&frac12; gels an hour.</strong><br>Or one and a couple of Oreos.</dd>
             </div>
             <div class="how-row">
               <dt>Going hard</dt>
-              <dd><strong>1&frac12; to 2 gels an hour.</strong> Or one and a half and a handful of wine gums.</dd>
+              <dd><strong>1&frac12; to 2 gels an hour.</strong><br>Or one and a half and a handful of wine gums.</dd>
             </div>
           </dl>
           <p class="how-pills">
@@ -168,7 +175,7 @@
       <div class="page stack-lg" id="app">
         <header class="order-intro">
           <h2 class="h-display" id="order-title">Order gels</h2>
-          <p class="lede" id="lede">Order below. Pay by bank transfer.</p>
+          <p class="lede" id="lede">Order below.<br>Pay by bank transfer.</p>
         </header>
 
         <figure id="photo" class="photo" hidden><img id="photo-img" alt=""></figure>
@@ -181,8 +188,8 @@
             <div class="choose-row choose-row--three">
               <button type="button" class="choose-btn" id="choose-collect" aria-pressed="false">
                 <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>
-                <span class="choose-title">Collect</span>
-                <span class="choose-sub" id="choose-collect-sub">Free</span>
+                <span class="choose-title" id="choose-collect-title">Free collection</span>
+                <span class="choose-sub" id="choose-collect-sub"></span>
               </button>
               <button type="button" class="choose-btn" id="choose-deliver" aria-pressed="false">
                 <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg>
@@ -191,11 +198,10 @@
               </button>
               <button type="button" class="choose-btn" id="choose-locker" aria-pressed="false">
                 <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M12 3.5v17M4 12h16"/><path d="M9 7.5v1.5M15 7.5v1.5"/></svg>
-                <span class="choose-title" id="choose-locker-title">To a Pudo locker</span>
+                <span class="choose-title">To a Pudo locker</span>
                 <span class="choose-sub" id="choose-locker-sub"></span>
               </button>
             </div>
-            <p class="choose-note" id="choose-note" hidden>*Location dependent</p>
           </fieldset>
 
           <div class="chosen" id="chosen" hidden>
@@ -312,7 +318,7 @@
     <div class="foot-inner">
       <div class="foot-brand">
         <p class="foot-mark">Supa<br>Juice</p>
-        <p class="foot-text">Small-batch energy gels from Cape Town. Collect in Sea Point, or we send them to you.</p>
+        <p class="foot-text">Small-batch energy gels from Cape Town.<br>Collect in Sea Point, or we send them to you.</p>
       </div>
       <p class="foot-ig" id="foot-ig" hidden></p>
     </div>
@@ -322,8 +328,9 @@
     <img src="img/instagram.png" alt="" width="54" height="54">
   </a>
 
-  <script src="config.js?v=20261110a"></script>
-  <script src="shared.js?v=20261110a"></script>
-  <script src="order.js?v=20261110a"></script>
+  <script src="config.js?v=20261111a"></script>
+  <script src="shared.js?v=20261111a"></script>
+  <script src="order.js?v=20261111a"></script>
+  <script src="ig-colour.js?v=20261111a"></script>
 </body>
 </html>

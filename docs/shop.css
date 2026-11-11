@@ -41,13 +41,13 @@
   --radius: 12px;
   --wrap: 75rem;
   color-scheme: light;
-  scroll-padding-top: 76px;
+  scroll-padding-top: 112px;
 }
 
 html:has(body.shop) {
   color-scheme: light;
   scroll-behavior: smooth;
-  scroll-padding-top: 76px;
+  scroll-padding-top: 112px;
   background: var(--sun);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -115,6 +115,7 @@ html:has(body.shop) {
   border-bottom: 3px solid var(--blue);
   padding-top: env(safe-area-inset-top);
 }
+/* The offer ribbon: a blue band at the very top, part of the sticky header so it stays in view. */
 .shop a.promo {
   display: flex;
   align-items: center;
@@ -489,6 +490,20 @@ html:has(body.shop) {
 }
 .strip span { display: inline-block; padding-left: 16px; }
 
+/* The moving ticker: the track slides left by half its width (one full copy of the words),
+   then starts again, so it never jumps. It moves for everyone, also when the device asks
+   for less motion: it is slow, and it only runs in this one strip. */
+.strip--moving { padding-left: 0; }
+.strip-track {
+  display: flex;
+  width: max-content;
+  animation: strip-slide 90s linear infinite;
+}
+.strip-track span { flex: none; padding: 0 0.35em 0 0; }
+@keyframes strip-slide {
+  to { transform: translateX(-50%); }
+}
+
 /* ---------- Why ---------- */
 
 .why { background: var(--cream); padding: 64px 0; }
@@ -727,10 +742,7 @@ html:has(body.shop) {
   background: transparent;
 }
 .order-intro { display: grid; gap: 10px; }
-/* The picture above the form (set on Greg's page) stays small, so the form is close by. */
-.order-panel .photo { width: 140px; max-height: none; }
-@media (min-width: 52rem) { .order-panel .photo { width: 180px; } }
-.order-intro .lede { max-width: 40ch; color: var(--ink); }
+.order-intro .lede { max-width: 40ch; color: var(--ink); white-space: pre-line; }
 .order-panel #order-form,
 .order-panel #view-done,
 .order-panel #view-closed {
@@ -745,6 +757,28 @@ html:has(body.shop) {
   .order-panel #order-form,
   .order-panel #view-done,
   .order-panel #view-closed { padding: 32px 32px 36px; }
+}
+
+/* On wide screens, the photo on the left and the order form beside it, with the
+   delivery choices stacked. The photo stays in view while the form grows. Without a photo,
+   or on a phone, it stays one column. */
+@media (min-width: 60rem) {
+  .order-panel .page:has(> #photo:not([hidden])) {
+    max-width: 68rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 48px;
+    row-gap: 32px;
+    align-items: start;
+  }
+  .order-panel .page:has(> #photo:not([hidden])) > * { margin-top: 0; grid-column: 2; }
+  .order-panel .page:has(> #photo:not([hidden])) > .order-intro { grid-column: 1 / -1; }
+  .order-panel .page:has(> #photo:not([hidden])) > #photo {
+    grid-column: 1;
+    grid-row: 2 / span 3;
+    position: sticky;
+    top: 136px;
+  }
 }
 
 /* Fields sit on white with a clear edge. */
@@ -821,20 +855,19 @@ html:has(body.shop) {
   font-size: 1.375rem;
   line-height: 1;
 }
-.shop .choose-sub { color: var(--ink); font-size: 0.875rem; font-weight: 600; line-height: 1.3; }
-.shop .choose-note { margin: 12px 0 0; color: var(--ink); font-size: 0.875rem; font-weight: 600; }
+.shop .choose-sub { color: var(--ink); font-size: 0.875rem; font-weight: 600; line-height: 1.3; white-space: pre-line; }
 .shop .choose-btn[aria-pressed='true'] .choose-sub { color: #fff; }
-@media (max-width: 400px) {
-  .shop .choose-row.choose-row--three { grid-template-columns: 1fr; }
-  .shop .choose-btn {
-    min-height: 64px;
-    display: grid;
-    grid-template-columns: 30px 1fr;
-    align-items: center;
-    column-gap: 10px;
-  }
-  .shop .choose-icon { grid-row: span 2; margin: 0; }
+/* The ordering choices are always stacked, one per row with the icon on the left,
+   on every screen size. */
+.shop .choose-row.choose-row--three { grid-template-columns: 1fr; }
+.shop .choose-btn {
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  align-items: center;
+  column-gap: 12px;
 }
+.shop .choose-icon { grid-row: span 2; margin: 0; }
 .shop .chosen {
   border: 3px solid var(--blue);
   background: var(--sun);
@@ -965,6 +998,35 @@ html:has(body.shop) {
 .ig-float:hover { transform: translateY(-2px); }
 @media (min-width: 52rem) {
   .ig-float { width: 60px; height: 60px; right: 28px; bottom: 28px; border-radius: 15px; }
+}
+
+/* The button takes the brand colours of what it floats over (see ig-colour.js).
+   Instagram's rules allow its glyph only in black, white or its own gradient, so the glyph
+   stays white or black and the circle behind it changes: blue over light parts of the page,
+   yellow over blue and dark parts. */
+.shop .ig-float {
+  border-radius: 50%;
+  padding: 13px;
+  background: var(--blue);
+  transition: transform 0.15s ease, background-color 0.25s ease;
+}
+.shop .ig-float img { filter: brightness(0) invert(1); transition: filter 0.25s ease; }
+.shop .ig-float.ig-float--on-dark { background: var(--sun); }
+.shop .ig-float.ig-float--on-dark img { filter: brightness(0); }
+/* The button is as tall as the footer's @supajuice.co pill (48px), so both have the same
+   round ends. On wide screens it floats as high as the footer's bottom padding, so at the end
+   of the page it lines up with the pill and the last line of the footer, beside the pill. */
+.shop .ig-float,
+.shop .ig-float:hover { width: 48px; height: 48px; padding: 11px; }
+/* On a phone the pill is the footer's last row, at the button's height from the bottom, with
+   the button to its right. */
+@media (max-width: 51.99rem) {
+  .shop .foot-inner { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .shop .foot-ig { margin-right: 64px; }
+}
+@media (min-width: 52rem) {
+  .shop .ig-float { bottom: calc(48px + env(safe-area-inset-bottom)); }
+  .shop .foot-ig { margin-right: 64px; }
 }
 
 /* ---------- Footer ---------- */
