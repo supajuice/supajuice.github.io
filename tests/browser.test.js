@@ -333,13 +333,13 @@ test('order page: with fees confirmed per order, a delivery is sent as a request
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true });
   await page.waitForSelector('#order-form:not([hidden])');
   // A starting price says, on its own line, that the final price follows.
-  assert.equal(await text(page, '#choose-deliver-sub'), "From R30\n(we'll contact you with the final price)");
-  assert.equal(await text(page, '#choose-locker-sub'), "From R30\n(we'll contact you with the final price)");
+  assert.equal(await text(page, '#choose-deliver-sub'), "From R30*\n*Location dependent");
+  assert.equal(await text(page, '#choose-locker-sub'), "From R30*\n*Location dependent");
   assert.equal(await text(page, '#choose-deliver-title'), 'To your door');
   assert.equal(await text(page, '#choose-locker .choose-title'), 'To a Pudo locker');
   await choose(page, 'deliver');
   await page.click('[aria-label="One more Orange"]');
-  assert.match(await text(page, '#summary'), /Delivery\s+From R30 \(we'll contact you with the final price\)/);
+  assert.match(await text(page, '#summary'), /Delivery\s+From R30\* \*Location dependent/);
   assert.match(await text(page, '#summary'), /Total before delivery\s+R40/);
   assert.equal(await text(page, '#submit'), 'Send order for R40 + delivery');
   assert.match(await text(page, '#next-note'), /There is nothing to pay yet/);

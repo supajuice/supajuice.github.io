@@ -305,7 +305,7 @@
 
   // While the fee is confirmed after the order, a starting price says so.
   // Trial page: each part of a choice's small text goes on its own line (see .choose-sub in shop.css).
-  var QUOTE_NOTE = '\n(we\'ll contact you with the final price)';
+  var QUOTE_NOTE = '*\n*Location dependent';
 
   // The starting price for door or locker, with the note, or '' when there is none.
   function quoteFromText(kind) {
