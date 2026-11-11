@@ -27,6 +27,13 @@
     // Not a status: how many gels to make each week, for collections and deliveries.
     { id: 'weeks', status: null, label: 'Gels per week' }
   ];
+  // How an order goes out. Narrows every status list, so Greg sees, say, Pudo orders still to send.
+  var METHODS = [
+    { id: 'all', label: 'All' },
+    { id: 'collect', label: 'Collection' },
+    { id: 'locker', label: 'Pudo locker' },
+    { id: 'door', label: 'To the door' }
+  ];
   var BULK_MAX = 50; // the most orders the service changes at once
   var LOW_EMAILS = 10; // warn when fewer emails than this can still be sent today
 
@@ -144,6 +151,7 @@
     acceptFees: {},     // delivery fee typed for each new request, by invoice
     declineReason: '',
     query: '',          // the search box
+    method: 'all',      // 'all', 'collect', 'locker' or 'door': which orders the lists show
     weekKind: 'all',    // Gels per week: 'all', 'collect' or 'deliver'
     weekOpen: {},       // Gels per week: the weeks whose orders are shown
     selected: {},       // ticked orders in the list shown, by invoice
@@ -230,8 +238,24 @@
     return b.created.localeCompare(a.created) || b.invoice.localeCompare(a.invoice, undefined, { numeric: true });
   }
 
+  // 'collect', 'locker' or 'door'. The order service saves locker orders with the address
+  // "Pudo locker near: …", so a DM order typed that way counts as a locker order too.
+  function methodOf(o) {
+    if (o.collect) return 'collect';
+    return /^\s*pudo locker/i.test(o.address || '') ? 'locker' : 'door';
+  }
+
+  function inMethod(o) {
+    return state.method === 'all' || methodOf(o) === state.method;
+  }
+
+  function methodLabel(id) {
+    return METHODS.filter(function (m) { return m.id === id; })[0].label;
+  }
+
+  // Counts follow the delivery method picked, so each chip says how many are in its list.
   function countOf(status) {
-    return state.orders.filter(function (o) { return o.status === status; }).length;
+    return state.orders.filter(function (o) { return o.status === status && inMethod(o); }).length;
   }
 
   function currentFilter() {
@@ -418,6 +442,8 @@
           : 'Only ' + plural(state.emailsLeft, 'email') + ' can be sent today. Google allows about 100 a day.')));
     }
     panel.appendChild(searchBox());
+    // Gels per week has its own collection or delivery switch.
+    if (state.filter !== 'weeks' && !searching()) panel.appendChild(methodRow());
     panel.appendChild(chipsRow());
 
     var f = currentFilter();
@@ -476,6 +502,44 @@
     return f.id === 'collections' ? state.orders.filter(upcomingCollection).length : countOf(f.status);
   }
 
+  // Paid orders not yet sent or collected, for the delivery method's count.
+  function toSend(id) {
+    return state.orders.filter(function (o) {
+      return o.status === PAID && (id === 'all' || methodOf(o) === id);
+    }).length;
+  }
+
+  // All · Collection · Pudo locker · To the door. Picking one opens its paid orders: the ones to send.
+  function methodRow() {
+    var wrap = el('div', { class: 'stack-sm' },
+      el('p', { class: 'method-title', id: 'method-title' }, 'Send by'));
+    var row = el('div', { class: 'seg seg--method', role: 'group', 'aria-labelledby': 'method-title' });
+    METHODS.forEach(function (m) {
+      var n = toSend(m.id);
+      var btn = el('button', {
+        type: 'button', class: 'seg-btn', 'aria-pressed': state.method === m.id ? 'true' : 'false', 'data-role': 'method-' + m.id,
+        'aria-label': m.label + ', ' + plural(n, 'paid order') + ' to send'
+      }, m.label, el('span', { class: 'seg-count' + (n ? ' seg-count--due' : '') }, String(n)));
+      btn.addEventListener('click', function () {
+        state.method = m.id;
+        if (m.id !== 'all') state.filter = 'paid';
+        state.query = '';
+        state.selected = {};
+        state.bulk = null;
+        state.bulkFailures = [];
+        state.bulkPreview = null;
+        state.confirm = null;
+        state.preview = null;
+        state.moreOpen = null;
+        state.focus = { role: 'method-' + m.id };
+        renderOrders();
+      });
+      row.appendChild(btn);
+    });
+    wrap.appendChild(row);
+    return wrap;
+  }
+
   // Name, invoice number, email, contact or address. Phone numbers match with or without spaces.
   function matches(o, query) {
     var q = query.trim().toLowerCase();
@@ -494,7 +558,7 @@
     if (searching()) return state.orders.filter(function (o) { return matches(o, state.query); }).sort(newestFirst);
     if (f.id === 'collections') return state.orders.filter(upcomingCollection).sort(byCollectTime);
     if (f.id === 'weeks') return weekOrders();
-    return state.orders.filter(function (o) { return o.status === f.status; }).sort(newestFirst);
+    return state.orders.filter(function (o) { return o.status === f.status && inMethod(o); }).sort(newestFirst);
   }
 
   // A date on this phone as 2026-10-29.
@@ -703,6 +767,8 @@
     FILTERS.forEach(function (f) {
       // With a fixed delivery fee there are no requests, so the filter would only be clutter.
       if (f.status === REQUESTED && !state.config.quote && countOf(REQUESTED) === 0 && state.filter !== 'requests') return;
+      // Collections are never sent by Pudo or to the door.
+      if (f.id === 'collections' && (state.method === 'locker' || state.method === 'door')) return;
       var btn = el('button', {
         type: 'button', class: 'chip', 'aria-pressed': state.filter === f.id ? 'true' : 'false', 'data-role': 'chip-' + f.id
       }, f.label, el('span', { class: 'chip-count' }, String(filterCount(f))));
@@ -731,11 +797,16 @@
     var total = SJ.money(sumOf(list), state.config.currency);
     if (f.id === 'collections') return plural(n, 'collection') + ' to hand over.';
     if (f.id === 'weeks') return 'Gels to make each week, from orders that are not cancelled.';
-    if (f.id === 'requests') return plural(n, 'new request') + ' to set a delivery fee for and accept.';
-    if (f.id === 'awaiting') return plural(n, 'order') + ' waiting for payment, ' + total + ' in total.';
-    if (f.id === 'paid') return plural(n, 'paid order') + ' to deliver, ' + total + ' in total.';
-    if (f.id === 'delivered') return plural(n, 'delivered order') + ', ' + total + ' in total.';
-    return plural(n, 'cancelled order') + '.';
+    var m = state.method;
+    var kind = m === 'all' ? '' : ' (' + methodLabel(m) + ')';
+    if (f.id === 'requests') return plural(n, 'new request') + kind + ' to set a delivery fee for and accept.';
+    if (f.id === 'awaiting') return plural(n, 'order') + kind + ' waiting for payment, ' + total + ' in total.';
+    if (f.id === 'paid') {
+      var todo = { all: ' to deliver', collect: ' still to be collected', locker: ' to send to a Pudo locker', door: ' to deliver to the door' }[m];
+      return plural(n, 'paid order') + todo + ', ' + total + ' in total.';
+    }
+    if (f.id === 'delivered') return plural(n, 'delivered order') + kind + ', ' + total + ' in total.';
+    return plural(n, 'cancelled order') + kind + '.';
   }
 
   function listHead(f, list) {
@@ -1016,6 +1087,15 @@
       cancelled: 'No orders have been cancelled.',
       weeks: state.weekKind === 'collect' ? 'No collection orders yet.' : state.weekKind === 'deliver' ? 'No delivery orders yet.' : 'No orders yet.'
     };
+    if (state.method !== 'all' && f.id !== 'weeks' && f.id !== 'collections') {
+      texts = {
+        requests: 'No new ' + methodLabel(state.method) + ' requests.',
+        awaiting: 'No ' + methodLabel(state.method) + ' orders are waiting for payment.',
+        paid: { collect: 'All paid collections have been collected.', locker: 'Nothing left to send to a Pudo locker.', door: 'Nothing left to deliver to the door.' }[state.method],
+        delivered: 'No ' + methodLabel(state.method) + ' orders have been ' + (state.method === 'collect' ? 'collected' : 'delivered') + ' yet.',
+        cancelled: 'No ' + methodLabel(state.method) + ' orders have been cancelled.'
+      };
+    }
     var box = el('div', { class: 'empty stack' },
       el('p', null, none ? 'No orders yet. Orders from your order page and the DM orders you add will show up here.' : texts[f.id]));
     if (none) {
@@ -1085,7 +1165,9 @@
 
     card.appendChild(el('div', { class: 'order-who' },
       el('span', { class: 'order-name' }, o.name),
-      el('span', { class: 'status status-' + (STATUS_CLASS[o.status] || 'cancelled') }, o.status)));
+      el('span', { class: 'order-tags' },
+        el('span', { class: 'method-tag method-tag--' + methodOf(o), 'data-role': 'method-tag' }, methodLabel(methodOf(o))),
+        el('span', { class: 'status status-' + (STATUS_CLASS[o.status] || 'cancelled') }, o.status))));
 
     if (state.editing === o.invoice && (awaiting || request)) {
       card.appendChild(editForm(o));

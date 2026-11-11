@@ -1187,6 +1187,58 @@ a {
 .status-delivered { background: var(--tint); border-color: var(--tint); }
 .status-cancelled { border-style: dashed; text-decoration: line-through; }
 
+/* How the order goes out: Collection, Pudo locker or To the door */
+.order-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.method-tag {
+  display: inline-block;
+  padding: 1px 10px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--tint);
+  color: var(--ink);
+}
+.method-title {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.seg--method .seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 2px var(--s2);
+  padding: var(--s1) var(--s2);
+  font-size: 0.9375rem;
+  line-height: 1.2;
+}
+.seg-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: var(--muted);
+}
+.seg-count--due {
+  min-width: 1.5em;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-weight: 700;
+  background: var(--ink);
+  color: var(--surface);
+}
+.seg-btn[aria-pressed='true'] .seg-count { color: var(--accent-ink); }
+.seg-btn[aria-pressed='true'] .seg-count--due {
+  background: var(--accent-ink);
+  color: var(--accent);
+}
+
 details.more {
   position: relative;
 }

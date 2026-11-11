@@ -2694,3 +2694,64 @@ test('admin: gels per week, by pickup week for collections and order week for de
   assert.match(await page.locator('.week-orders').innerText(), /5\s+Next Week · SJ-\d+\s+Collect Tue 3 Nov, 17:00/);
   noErrors(errors);
 });
+
+test('send by: Pudo locker, door and collection each list the paid orders still to send', async (t) => {
+  const { dev, page, errors } = await open(t, { quote: false, collections: true });
+  const kiosk = (over) => {
+    const r = dev.gas.call(Object.assign({
+      action: 'order', areaConfirmed: true, notes: '', website: '', contact: '', email: 'pudo@example.com',
+      requestId: 'req_' + Math.random().toString(36).slice(2).padEnd(12, '0')
+    }, over, { expectedTotal: over.qty * 40 + 30 }));
+    assert.equal(r.ok, true, JSON.stringify(r));
+    return r.order.invoice;
+  };
+  const paid = (invoice) => dev.gas.call({ action: 'setStatus', key: dev.key, invoice, status: 'Paid' });
+  const lockerA = kiosk({ name: 'Locker Paid', ship: 'locker', address: '9 Long St, Cape Town', qty: 5 });
+  const lockerB = kiosk({ name: 'Locker Unpaid', ship: 'locker', address: '1 Bree St, Cape Town', qty: 6 });
+  const door = kiosk({ name: 'Door Paid', ship: 'door', address: '4 Regent Rd, Sea Point', qty: 5 });
+  paid(lockerA);
+  paid(door);
+  const rows = dev.gas.rows('Orders');
+  const isLocker = (r) => /^Pudo locker/.test(r.Address);
+  const paidRows = rows.filter((r) => r.Status === 'Paid');
+  const paidDoor = paidRows.filter((r) => r.Collect !== 'yes' && !isLocker(r)).length;
+  const paidCollect = paidRows.filter((r) => r.Collect === 'yes').length;
+
+  await page.goto(dev.adminUrl());
+  await page.waitForSelector('.tabs');
+  const count = (id) => text(page, '[data-role="method-' + id + '"] .seg-count');
+  assert.equal(await count('all'), String(paidRows.length));
+  assert.equal(await count('locker'), '1');
+  assert.equal(await count('door'), String(paidDoor));
+  assert.equal(await count('collect'), String(paidCollect));
+
+  // Pudo opens its paid orders: only the paid locker order, ready to mark delivered.
+  await page.click('[data-role="method-locker"]');
+  assert.equal(await page.getAttribute('[data-role="chip-paid"]', 'aria-pressed'), 'true');
+  assert.equal(await text(page, '[data-role="chip-paid"] .chip-count'), '1');
+  assert.equal(await page.locator('[data-role="chip-collections"]').count(), 0, 'no collections chip for Pudo');
+  assert.deepEqual(await page.locator('.order-name').allInnerTexts(), ['Locker Paid']);
+  assert.match(await text(page, '.list-total'), /1 paid order to send to a Pudo locker/);
+  assert.equal(await text(page, '.order [data-role="method-tag"]'), 'Pudo locker');
+
+  // Awaiting payment narrows to Pudo too.
+  await page.click('[data-role="chip-awaiting"]');
+  assert.deepEqual(await page.locator('.order-name').allInnerTexts(), ['Locker Unpaid']);
+
+  // To the door leaves out lockers and collections.
+  await page.click('[data-role="method-door"]');
+  const names = await page.locator('.order-name').allInnerTexts();
+  assert.ok(names.includes('Door Paid') && !names.includes('Locker Paid'), names.join(', '));
+  assert.equal(names.length, paidDoor);
+
+  // Marking it delivered takes it off the door count.
+  await page.locator('.order', { hasText: 'Door Paid' }).locator('[data-role="mark-delivered"]').click();
+  const confirm = page.locator('.order', { hasText: 'Door Paid' }).locator('[data-role="confirm"]');
+  if (await confirm.count()) await confirm.click();
+  await page.waitForFunction((n) => document.querySelector('[data-role="method-door"] .seg-count').textContent === String(n), paidDoor - 1);
+
+  // All shows every status list as before.
+  await page.click('[data-role="method-all"]');
+  assert.equal(await page.locator('[data-role="chip-collections"]').count(), 1);
+  noErrors(errors);
+});
