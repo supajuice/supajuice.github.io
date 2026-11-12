@@ -124,6 +124,7 @@ const SETTING_DEFS = [
   { key: 'pudo_m_locker', value: '69', note: 'Pudo Medium, locker to locker.' },
   { key: 'pudo_m_door', value: '115.81', note: 'Pudo Medium, locker to door.' },
   { key: 'discount_codes', value: '', note: 'Discount codes customers can enter on the order page, separated by commas: the code, then a percent off the sachets or "delivery" for free delivery, then on or off. For example: RUN10 10 on. Set them on the admin page.' },
+  { key: 'code_customers', value: '', note: 'Codes only some customers can use, each of them once. Separate codes with ; and list each code, a colon, then the emails it was sent to. For example: THANKS25: anna@example.com, ben@example.com. A code not listed here works for anyone, as often as they like.' },
   { key: 'min_quantity', value: '1', note: 'Fewest sachets one order can include. The quantity starts here.' },
   { key: 'max_quantity', value: '20', note: 'Most sachets one order can include.' },
   { key: 'invoice_prefix', value: 'SJ', note: 'Letters before the invoice number, for example SJ-0001. Up to 6 letters or digits.' },
@@ -139,7 +140,7 @@ const SETTING_DEFS = [
 // Longest allowed text per setting.
 const SETTING_MAX = {
   brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, collection_address: 200, alert_email: 120,
-  collection_dates: 8000, discount_codes: 4000, collection_hours: 20, locker_fees: 200,
+  collection_dates: 8000, discount_codes: 4000, code_customers: 8000, collection_hours: 20, locker_fees: 200,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
 
@@ -306,6 +307,9 @@ function createOrder_(body, source) {
     // A code must be live when the order is placed. Free delivery leaves a collection as it is.
     const code = codeText ? findCode_(settings.codes, codeText) : null;
     if (codeText && !code) throw fail_('bad_code', 'The discount code ' + codeText.toUpperCase() + ' is not valid. Check it, or remove it to order without it.', { config: publicConfig_(settings, freeSlots_(settings, sheet)) });
+    // A code for named customers: only their emails, once each. Greg's own DM orders are not limited.
+    const codeProblem = kiosk && code ? codeCustomerProblem_(settings, sheet, code.code, email) : '';
+    if (codeProblem) throw fail_('bad_code', codeProblem + ' Remove it to order without it.', { config: publicConfig_(settings, freeSlots_(settings, sheet)) });
     const freeDelivery = !!(code && code.delivery && !collect);
     const percent = code && !code.delivery ? code.percent : 0;
     // Fixed Pudo locker prices: charged straight away, up to the last one. Bigger orders are a request.
@@ -1325,9 +1329,56 @@ function findCode_(codes, typed) {
 function checkCode_(body) {
   const typed = clean_(body.code, 30);
   if (!typed) throw fail_('bad_code', 'Enter a discount code.');
-  const code = findCode_(readTypedSettings_().codes, typed);
+  const settings = readTypedSettings_();
+  const code = findCode_(settings.codes, typed);
   if (!code) throw fail_('bad_code', 'The discount code ' + typed.toUpperCase() + ' is not valid.');
+  // A code for named customers is checked against the email when the page sends one. Without it,
+  // the check happens when the order is placed.
+  const email = clean_(body.email, 120);
+  if (email && EMAIL_PATTERN.test(email)) {
+    const problem = codeCustomerProblem_(settings, ordersSheet_(), code.code, email);
+    if (problem) throw fail_('bad_code', problem);
+  }
   return { ok: true, discount: { code: code.code, percent: code.percent, delivery: code.delivery } };
+}
+
+// Codes for named customers, kept in the code_customers setting:
+// "THANKS25: anna@example.com, ben@example.com; OTHER10: cara@example.com".
+// Returns { THANKS25: ['anna@example.com', 'ben@example.com'], ... }. Lines that make no sense are skipped.
+function parseCodeCustomers_(text) {
+  const out = {};
+  String(text || '').split(/[;\r\n]+/).forEach(function (part) {
+    const m = /^\s*([A-Za-z0-9]{3,20})\s*:\s*(.*)$/.exec(part);
+    if (!m) return;
+    const code = m[1].toUpperCase();
+    const emails = m[2].split(/[\s,]+/).map(function (e) { return e.trim().toLowerCase(); }).filter(function (e) {
+      return EMAIL_PATTERN.test(e);
+    });
+    out[code] = (out[code] || []).concat(emails);
+  });
+  return out;
+}
+
+// Why this email cannot use this code, or '' when it can. Codes not in code_customers are open to all.
+// A cancelled order gives the code back.
+function codeCustomerProblem_(settings, sheet, code, email) {
+  const allowed = (settings.codeCustomers || {})[code];
+  if (!allowed) return '';
+  const who = String(email || '').trim().toLowerCase();
+  if (allowed.indexOf(who) === -1) {
+    return 'The discount code ' + code + ' only works with the email address it was sent to.';
+  }
+  const last = sheet.getLastRow();
+  if (last >= 2) {
+    const rows = sheet.getRange(2, 1, last - 1, COL.CODE + 1).getValues();
+    for (let i = 0; i < rows.length; i++) {
+      if (str_(rows[i][COL.CODE]).toUpperCase() === code && str_(rows[i][COL.EMAIL]).toLowerCase() === who &&
+          str_(rows[i][COL.STATUS]) !== STATUS.CANCELLED) {
+        return 'You have already used the discount code ' + code + '.';
+      }
+    }
+  }
+  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -1410,6 +1461,7 @@ function readTypedSettings_() {
     ship: shipTable_(raw),
     lockerFees: parseLockerFees_(raw.locker_fees) || [],
     codes: parseCodes_(raw.discount_codes) || [],
+    codeCustomers: parseCodeCustomers_(raw.code_customers),
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
     minQty: Math.min(maxQty, Math.max(1, Math.floor(parseNumber_(raw.min_quantity, 1)))),
     maxQty: maxQty,
@@ -1597,6 +1649,10 @@ function validateSetting_(key, value) {
       const n = parseNumber_(text, NaN);
       if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 200) throw fail_('invalid', 'Most per order must be a whole number from 1 to 200.');
       return String(n);
+    }
+    case 'code_customers': {
+      const map = parseCodeCustomers_(value);
+      return Object.keys(map).map(function (c) { return c + ': ' + map[c].join(', '); }).join('; ');
     }
     case 'locker_fees': {
       const fees = parseLockerFees_(text);

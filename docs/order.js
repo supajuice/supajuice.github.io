@@ -212,7 +212,7 @@
     $('code-apply').disabled = true;
     $('code-apply').textContent = 'Checking…';
     try {
-      var res = await SJ.api('checkCode', { code: typed });
+      var res = await SJ.api('checkCode', { code: typed, email: $('email').value.trim() });
       discount = res.discount;
       $('code').value = discount.code;
       syncCode('');

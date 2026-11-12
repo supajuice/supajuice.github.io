@@ -2086,3 +2086,36 @@ test('Pudo locker prices that cannot be read are refused', () => {
   });
   assert.equal(gas.call({ action: 'saveSettings', key, values: { locker_fees: '' } }).ok, true, 'blank turns them off');
 });
+
+test('a code for named customers works only with their emails, once each, and a cancelled order gives it back', () => {
+  const { gas, key } = readyCodes({ discount_codes: 'THANKS25 25 on, RUN10 10 on', code_customers: 'thanks25: Anna@Example.com, jane@example.com\nbad line' });
+  assert.equal(gas.call({ action: 'getSettings', key }).values.code_customers, 'THANKS25: anna@example.com, jane@example.com');
+
+  // Someone it was not sent to: turned away on the check (with an email) and when ordering.
+  assert.match(gas.call({ action: 'checkCode', code: 'thanks25', email: 'friend@example.com' }).message, /only works with the email address it was sent to/);
+  const friend = gas.call(order({ code: 'THANKS25', email: 'friend@example.com' }));
+  assert.equal(friend.error, 'bad_code');
+  assert.match(friend.message, /only works with the email address it was sent to/);
+  // Without an email yet, the check lets the code through; the order decides.
+  assert.equal(gas.call({ action: 'checkCode', code: 'THANKS25' }).ok, true);
+
+  // Jane may use it once.
+  assert.equal(gas.call({ action: 'checkCode', code: 'THANKS25', email: 'JANE@example.com' }).ok, true);
+  const first = gas.call(order({ code: 'thanks25', expectedTotal: undefined }));
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.order.discountPct, 25);
+  const again = gas.call(order({ code: 'THANKS25', expectedTotal: undefined }));
+  assert.equal(again.error, 'bad_code');
+  assert.match(again.message, /already used the discount code THANKS25/);
+  assert.match(gas.call({ action: 'checkCode', code: 'THANKS25', email: 'jane@example.com' }).message, /already used/);
+
+  // Codes not listed stay open to everyone, as often as they like.
+  assert.equal(gas.call(order({ code: 'RUN10', email: 'friend@example.com', expectedTotal: undefined })).ok, true);
+  assert.equal(gas.call(order({ code: 'RUN10', email: 'friend@example.com', expectedTotal: undefined })).ok, true);
+
+  // Greg cancels Jane's order: she can use the code again.
+  const inv = first.order.invoice;
+  const c = gas.call({ action: 'setStatus', key, invoice: inv, status: 'Cancelled' });
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(gas.call(order({ code: 'THANKS25', expectedTotal: undefined })).ok, true);
+});
