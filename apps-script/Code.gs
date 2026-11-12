@@ -517,7 +517,7 @@ function editOrder_(body) {
       .forEach(function (v, i) { row[COL.FLAVOUR + i] = v; });
     row[COL.EDITED] = nowString_();
     // The whole row is written back with its formats, which also fills in columns older rows lack.
-    sheet.getRange(rowNum, 1, 1, HEADERS.length).setNumberFormats([FORMATS]).setValues([row]);
+    setFormats_(sheet.getRange(rowNum, 1, 1, HEADERS.length), [FORMATS]).setValues([row]);
     SpreadsheetApp.flush();
     order = rowToOrder_(row);
   } finally {
@@ -647,7 +647,7 @@ function setCollectTime_(body) {
     changed = str_(row[COL.COLLECT_AT]) !== collectAt;
     if (changed) {
       row[COL.COLLECT_AT] = collectAt;
-      sheet.getRange(rowNum, COL.COLLECT_AT + 1).setNumberFormat('@').setValue(collectAt);
+      setFormats_(sheet.getRange(rowNum, COL.COLLECT_AT + 1), [['@']]).setValue(collectAt);
       SpreadsheetApp.flush();
     }
     order = rowToOrder_(row);
@@ -688,7 +688,7 @@ function acceptOrder_(body) {
     row[COL.FEE] = delivery;
     row[COL.TOTAL] = totalCents_(Number(row[COL.PRICE]) || 0, Number(row[COL.QTY]) || 0, delivery, Number(row[COL.DISCOUNT]) || 0) / 100;
     row[COL.STATUS] = STATUS.AWAITING;
-    sheet.getRange(rowNum, 1, 1, HEADERS.length).setNumberFormats([FORMATS]).setValues([row]);
+    setFormats_(sheet.getRange(rowNum, 1, 1, HEADERS.length), [FORMATS]).setValues([row]);
     SpreadsheetApp.flush();
     order = rowToOrder_(row);
   } finally {
@@ -878,8 +878,29 @@ function writeRow_(sheet, rowNum, values) {
     sheet.insertRowsAfter(sheet.getMaxRows(), Math.max(500, rowNum - sheet.getMaxRows()));
   }
   const range = sheet.getRange(rowNum, 1, 1, HEADERS.length);
-  range.setNumberFormats([FORMATS]);
+  setFormats_(range, [FORMATS]);
   range.setValues([values]);
+}
+
+// Sets number formats, skipping columns Google will not format. When the Orders tab is turned
+// into a table (Format > Convert to table), each typed column keeps its own format and refuses
+// a new one, so those columns are left as the table has them. Returns the range.
+function setFormats_(range, formats) {
+  try {
+    range.setNumberFormats(formats);
+  } catch (err) {
+    const sheet = range.getSheet();
+    formats.forEach(function (rowFormats, r) {
+      rowFormats.forEach(function (format, c) {
+        try {
+          sheet.getRange(range.getRow() + r, range.getColumn() + c).setNumberFormat(format);
+        } catch (ignored) {
+          // A typed table column: it keeps the table's format.
+        }
+      });
+    });
+  }
+  return range;
 }
 
 function takeKioskSlot_() {
@@ -972,7 +993,7 @@ function emailInvoice_(order, s, extra) {
   try {
     const sheet = ordersSheet_();
     const rowNum = findRow_(sheet, order.invoice);
-    if (rowNum) sheet.getRange(rowNum, COL.EMAILED + 1).setNumberFormat('@').setValue(order.emailedOn);
+    if (rowNum) setFormats_(sheet.getRange(rowNum, COL.EMAILED + 1), [['@']]).setValue(order.emailedOn);
   } catch (err) {
     console.error('Could not note the invoice email for ' + order.invoice + ': ' + err);
   }
@@ -2224,7 +2245,11 @@ function setup() {
   orders.setFrozenRows(1);
   if (orders.getMaxRows() < 2) orders.insertRowsAfter(1, 998);
   FORMATS.forEach(function (format, i) {
-    orders.getRange(2, i + 1, orders.getMaxRows() - 1, 1).setNumberFormat(format);
+    try {
+      orders.getRange(2, i + 1, orders.getMaxRows() - 1, 1).setNumberFormat(format);
+    } catch (err) {
+      // A typed column in a table keeps the table's format.
+    }
   });
   [110, 130, 70, 160, 160, 260, 200, 50, 80, 90, 80, 120, 130, 130, 120, 200, 130, 70, 130, 130, 110, 80, 90].concat(FLAVOURS.map(function () { return 80; })).forEach(function (w, i) {
     orders.setColumnWidth(i + 1, w);

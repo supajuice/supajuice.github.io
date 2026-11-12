@@ -70,11 +70,22 @@ class MockRange {
     this._each((r, c) => this._write(this.sheet._cell(r, c), v));
     return this;
   }
+  getSheet() { return this.sheet; }
+  getRow() { return this.row; }
+  getColumn() { return this.col; }
+  // Like a Google Sheets table: a typed column refuses any new number format.
+  _checkFormattable() {
+    for (let j = 0; j < this.numCols; j++) {
+      if (this.sheet.typedCols.has(this.col + j)) throw new Error("Exception: You can't set the number format of cells in a typed column.");
+    }
+  }
   setNumberFormat(f) {
+    this._checkFormattable();
     this._each((r, c) => { this.sheet._cell(r, c).fmt = f; });
     return this;
   }
   setNumberFormats(formats) {
+    this._checkFormattable();
     this._each((r, c, i, j) => { this.sheet._cell(r, c).fmt = formats[i][j]; });
     return this;
   }
@@ -91,6 +102,7 @@ class MockSheet {
     this.maxRows = maxRows || 1000;
     this.cells = new Map();
     this.frozen = 0;
+    this.typedCols = new Set(); // columns of a table with a type, as numbers from 1
   }
   _cell(r, c) {
     const k = r + ',' + c;

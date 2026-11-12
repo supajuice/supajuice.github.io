@@ -414,6 +414,32 @@ test('marking paid emails the paid invoice once; undoing and other moves send no
   assert.equal(set('Delivered').emailed, undefined);
 });
 
+test('the Orders tab can be a Google Sheets table with typed columns', () => {
+  const { gas, key } = ready();
+  // Format > Convert to table: Invoice, Contact, Qty, Status, Paid on, Collect at and Invoice emailed get a type.
+  [1, 5, 8, 12, 13, 20, 17].forEach((c) => gas.sheet('Orders').typedCols.add(c));
+  assert.doesNotThrow(() => gas.run('setup()'), 'setup runs again');
+  const placed = gas.call(order({ contact: '0826556151' }));
+  assert.equal(placed.ok, true, JSON.stringify(placed));
+  assert.equal(placed.order.contact, '0826556151', 'the leading 0 stays');
+  const edited = gas.call({ action: 'editOrder', key, invoice: 'SJ-0001', name: 'Jane Doe', contact: '0826556151', email: 'jane@example.com',
+    address: '12 Beach Rd, Sea Point', notes: 'Gate 2', qty: 4, collect: false, price: '40', fee: '30', sendInvoice: false });
+  assert.equal(edited.ok, true, JSON.stringify(edited));
+  assert.equal(edited.order.qty, 4);
+  assert.equal(gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0001' }).ok, true);
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' }).ok, true);
+});
+
+test('with the Orders tab as a table, Greg can still set the delivery fee on a request', () => {
+  const { gas, key } = readyQuote();
+  gas.call(request());
+  [1, 5, 8, 10, 12, 13].forEach((c) => gas.sheet('Orders').typedCols.add(c));
+  const r = gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0001', fee: 'R45' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'Awaiting payment');
+  assert.equal(r.order.fee, 45);
+});
+
 test('orders without an email are never emailed', () => {
   const { gas, key } = ready();
   gas.call(dm(key));
