@@ -83,7 +83,7 @@ test('public config shows the price but no bank details', () => {
   assert.deepEqual(flavours, [{ key: 'orange', name: 'Orange' }, { key: 'cranberry', name: 'Cranberry' }]);
   assert.deepEqual(rest, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R',
-    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, ship: null, cardPay: false, codesOn: false, ready: true
+    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, lockerFees: [], ship: null, cardPay: false, codesOn: false, ready: true
   });
   assert.ok(collectSlots.length > 0, 'collection times are always offered');
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
@@ -2041,4 +2041,48 @@ test('setup adds the flavour columns to an older orders tab', () => {
   const { gas } = ready();
   const header = gas.sheet('Orders').getRange(1, 24, 1, 2).getValues()[0];
   assert.deepEqual(header, ['Orange', 'Cranberry']);
+});
+
+// Fixed Pudo locker prices: R90 up to 15 sachets, R120 up to 40, Greg's own price above that.
+function readyLockers() {
+  const env = readyQuote();
+  const r = env.gas.call({ action: 'saveSettings', key: env.key, values: { locker_fees: '15 90, 40 R120', max_quantity: '50' } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.values.locker_fees, '15 90, 40 120');
+  return env;
+}
+const locker = (qty, fee, over) => order(Object.assign({ ship: 'locker', address: '12 Main Rd, Sea Point', qty, expectedTotal: qty * 40 + fee }, over));
+
+test('Pudo locker prices are charged straight away and the invoice is emailed', () => {
+  const { gas } = readyLockers();
+  assert.deepEqual(gas.call({ action: 'config' }).config.lockerFees, [{ upTo: 15, fee: 90 }, { upTo: 40, fee: 120 }]);
+  gas.mail.length = 0;
+  const small = gas.call(locker(15, 90));
+  assert.equal(small.ok, true, JSON.stringify(small));
+  assert.equal(small.order.status, 'Awaiting payment');
+  assert.equal(small.order.fee, 90);
+  assert.equal(small.order.total, 690);
+  assert.ok(gas.mail.some((m) => m.to === 'jane@example.com' && /Total due: R690/.test(m.body)), 'invoice emailed');
+  const big = gas.call(locker(16, 120));
+  assert.equal(big.order.fee, 120);
+  assert.equal(gas.call(locker(40, 120)).order.total, 1720);
+});
+
+test('over 40 sachets to a Pudo locker waits for Greg to set the fee; door delivery is unchanged', () => {
+  const { gas } = readyLockers();
+  const over = gas.call(locker(41, 0));
+  assert.equal(over.ok, true, JSON.stringify(over));
+  assert.equal(over.order.status, 'New request');
+  assert.equal(over.order.total, 41 * 40);
+  const door = gas.call(order({ qty: 5, expectedTotal: 200 }));
+  assert.equal(door.order.status, 'New request', 'the door fee is still set by Greg');
+  assert.equal(gas.call(order({ qty: 51, expectedTotal: 2040 })).error, 'invalid', 'at most 50');
+});
+
+test('Pudo locker prices that cannot be read are refused', () => {
+  const { gas, key } = readyQuote();
+  ['15', '15 90 40 120', '40 120, 15 90', 'abc'].forEach((v) => {
+    assert.equal(gas.call({ action: 'saveSettings', key, values: { locker_fees: v } }).error, 'invalid', v);
+  });
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { locker_fees: '' } }).ok, true, 'blank turns them off');
 });

@@ -13,7 +13,7 @@ test.after(async () => { if (browser) await browser.close(); });
 // A fresh fake service, browser context and page for one test. Everything is closed afterwards.
 async function open(t, opts) {
   opts = opts || {};
-  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote, collections: opts.collections, cardPay: opts.cardPay, pudo: opts.pudo });
+  const dev = await startDevServer({ mode: opts.mode || 'seeded', latency: opts.latency || 0, fee: opts.fee, quote: opts.quote, collections: opts.collections, cardPay: opts.cardPay, pudo: opts.pudo, lockerFees: opts.lockerFees });
   const ctx = await browser.newContext({
     viewport: { width: opts.width || 390, height: opts.height || 844 },
     deviceScaleFactor: 1,
@@ -54,7 +54,7 @@ async function openAdmin(t, opts) {
 // The order page opens on two buttons. Tapping one shows the rest of the form.
 async function choose(page, what) {
   await page.waitForSelector('#order-form:not([hidden])');
-  if (await page.locator('#choose').isVisible()) await page.click(what === 'collect' ? '#choose-collect' : '#choose-deliver');
+  if (await page.locator('#choose').isVisible()) await page.click(what === 'collect' ? '#choose-collect' : what === 'locker' ? '#choose-locker' : '#choose-deliver');
   await page.waitForSelector('#order-rest:not([hidden])');
 }
 
@@ -370,6 +370,36 @@ test('order page: with fees confirmed per order, a delivery is sent as a request
   assert.equal(await text(page, '#submit'), 'Choose at least 1 gel', 'a new order starts with nothing chosen');
   await page.click('[aria-label="One more Orange"]');
   assert.equal(await text(page, '#submit'), 'Place order for R40', 'with no fee');
+  noErrors(errors);
+});
+
+test('order page: Pudo locker prices are fixed and charged straight away; over 40 is a request', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true, lockerFees: '15 90, 40 120' });
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await text(page, '#choose-locker-sub'), 'From R90', 'no location note on the locker');
+  assert.equal(await text(page, '#choose-deliver-sub'), "From R30*\n*Location dependent", 'the door is unchanged');
+  await choose(page, 'locker');
+  const more = async (n) => { for (let i = 0; i < n; i++) await page.click('[aria-label="One more Orange"]'); };
+  await more(15);
+  assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R90/);
+  assert.equal(await text(page, '#submit'), 'Place order for R690');
+  await more(1);
+  assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R120/);
+  assert.equal(await text(page, '#submit'), 'Place order for R760');
+  await more(25);
+  assert.match(await text(page, '#summary'), /We send you the price \(over 40\)/);
+  assert.equal(await text(page, '#submit'), 'Send order for R1640 + delivery');
+  for (let i = 0; i < 21; i++) await page.click('[aria-label="One fewer Orange"]');
+
+  await page.fill('#name', 'Jane Doe');
+  await page.fill('#email', 'jane@example.com');
+  await page.fill('#contact', '082 123 4567');
+  await page.fill('#address', '12 Main Rd, Sea Point');
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await page.locator('#pay-section').isHidden(), false, 'bank details shown straight away');
+  const row = orderRows(dev)[0];
+  assert.deepEqual([row.Status, row['Delivery fee'], row.Total, row.Qty], ['Awaiting payment', 120, 920, 20]);
   noErrors(errors);
 });
 
@@ -2185,7 +2215,7 @@ test('admin: settings show the current values and the order page link', async (t
   });
   assert.deepEqual(values, {
     price: '40', delivery_fee: '30', delivery_quote: 'on',
-    min_quantity: '1', max_quantity: '20',
+    locker_fees: '', min_quantity: '1', max_quantity: '20',
     collection_note: 'Sea Point', collection_address: '', collection_slot_minutes: '30', collection_per_slot: '1',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',

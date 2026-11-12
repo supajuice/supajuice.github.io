@@ -123,6 +123,7 @@ function build(mode, opts) {
     }));
   }
   if (opts.pudo && mode !== 'empty') expectOk(gas.call({ action: 'saveSettings', key, values: { pudo_shipping: 'yes' } }));
+  if (opts.lockerFees && mode !== 'empty') expectOk(gas.call({ action: 'saveSettings', key, values: { locker_fees: opts.lockerFees, max_quantity: '50' } }));
   if (opts.cardPay) gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
   if (mode === 'seeded') seed(gas, key);
   if (mode === 'seeded' && opts.collections) seedCollections(gas, key);

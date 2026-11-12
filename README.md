@@ -148,6 +148,10 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 - **If the admin key leaks or Greg loses his phone:** run `rotateAdminKey` in the script editor. The old link stops working. Give Greg the new key and link.
 - **Invoice prefix:** `SJ` by default, changeable in Settings. Numbers always continue; a number is never reused, even if you delete rows.
 
+## Fixed Pudo locker prices
+
+In **Settings > Price and delivery**, **Pudo locker prices** sets what a Pudo locker costs by the number of sachets, for example `15 90, 40 120`: up to 15 sachets R90, 16 to 40 R120. These orders are charged straight away and the customer gets the invoice with the bank details at once. The locker button on the order page shows the lowest price ("From R90"). Bigger orders arrive under **New requests** for you to set the fee, like door deliveries. Leave it blank to confirm every locker fee yourself.
+
 ## Delivery fees with Pudo
 
 Customers choose **Collect**, **To your door** or **To a Pudo locker**. The fee is worked out on the spot, so delivery orders no longer wait for Greg to set a fee.

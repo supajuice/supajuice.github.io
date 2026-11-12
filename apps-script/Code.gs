@@ -100,6 +100,7 @@ const SETTING_DEFS = [
   { key: 'price', value: '', note: 'REQUIRED. Price of one sachet, as a number (for example 40).' },
   { key: 'delivery_fee', value: '0', note: 'Delivery fee per order. 0 means free delivery. When fees are confirmed per order, customers see it as "from" and it is suggested when you accept a request.' },
   { key: 'delivery_quote', value: 'yes', note: 'yes: delivery orders from the order page wait for you to set the fee and accept them. no: the delivery fee above is charged straight away.' },
+  { key: 'locker_fees', value: '', note: 'Fixed prices for delivery to a Pudo locker: the most sachets, then the price, separated by commas. For example "15 90, 40 120": up to 15 sachets R90, up to 40 R120. These are charged straight away. Bigger orders wait for you to set the fee. Blank: lockers work like door delivery.' },
   { key: 'currency_symbol', value: 'R', note: 'Shown before amounts.' },
   { key: 'collection_note', value: 'Sea Point', note: 'REQUIRED. Where customers collect, for example "Sea Point". Shown on the order page. Collection is free.' },
   { key: 'collection_address', value: '', note: 'Optional. The full street address for collections. Kept off the order page: customers get it once they place an order, on their invoice email and calendar invite. Blank: the collection place above is used.' },
@@ -138,7 +139,7 @@ const SETTING_DEFS = [
 // Longest allowed text per setting.
 const SETTING_MAX = {
   brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, collection_address: 200, alert_email: 120,
-  collection_dates: 8000, discount_codes: 4000, collection_hours: 20,
+  collection_dates: 8000, discount_codes: 4000, collection_hours: 20, locker_fees: 200,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
 
@@ -307,8 +308,12 @@ function createOrder_(body, source) {
     if (codeText && !code) throw fail_('bad_code', 'The discount code ' + codeText.toUpperCase() + ' is not valid. Check it, or remove it to order without it.', { config: publicConfig_(settings, freeSlots_(settings, sheet)) });
     const freeDelivery = !!(code && code.delivery && !collect);
     const percent = code && !code.delivery ? code.percent : 0;
-    const request = kiosk && !collect && settings.quote && !pudo && !freeDelivery;
+    // Fixed Pudo locker prices: charged straight away, up to the last one. Bigger orders are a request.
+    const lockerRates = kiosk && toLocker && !pudo && !freeDelivery && settings.lockerFees.length > 0;
+    const lockerFee = lockerRates ? lockerFeeFor_(settings.lockerFees, qty) : null;
+    const request = kiosk && !collect && !pudo && !freeDelivery && (lockerRates ? lockerFee === null : settings.quote);
     const fee = freeDelivery ? 0 : pudo ? (collect ? tier.collect : toLocker ? tier.locker : tier.door)
+      : lockerFee !== null ? lockerFee
       : collect || request ? 0 : (customFee !== null ? round2_(customFee) : settings.fee);
     const totalCents = totalCents_(settings.price, qty, fee, percent);
     const total = totalCents / 100;
@@ -1352,6 +1357,31 @@ const NEVER_BLANK = ['collection_note', 'collection_hours', 'collection_slot_min
 // Settings from earlier versions. setup marks their rows as no longer used.
 const OLD_SETTINGS = ['collection_days', 'collection_days_ahead', 'delivery_area'];
 
+// Fixed Pudo locker prices, kept as "15 90, 40 120": the most sachets, then the price.
+// Returns [{ upTo, fee }] smallest first, [] when blank, or null when it cannot be read.
+function parseLockerFees_(text) {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const out = [];
+  const parts = t.split(',');
+  for (let i = 0; i < parts.length; i++) {
+    const m = parts[i].trim().match(/^(\d+)\s+R?\s*(\d+(?:[.,]\d{1,2})?)$/i);
+    if (!m) return null;
+    const upTo = Number(m[1]);
+    const fee = round2_(Number(m[2].replace(',', '.')));
+    if (upTo < 1 || upTo > 500 || fee > 100000) return null;
+    if (out.length && upTo <= out[out.length - 1].upTo) return null;
+    out.push({ upTo: upTo, fee: fee });
+  }
+  return out;
+}
+
+// The locker price for this many sachets, or null when it is more than the last price covers.
+function lockerFeeFor_(fees, qty) {
+  for (let i = 0; i < fees.length; i++) if (qty <= fees[i].upTo) return fees[i].fee;
+  return null;
+}
+
 function readTypedSettings_() {
   const raw = readSettings_();
   const price = round2_(Math.max(0, parseNumber_(raw.price, 0)));
@@ -1374,6 +1404,7 @@ function readTypedSettings_() {
     collectAddress: raw.collection_address, // only for placed orders, never in publicConfig_
     quote: String(raw.delivery_quote).toLowerCase() !== 'no',
     ship: shipTable_(raw),
+    lockerFees: parseLockerFees_(raw.locker_fees) || [],
     codes: parseCodes_(raw.discount_codes) || [],
     // A minimum above the maximum (possible by editing the sheet) is pulled down to the maximum.
     minQty: Math.min(maxQty, Math.max(1, Math.floor(parseNumber_(raw.min_quantity, 1)))),
@@ -1400,6 +1431,8 @@ function publicConfig_(s, slots) {
     collectNote: s.collectNote, // where customers collect
     quote: s.quote && !s.ship.on, // true: the delivery fee is confirmed by Greg after the customer orders
     // Pudo fees by number of sachets: [{ upTo, door, locker, collect }]. Box costs are inside them.
+    // Fixed Pudo locker prices: [{ upTo, fee }]. More sachets than the last one wait for Greg's price.
+    lockerFees: s.ship.on ? [] : s.lockerFees,
     ship: s.ship.on ? { tiers: s.ship.tiers.map(function (t) { return { upTo: t.upTo, door: t.door, locker: t.locker, collect: t.collect }; }) } : null,
     minQty: s.minQty,
     maxQty: s.maxQty,
@@ -1560,6 +1593,11 @@ function validateSetting_(key, value) {
       const n = parseNumber_(text, NaN);
       if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 200) throw fail_('invalid', 'Most per order must be a whole number from 1 to 200.');
       return String(n);
+    }
+    case 'locker_fees': {
+      const fees = parseLockerFees_(text);
+      if (!fees) throw fail_('invalid', 'Pudo locker prices must look like 15 90, 40 120: the most sachets, then the price, smallest first.');
+      return fees.map(function (f) { return f.upTo + ' ' + f.fee; }).join(', ');
     }
     case 'discount_codes': {
       const codes = parseCodes_(text);

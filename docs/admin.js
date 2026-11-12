@@ -53,6 +53,7 @@
         { key: 'price', label: 'Price per sachet', hint: 'A number, for example 40', mode: 'decimal', max: 12 },
         { key: 'delivery_fee', label: 'Delivery fee', hint: '0 means free delivery. With the box below ticked, customers see it as "from".', mode: 'decimal', max: 12 },
         { key: 'delivery_quote', label: 'Confirm the delivery fee for each order', hint: 'Delivery orders from your order page wait under New requests until you set the fee and accept them. The invoice is emailed then. Untick to charge the fee above straight away.', type: 'checkbox', wide: true },
+        { key: 'locker_fees', label: 'Pudo locker prices', hint: 'The most sachets, then the price, separated by commas. For example 15 90, 40 120: up to 15 sachets R90, up to 40 R120, charged straight away. Bigger orders wait for you to set the fee. Leave blank to confirm every locker fee yourself.', wide: true, max: 200 },
         { key: 'min_quantity', label: 'Fewest sachets per order', hint: 'The quantity starts here. 1 means no minimum', mode: 'numeric', max: 3 },
         { key: 'max_quantity', label: 'Most sachets per order', mode: 'numeric', max: 3 }
       ]

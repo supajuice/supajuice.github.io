@@ -246,7 +246,28 @@
 
   // A delivery whose fee Greg confirms after the order: it is sent as a request.
   function quoting() {
-    return !!(config && config.quote) && !collecting() && !freeDeliveryCode();
+    if (collecting() || freeDeliveryCode() || !config) return false;
+    if (choice === 'locker' && lockerRates()) return lockerFee() === null;
+    return !!config.quote;
+  }
+
+  // ---------- Fixed Pudo locker prices ----------
+
+  // Greg's set prices for a Pudo locker, by number of sachets. More than the last one: he sends a price.
+  function lockerRates() {
+    return !!(config && !pudoOn() && config.lockerFees && config.lockerFees.length);
+  }
+
+  // The locker price for the sachets chosen, or null when it is more than the prices cover.
+  function lockerFee() {
+    var qty = Math.max(1, stepper.total());
+    var fees = config.lockerFees;
+    for (var i = 0; i < fees.length; i++) if (qty <= fees[i].upTo) return fees[i].fee;
+    return null;
+  }
+
+  function lockerMax() {
+    return config.lockerFees[config.lockerFees.length - 1].upTo;
   }
 
   // ---------- Pudo fees ----------
@@ -334,7 +355,9 @@
       $('choose-collect-title').textContent = collectFree ? 'Free collection' : 'Collect';
       $('choose-collect-sub').textContent = place ? 'From ' + place : '';
       $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
-      $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency) : quoteFromText('locker') || deliveryText(config);
+      $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency)
+        : lockerRates() ? 'From ' + SJ.money(config.lockerFees[0].fee, config.currency)
+        : quoteFromText('locker') || deliveryText(config);
     }
     $('chosen-text').textContent = collect ? 'Collect' + (place ? ' from ' + place : '')
       : choice === 'locker' ? 'Send to a Pudo locker'
@@ -394,7 +417,11 @@
       if (fee === null) opts.feeText = 'DM us for over ' + pudoMax();
     }
     if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
-    if (choice && !collecting() && quoteFromText(choice === 'locker' ? 'locker' : 'door')) {
+    if (choice === 'locker' && lockerRates()) {
+      var lf = lockerFee();
+      if (lf === null) opts.feeText = 'We send you the price (over ' + lockerMax() + ')';
+      else opts.fee = lf;
+    } else if (choice && !collecting() && quoteFromText(choice === 'locker' ? 'locker' : 'door')) {
       opts.feeText = quoteFromText(choice === 'locker' ? 'locker' : 'door');
     }
     opts.discount = discount;
@@ -534,7 +561,9 @@
         requestId: pending.id,
         // The total the customer was shown: without a fee for collection, or for a request.
         expectedTotal: SJ.totalFor(data.qty, config.price,
-          freeDeliveryCode() && !data.collect ? 0 : pudoOn() ? pudoFee() : data.collect || config.quote ? 0 : config.fee,
+          freeDeliveryCode() && !data.collect ? 0 : pudoOn() ? pudoFee()
+            : data.ship === 'locker' && !data.collect && lockerRates() ? (lockerFee() === null ? 0 : lockerFee())
+            : data.collect || config.quote ? 0 : config.fee,
           discount && !discount.delivery ? discount.percent : 0),
         website: $('website').value
       }));
