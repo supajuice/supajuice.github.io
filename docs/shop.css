@@ -1096,3 +1096,61 @@ html:has(body.shop) {
 
 .shop a.promo[hidden] { display: none; }
 .shop .promo-code { white-space: nowrap; }
+
+/* ---------- Reviews carousel (reviews.js fills it) ---------- */
+
+.revs { background: var(--sun); padding: 64px 0; overflow: hidden; }
+.revs-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; margin-bottom: 28px; }
+.revs .h-display { color: var(--blue); }
+.revs-cta {
+  color: var(--blue);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.revs-cta:hover { color: var(--blue-deep); }
+.revs-viewport { overflow: hidden; padding: 6px 0 14px; }
+.revs-track {
+  display: flex;
+  gap: 20px;
+  width: max-content;
+  margin: 0;
+  padding: 0 0 0 20px;
+  list-style: none;
+}
+.rev {
+  flex: 0 0 auto;
+  width: min(78vw, 320px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 22px;
+  background: #fff;
+  color: var(--ink);
+  border: 3px solid var(--blue);
+  border-radius: 16px;
+  box-shadow: 6px 6px 0 var(--blue);
+}
+.rev-stars { display: flex; gap: 2px; color: var(--orange); }
+.rev-stars svg { width: 22px; height: 22px; fill: currentColor; }
+.rev-stars .off { color: var(--line); }
+.rev-text { margin: 0; font-size: 1.0625rem; line-height: 1.45; white-space: pre-line; }
+.rev-meta { margin: auto 0 0; color: var(--muted); font-size: 0.875rem; font-weight: 600; }
+
+/* The track holds the reviews twice and slides left by one copy, so it loops without a jump.
+   It pauses while a finger or mouse is on it, and stays still for people who prefer less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .revs.is-moving .revs-track { animation: revs-slide var(--revs-time, 40s) linear infinite; }
+  .revs.is-moving .revs-viewport:hover .revs-track,
+  .revs.is-moving .revs-viewport:focus-within .revs-track,
+  .revs.is-moving .revs-viewport.is-held .revs-track { animation-play-state: paused; }
+}
+@keyframes revs-slide { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .revs-viewport { overflow-x: auto; scroll-snap-type: x mandatory; }
+  .rev { scroll-snap-align: start; }
+}
+@media (min-width: 52rem) {
+  .revs { padding: 88px 0 96px; }
+  .revs-track { padding-left: max(20px, calc((100vw - var(--wrap)) / 2 + 20px)); }
+}
