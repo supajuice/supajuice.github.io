@@ -890,15 +890,19 @@ function writeRow_(sheet, rowNum, values) {
 // Sets number formats, skipping columns Google will not format. When the Orders tab is turned
 // into a table (Format > Convert to table), each typed column keeps its own format and refuses
 // a new one, so those columns are left as the table has them. Returns the range.
+// Google only reports a refused format when the change is saved, so each try saves (flush)
+// straight away: otherwise the error would surface later, at some unrelated line.
 function setFormats_(range, formats) {
   try {
     range.setNumberFormats(formats);
+    SpreadsheetApp.flush();
   } catch (err) {
     const sheet = range.getSheet();
     formats.forEach(function (rowFormats, r) {
       rowFormats.forEach(function (format, c) {
         try {
           sheet.getRange(range.getRow() + r, range.getColumn() + c).setNumberFormat(format);
+          SpreadsheetApp.flush();
         } catch (ignored) {
           // A typed table column: it keeps the table's format.
         }
@@ -2285,6 +2289,7 @@ function setup() {
   FORMATS.forEach(function (format, i) {
     try {
       orders.getRange(2, i + 1, orders.getMaxRows() - 1, 1).setNumberFormat(format);
+      SpreadsheetApp.flush(); // a refused format is only reported when saved
     } catch (err) {
       // A typed column in a table keeps the table's format.
     }

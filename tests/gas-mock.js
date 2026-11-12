@@ -1,3 +1,9 @@
+// A change Google refused, reported at the next flush or read/write (see _checkFormattable).
+let pendingError = null;
+function throwPending() {
+  if (pendingError) { const e = pendingError; pendingError = null; throw e; }
+}
+
 'use strict';
 // A small in-memory stand-in for the parts of Google Apps Script that Code.gs uses.
 // It is deliberately strict where the real thing is strict (writes outside the
@@ -19,11 +25,13 @@ class MockRange {
     for (let i = 0; i < this.numRows; i++) for (let j = 0; j < this.numCols; j++) fn(this.row + i, this.col + j, i, j);
   }
   _checkWritable() {
+    throwPending();
     if (this.row + this.numRows - 1 > this.sheet.maxRows) {
       throw new Error('The coordinates of the range are outside the dimensions of the sheet.');
     }
   }
   getValues() {
+    throwPending();
     const out = [];
     for (let i = 0; i < this.numRows; i++) {
       const line = [];
@@ -74,18 +82,23 @@ class MockRange {
   getRow() { return this.row; }
   getColumn() { return this.col; }
   // Like a Google Sheets table: a typed column refuses any new number format.
+  // Google batches changes, so the refusal only shows up at the next flush or read/write.
   _checkFormattable() {
     for (let j = 0; j < this.numCols; j++) {
-      if (this.sheet.typedCols.has(this.col + j)) throw new Error("Exception: You can't set the number format of cells in a typed column.");
+      if (this.sheet.typedCols.has(this.col + j)) {
+        pendingError = new Error("Exception: You can't set the number format of cells in a typed column.");
+        return false;
+      }
     }
+    return true;
   }
   setNumberFormat(f) {
-    this._checkFormattable();
+    if (!this._checkFormattable()) return this;
     this._each((r, c) => { this.sheet._cell(r, c).fmt = f; });
     return this;
   }
   setNumberFormats(formats) {
-    this._checkFormattable();
+    if (!this._checkFormattable()) return this;
     this._each((r, c, i, j) => { this.sheet._cell(r, c).fmt = formats[i][j]; });
     return this;
   }
@@ -121,7 +134,7 @@ class MockSheet {
     return last;
   }
   getRange(r, c, nr, nc) { return new MockRange(this, r, c, nr === undefined ? 1 : nr, nc === undefined ? 1 : nc); }
-  setFrozenRows(n) { this.frozen = n; }
+  setFrozenRows(n) { throwPending(); this.frozen = n; }
   setColumnWidth() {}
   insertRowsAfter(after, n) { this.maxRows += n; }
   hideSheet() { this.hidden = true; return this; }
@@ -210,7 +223,7 @@ function createGas() {
     Date: FakeDate,
     console: { log() {}, error: (m) => errors.push(String(m)), warn() {} },
     Logger: { log: (m) => logs.push(String(m)) },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ss, flush() {} },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ss, flush() { throwPending(); } },
     LockService: {
       getScriptLock: () => ({
         waitLock() {
