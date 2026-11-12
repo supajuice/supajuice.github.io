@@ -207,7 +207,14 @@ html:has(body.shop) {
 .bar-cta:hover { background: var(--blue-deep); }
 @media (max-width: 420px) {
   .bar-link { display: none; }
+  /* Trial page: on a phone, Reviews stays in the header, next to Order gels. */
+  .bar-link.bar-link--reviews { display: inline-flex; font-size: 0.875rem; letter-spacing: 0.04em; }
+  .bar-nav { gap: 14px; }
 }
+@media (max-width: 379px) {
+  .bar-link.bar-link--reviews { display: none; }
+}
+.bar-link[aria-current='page'] { text-decoration: underline; text-underline-offset: 4px; }
 
 /* ---------- Hero ---------- */
 
@@ -1055,6 +1062,9 @@ html:has(body.shop) {
   text-transform: uppercase;
 }
 .foot-text { color: #d5dae8; }
+/* Trial page: links to the reviews and suggestions page. */
+.foot-feedback { color: #d5dae8; }
+.foot-feedback a { color: var(--sun) !important; font-weight: 700; text-underline-offset: 3px; }
 .foot-ig-link {
   display: inline-flex;
   align-items: center;

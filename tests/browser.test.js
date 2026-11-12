@@ -672,6 +672,17 @@ test('order page: a dropped connection after the order was saved does not create
   assert.equal(orderRows(dev).length, 1, 'still one order');
 });
 
+test('trial page: links to the reviews site, in the header (also on a phone) and the footer', async (t) => {
+  const { dev, page } = await open(t, { mode: 'ready' });
+  await page.goto(dev.siteUrl + '/orderstrialpage/');
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await page.isVisible('.bar-link--reviews'), true);
+  assert.equal(await page.isVisible('.bar-link[href="#how"]'), false, 'How to use makes room on a phone');
+  assert.equal(await page.locator('.bar-link--reviews').getAttribute('href'), 'https://supajuice.co.za/feedback/');
+  assert.deepEqual(await page.locator('.foot-feedback a').evaluateAll((as) => as.map((a) => a.getAttribute('href'))),
+    ['https://supajuice.co.za/feedback/', 'https://supajuice.co.za/feedback/#suggest']);
+});
+
 test('trial page: a demo copy of the order page that orders, sends and saves nothing', async (t) => {
   const { dev, page, errors } = await open(t, { mode: 'ready', cardPay: true });
   await page.goto(dev.siteUrl + '/orderstrialpage/');
