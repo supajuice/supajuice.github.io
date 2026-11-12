@@ -1,0 +1,235 @@
+/*
+  The "Our story" page (about.html). Loaded after app.css and shop.css, so it reuses the
+  pouch colours, the slanted logo face, the top bar, ticker strip, buttons and footer.
+  Only the parts that are new to this page live here.
+*/
+
+/* ---------- Opening ---------- */
+
+.ab-hero { background: var(--sun); color: var(--blue); overflow: hidden; }
+.ab-hero-inner {
+  display: grid;
+  gap: 40px;
+  align-items: center;
+  padding-top: 44px;
+  padding-bottom: 56px;
+}
+.ab-hero-copy { display: flex; flex-direction: column; gap: 18px; }
+.ab-title {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: clamp(3.5rem, 9vw, 7.5rem);
+  line-height: 0.84;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+.ab-lede {
+  max-width: 30rem;
+  color: var(--navy);
+  font-size: 1.1875rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.ab-photo {
+  position: relative;
+  justify-self: center;
+  width: min(80vw, 380px);
+  margin: 0 12px 12px 0;
+  border: 3px solid var(--blue);
+  border-radius: 18px;
+  background: var(--blue);
+  box-shadow: 10px 10px 0 var(--blue);
+  transform: rotate(2.5deg);
+}
+.ab-photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 15px;
+}
+/* A round sticker slapped on the corner of the photo. */
+.ab-sticker {
+  position: absolute;
+  left: -22px;
+  bottom: 28px;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: 4px solid var(--blue);
+  background: #fff;
+  color: var(--blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 1.25rem;
+  line-height: 0.95;
+  text-transform: uppercase;
+  transform: rotate(-12deg);
+}
+@media (min-width: 52rem) {
+  .ab-hero-inner { grid-template-columns: 1.15fr 0.85fr; gap: 56px; padding-top: 72px; padding-bottom: 88px; }
+  .ab-photo { justify-self: end; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ab-photo { animation: ab-drop 560ms cubic-bezier(.2, .9, .3, 1.2) 120ms both; }
+  @keyframes ab-drop { from { opacity: 0; transform: translateY(40px) rotate(8deg); } }
+}
+
+/* ---------- The story ---------- */
+
+.ab-story { background: var(--cream); padding: 64px 0; }
+.ab-steps {
+  list-style: none;
+  margin: 36px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+}
+.ab-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: start;
+  padding: 24px;
+  border: 3px solid var(--blue);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 6px 6px 0 var(--blue);
+}
+.ab-num {
+  color: var(--sun);
+  -webkit-text-stroke: 2px var(--blue);
+  paint-order: stroke fill;
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 3.5rem;
+  line-height: 0.85;
+}
+.ab-step h3 {
+  margin: 0 0 8px;
+  color: var(--blue);
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 1.875rem;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.ab-step p { color: var(--ink); font-size: 1.0625rem; line-height: 1.55; }
+@media (min-width: 52rem) {
+  .ab-story { padding: 88px 0; }
+  .ab-steps { grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .ab-step { grid-template-columns: 1fr; gap: 14px; padding: 28px; }
+  .ab-num { font-size: 4.5rem; }
+  /* A gentle stagger, like steps up a hill. */
+  .ab-step:nth-child(2) { margin-top: 28px; }
+  .ab-step:nth-child(3) { margin-top: 56px; }
+}
+
+/* ---------- The quote ---------- */
+
+.ab-quote { background: var(--blue); color: var(--sun); padding: 64px 0; }
+.ab-quote blockquote { margin: 0; max-width: 54rem; }
+.ab-quote p {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: clamp(2.5rem, 6.5vw, 5rem);
+  line-height: 0.92;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+.ab-quote p::before { content: '\201C'; }
+.ab-quote p::after { content: '\201D'; }
+.ab-quote-inner { display: grid; gap: 40px; align-items: center; }
+.ab-quote-photo {
+  justify-self: center;
+  width: min(70vw, 340px);
+  margin: 0 10px 10px 0;
+  border: 3px solid var(--sun);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 10px 10px 0 var(--sun);
+  transform: rotate(-2.5deg);
+}
+.ab-quote-photo img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; object-fit: cover; }
+@media (min-width: 52rem) {
+  .ab-quote { padding: 96px 0; }
+  .ab-quote-inner { grid-template-columns: 1.4fr 0.6fr; gap: 56px; }
+  .ab-quote-photo { justify-self: end; }
+}
+
+/* ---------- Giving back ---------- */
+
+.ab-give { background: #fff; border-bottom: 3px solid var(--blue); padding: 64px 0; }
+.ab-give-inner { display: grid; gap: 36px; align-items: center; }
+.ab-give-copy { display: grid; gap: 14px; max-width: 36rem; }
+.ab-give-copy .eyebrow { color: var(--blue); }
+.ab-give-copy p:not(.eyebrow) { color: var(--ink); font-size: 1.125rem; line-height: 1.55; }
+.ab-give-copy strong { color: var(--blue); }
+.ab-give-badge {
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.ab-coin {
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  border: 6px solid var(--blue);
+  background: var(--sun);
+  color: var(--blue);
+  box-shadow: 8px 8px 0 var(--navy);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.ab-coin b {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 5.5rem;
+  line-height: 0.9;
+}
+.ab-coin small,
+.ab-coin-label {
+  font-weight: 800;
+  font-size: 0.875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.ab-coin-label {
+  padding: 4px 14px 5px;
+  background: var(--blue);
+  color: var(--sun);
+  transform: skewX(-8deg);
+}
+@media (min-width: 52rem) {
+  .ab-give { padding: 96px 0; }
+  .ab-give-inner { grid-template-columns: 1.3fr 0.7fr; gap: 56px; }
+  .ab-coin { width: 240px; height: 240px; }
+  .ab-coin b { font-size: 6.5rem; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ab-coin { animation: ab-spin 6s ease-in-out infinite; }
+  @keyframes ab-spin { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+}
+
+/* ---------- Order nudge ---------- */
+
+.ab-cta { background: var(--sun); padding: 64px 0 72px; }
+.ab-cta-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 28px; }
+.ab-cta .h-display { max-width: 40rem; }
+@media (min-width: 52rem) { .ab-cta { padding: 88px 0 96px; } }

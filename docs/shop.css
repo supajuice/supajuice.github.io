@@ -207,7 +207,25 @@ html:has(body.shop) {
 .bar-cta:hover { background: var(--blue-deep); }
 @media (max-width: 420px) {
   .bar-link { display: none; }
+  .bar-link.bar-link--keep { display: inline-flex; }
 }
+/* Keep the bar to one line on narrow phones now that it holds a page link. */
+.bar-name, .bar-link, .bar-cta { white-space: nowrap; }
+@media (max-width: 480px) {
+  .bar-inner { gap: 10px; }
+  .bar-nav { gap: 14px; }
+  .bar-name { font-size: 1.5rem; }
+  .bar-link { font-size: 0.8125rem; letter-spacing: 0.04em; }
+  .bar-cta { padding: 0 14px; font-size: 1.0625rem; }
+}
+@media (max-width: 359px) {
+  .bar-inner { gap: 8px; padding-inline: 14px; }
+  .bar-nav { gap: 10px; }
+  .bar-name { font-size: 1.3125rem; }
+  .bar-link { font-size: 0.75rem; letter-spacing: 0.02em; }
+  .bar-cta { padding: 0 11px; font-size: 1rem; }
+}
+.bar-link[aria-current='page'] { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }
 
 /* ---------- Hero ---------- */
 
@@ -1056,6 +1074,8 @@ html:has(body.shop) {
   text-transform: uppercase;
 }
 .foot-text { color: #d5dae8; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.foot-links a { color: var(--sun) !important; font-weight: 700; text-underline-offset: 4px; }
 .foot-ig-link {
   display: inline-flex;
   align-items: center;
