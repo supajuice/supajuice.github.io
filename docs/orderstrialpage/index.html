@@ -20,7 +20,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="../img/icon-192.png">
   <link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
   <link rel="stylesheet" href="app.css?v=20261111f">
-  <link rel="stylesheet" href="shop.css?v=20261111f">
+  <link rel="stylesheet" href="shop.css?v=20261112r">
 </head>
 <body class="shop">
   <a class="skip" href="#order">Skip to the order form</a>
@@ -153,6 +153,18 @@
             </div>
           </li>
         </ul>
+      </div>
+    </section>
+
+    <!-- Reviews carousel. Hidden until reviews.js has at least one approved review to show
+         (Show on site: yes in the Supa Juice Feedback Sheet). -->
+    <section class="revs landing" id="reviews" aria-labelledby="revs-title" hidden>
+      <div class="wrap revs-head">
+        <h2 class="h-display" id="revs-title">What runners say</h2>
+        <a class="revs-cta" href="https://supajuice.co.za/feedback/">Leave a review</a>
+      </div>
+      <div class="revs-viewport" id="revs-viewport">
+        <ul class="revs-track" id="revs-track"></ul>
       </div>
     </section>
 
@@ -340,6 +352,7 @@
   <script src="shared.js?v=20261111f"></script>
   <script src="demo.js?v=20261111f"></script>
   <script src="order.js?v=20261111f"></script>
+  <script src="reviews.js?v=20261112r"></script>
   <script src="ig-colour.js?v=20261111f"></script>
 </body>
 </html>
