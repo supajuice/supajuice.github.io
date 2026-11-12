@@ -632,6 +632,24 @@
     // A delivery request has no fee yet, so no bank details: the invoice comes by email later.
     var request = o.status === 'New request';
     var paid = isPaid(o);
+
+    // Tell the Meta Pixel about a new order, once per invoice (pixel.js). The value is the gels' total.
+    if (!restored && typeof window.fbq === 'function') {
+      var tracked = '';
+      try { tracked = sessionStorage.getItem('sj_pixel_last') || ''; } catch (err) { /* private browsing */ }
+      if (tracked !== String(o.invoice)) {
+        try {
+          window.fbq('track', 'Purchase', { value: Number(o.total) || 0, currency: 'ZAR', num_items: Number(o.qty) || 0 }, { eventID: String(o.invoice) });
+          sessionStorage.setItem('sj_pixel_last', String(o.invoice));
+        } catch (err) { /* never let tracking get in the way of the order */ }
+      }
+    }
+    var follow = $('done-follow');
+    if (follow && SJ.cfg.instagram) {
+      var igHandle = String(SJ.cfg.instagram).replace(/^@/, '');
+      follow.href = 'https://www.instagram.com/' + igHandle + '/';
+      follow.textContent = 'Follow @' + igHandle + ' for new flavours and drops';
+    }
     $('pay-section').hidden = request || paid;
     $('copy-invoice').hidden = request;
     $('done-keep').textContent = 'Take a screenshot of this page to keep your ' + (request ? 'order' : 'invoice') + ' number.';
