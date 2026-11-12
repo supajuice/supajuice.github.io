@@ -964,7 +964,7 @@ test('admin: shows the orders that need attention first, newest on top, with the
   const { page, errors } = await openAdmin(t);
   await page.waitForSelector('.order');
 
-  assert.deepEqual(await chipCounts(page), { awaiting: 2, unpaid: 0, paid: 1, delivered: 1, cancelled: 1 });
+  assert.deepEqual(await chipCounts(page), { awaiting: 2, paid: 1, delivered: 1, cancelled: 1 });
   assert.equal(await page.getAttribute('[data-role="chip-awaiting"]', 'aria-pressed'), 'true');
   assert.equal(await text(page, '.list-total'), '2 orders waiting for payment, R340 in total.');
 
@@ -1045,7 +1045,7 @@ test('admin: marking an order paid asks first, then moves it to Paid, ready to c
   assert.match(await paid.innerText(), /Paid/);
   assert.match(await paid.innerText(), /Paid Wed 28 Oct, 15:41/);
   assert.equal(await paid.locator('.badge--attention').count(), 0);
-  assert.deepEqual(await chipCounts(page), { awaiting: 1, unpaid: 0, paid: 2, delivered: 1, cancelled: 1 });
+  assert.deepEqual(await chipCounts(page), { awaiting: 1, paid: 2, delivered: 1, cancelled: 1 });
 
   const row = serverStatus(dev, 'SJ-0005');
   assert.equal(row.Status, 'Paid');
@@ -1130,7 +1130,7 @@ test('admin: delivering, undoing, cancelling and reopening update the order and 
   assert.match(await text(page, '.empty'), /No paid orders are waiting for delivery/);
   assert.equal(serverStatus(dev, 'SJ-0003').Status, 'Delivered');
   assert.equal(serverStatus(dev, 'SJ-0003')['Delivered on'], '2026-10-28 15:41');
-  assert.deepEqual(await chipCounts(page), { awaiting: 2, unpaid: 0, paid: 0, delivered: 2, cancelled: 1 });
+  assert.deepEqual(await chipCounts(page), { awaiting: 2, paid: 0, delivered: 2, cancelled: 1 });
 
   // Delivered -> back to Paid keeps the original paid date
   await chip(page, 'delivered');
@@ -1162,35 +1162,7 @@ test('admin: delivering, undoing, cancelling and reopening update the order and 
   await card(page, 'SJ-0002').locator('[data-role="reopen"]').click();
   await toast(page, 'SJ-0002 is waiting for payment again.');
   assert.equal(serverStatus(dev, 'SJ-0002').Status, 'Awaiting payment');
-  assert.deepEqual(await chipCounts(page), { awaiting: 3, unpaid: 0, paid: 0, delivered: 1, cancelled: 1 });
-  noErrors(errors);
-});
-
-test('admin: an order is marked delivered first, waits under Delivered, not paid, then is marked paid', async (t) => {
-  const { dev, page, errors } = await openAdmin(t);
-  await page.waitForSelector('.order');
-  const c5 = card(page, 'SJ-0005');
-
-  // On Awaiting payment, delivering comes first; paying first is still there.
-  assert.equal(await c5.locator('[data-role="mark-delivered"]').innerText(), 'Mark delivered');
-  assert.equal(await c5.locator('[data-role="mark-paid"]').count(), 1);
-  await c5.locator('[data-role="mark-delivered"]').click();
-  await toast(page, 'SJ-0005 marked delivered. It waits under Delivered, not paid until you mark it paid.');
-  assert.equal(serverStatus(dev, 'SJ-0005').Status, 'Delivered, not paid');
-  assert.equal(serverStatus(dev, 'SJ-0005')['Paid on'], '');
-  assert.deepEqual(await chipCounts(page), { awaiting: 1, unpaid: 1, paid: 1, delivered: 1, cancelled: 1 });
-
-  await chip(page, 'unpaid');
-  const unpaid = card(page, 'SJ-0005');
-  await unpaid.locator('[data-role="mark-paid"]').click();
-  await unpaid.getByRole('button', { name: 'Yes, mark paid' }).click();
-  await toast(page, 'SJ-0005 marked paid. The paid invoice was emailed to pieter@example.com.');
-  assert.equal(await page.getAttribute('[data-role="chip-delivered"]', 'aria-pressed'), 'true');
-  const row = serverStatus(dev, 'SJ-0005');
-  assert.equal(row.Status, 'Delivered');
-  assert.equal(row['Paid on'], '2026-10-28 15:41');
-  assert.equal(row['Delivered on'], '2026-10-28 15:41');
-  assert.deepEqual(await chipCounts(page), { awaiting: 1, unpaid: 0, paid: 1, delivered: 2, cancelled: 1 });
+  assert.deepEqual(await chipCounts(page), { awaiting: 3, paid: 0, delivered: 1, cancelled: 1 });
   noErrors(errors);
 });
 
@@ -1204,7 +1176,7 @@ test('admin: a change made on another phone is explained and the list catches up
   await card(page, 'SJ-0005').getByRole('button', { name: 'Yes, mark paid' }).click();
   await toast(page, /An order that is Cancelled cannot be changed to Paid/);
   await page.waitForFunction(() => document.querySelectorAll('article.order').length === 1);
-  assert.deepEqual(await chipCounts(page), { awaiting: 1, unpaid: 0, paid: 1, delivered: 1, cancelled: 2 });
+  assert.deepEqual(await chipCounts(page), { awaiting: 1, paid: 1, delivered: 1, cancelled: 2 });
   assert.equal(serverStatus(dev, 'SJ-0005').Status, 'Cancelled');
 });
 
