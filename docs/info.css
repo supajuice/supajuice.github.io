@@ -1,0 +1,130 @@
+/*
+  The "Delivery, refunds & contact" page (info.html). Loaded after app.css and shop.css,
+  so it reuses the pouch colours, the slanted logo face, the top bar, buttons and footer.
+  Three bands: delivery on white, refunds on yellow, contact on blue.
+*/
+
+/* ---------- Opening ---------- */
+
+.in-hero { background: var(--sun); color: var(--blue); border-bottom: 3px solid var(--blue); }
+.in-hero-inner { display: flex; flex-direction: column; gap: 18px; padding-top: 44px; padding-bottom: 48px; }
+.in-title {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: clamp(3rem, 8vw, 6.25rem);
+  line-height: 0.86;
+  text-transform: uppercase;
+  text-wrap: balance;
+  max-width: 14ch;
+}
+.in-jump { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.in-jump a {
+  padding: 8px 16px;
+  border: 2px solid var(--blue);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--blue);
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: 3px 3px 0 var(--blue);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.in-jump a:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--blue); }
+.in-jump a:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--blue); }
+
+/* ---------- Shared section layout ---------- */
+
+.in-sec { background: #fff; color: var(--ink); padding: 60px 0; scroll-margin-top: 80px; }
+.in-sec--sun { background: var(--cream); border-block: 3px solid var(--blue); }
+.in-sec--blue { background: var(--blue); color: #fff; }
+.in-sec--blue .h-display { color: var(--sun); }
+.in-sec-inner { display: grid; gap: 32px; }
+.in-head { display: grid; gap: 12px; max-width: 38rem; }
+.in-num {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 1.25rem;
+  color: var(--blue);
+}
+.in-sec--blue .in-num { color: var(--sun); }
+.in-lede { font-size: 1.1875rem; font-weight: 500; line-height: 1.5; }
+.in-sec h3 { font-size: 1.125rem; font-weight: 800; color: var(--blue); }
+
+/* ---------- Delivery ---------- */
+
+.in-ways { list-style: none; display: grid; gap: 16px; padding: 0; margin: 0; }
+.in-way {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 20px 22px;
+  border: 3px solid var(--blue);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: 6px 6px 0 var(--blue);
+}
+.in-price {
+  justify-self: start;
+  padding: 1px 10px 2px;
+  background: var(--sun);
+  color: var(--blue);
+  font-weight: 900;
+  transform: skewX(-8deg);
+}
+.in-list { display: grid; gap: 0; margin: 0; border-top: 2px solid var(--line); }
+.in-list > div { display: grid; gap: 4px; padding: 14px 0; border-bottom: 2px solid var(--line); }
+.in-list dt { font-weight: 800; color: var(--blue); }
+.in-list dd { margin: 0; line-height: 1.55; }
+
+/* ---------- Refunds ---------- */
+
+.in-rules { list-style: none; display: grid; gap: 16px; padding: 0; margin: 0; counter-reset: rule; }
+.in-rules li {
+  display: grid;
+  gap: 6px;
+  padding: 20px 22px;
+  border-radius: var(--radius);
+  background: #fff;
+  border: 2px solid var(--line);
+}
+.in-rules p { line-height: 1.55; }
+.in-ask { font-weight: 700; }
+.in-ask a { color: var(--blue); }
+
+/* ---------- Contact ---------- */
+
+.in-cards { font-style: normal; display: grid; gap: 16px; }
+.in-card {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 20px 22px;
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink) !important;
+  text-decoration: none;
+  box-shadow: 6px 6px 0 var(--navy);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+a.in-card:hover { transform: translate(-2px, -2px); box-shadow: 8px 8px 0 var(--navy); }
+a.in-card:active { transform: translate(3px, 3px); box-shadow: 3px 3px 0 var(--navy); }
+.in-sec--blue :focus-visible { outline-color: var(--sun); }
+.in-card-label { font-weight: 800; font-size: 0.8125rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--blue); }
+.in-card-value { font-size: 1.125rem; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
+
+/* ---------- Wider screens ---------- */
+
+@media (min-width: 40rem) {
+  .in-ways, .in-rules, .in-cards { grid-template-columns: repeat(2, 1fr); }
+  .in-list > div { grid-template-columns: 12rem 1fr; gap: 24px; }
+}
+@media (min-width: 60rem) {
+  .in-sec { padding: 88px 0; }
+  .in-ways { grid-template-columns: repeat(3, 1fr); }
+  .in-cards { grid-template-columns: repeat(4, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .in-jump a, .in-card { transition: none; }
+}

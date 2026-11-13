@@ -1154,3 +1154,7 @@ html:has(body.shop) {
   .revs { padding: 88px 0 96px; }
   .revs-track { padding-left: max(20px, calc((100vw - var(--wrap)) / 2 + 20px)); }
 }
+
+/* Business address, email and phone in the footer (Paystack asks for them on every page). */
+.foot-contact { font-size: 0.9375rem; line-height: 1.6; }
+.foot-contact a { color: #fff !important; text-underline-offset: 3px; }
