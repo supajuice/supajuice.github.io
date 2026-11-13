@@ -146,7 +146,7 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 - **The same settings in the sheet:** the **Settings** tab of the Google Sheet works too. The page is safer because it checks what you type.
 - **Changing `Code.gs`:** paste the new code, save, and run `setup` once more (it keeps your settings, key and orders, and adds any new columns). Then choose **Deploy > Manage deployments**, click the pencil, set **Version** to **New version**, and **Deploy**. The web app address stays the same. Without this step the live service keeps running the old code. If Google asks for permission again, allow it as in Part 1.
 - **If the admin key leaks or Greg loses his phone:** run `rotateAdminKey` in the script editor. The old link stops working. Give Greg the new key and link.
-- **The read-only key for the insights dashboard** (`READ_KEY`): made with `makeReadKey`, which logs it. It only opens the `insights` action: the orders without any customer names, emails, phone numbers, addresses or notes, and it can't change anything. It goes in the `supajuice/insights` repo as the `ORDERS_READ_KEY` secret. If it leaks, run `rotateReadKey` and update that secret.
+- **The read-only key for the insights dashboard** (`READ_KEY`): made with `makeReadKey`, which logs it. It only opens the `insights` action: the orders without any customer names, emails, phone numbers, addresses or notes, and it can't change anything. It goes in the `supajuice/secretinsights` repo as the `ORDERS_READ_KEY` secret. If it leaks, run `rotateReadKey` and update that secret.
 - **Invoice prefix:** `SJ` by default, changeable in Settings. Numbers always continue; a number is never reused, even if you delete rows.
 
 ## Fixed Pudo locker prices
