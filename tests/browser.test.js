@@ -702,6 +702,52 @@ test('order page: a dropped connection after the order was saved does not create
   assert.equal(orderRows(dev).length, 1, 'still one order');
 });
 
+test('shop page: reviews show one at a time, with previous and next', async (t) => {
+  const { dev, page, errors } = await open(t, { mode: 'ready' });
+  const feed = (reviews) => page.route('**/macros/s/**action=reviews', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, reviews }) }));
+  await feed([
+    { stars: 5, text: 'Best gels I have had.', flavour: 'Orange', used: 'Road running' },
+    { stars: 4, text: 'Easy on the stomach.', flavour: 'Cranberry', used: 'Trail running' },
+    { stars: 5, text: 'No more sticky fingers.', flavour: '', used: '' }
+  ]);
+  await page.goto(dev.siteUrl + '/');
+  await page.waitForSelector('#reviews:not([hidden])');
+  const shown = () => page.locator('#revs-list .rev:not(.is-off) .rev-text').allTextContents();
+  // Each review once, one at a time.
+  assert.equal(await page.locator('#revs-list .rev').count(), 3);
+  assert.deepEqual(await shown(), ['“Best gels I have had.”']);
+  assert.equal(await text(page, '#revs-count'), '1 of 3');
+  await page.click('#revs-next');
+  assert.deepEqual(await shown(), ['“Easy on the stomach.”']);
+  assert.equal(await text(page, '#revs-count'), '2 of 3');
+  await page.click('#revs-prev');
+  await page.click('#revs-prev'); // from the first, back to the last
+  assert.deepEqual(await shown(), ['“No more sticky fingers.”']);
+  await page.keyboard.press('ArrowRight'); // the arrow keys work while a button has focus
+  assert.equal(await text(page, '#revs-count'), '1 of 3');
+  // No scrolling strip: the section is no wider than the screen.
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  assert.deepEqual(errors, []);
+
+  // One review: no buttons, no count.
+  await page.unrouteAll();
+  await feed([{ stars: 5, text: 'Only one.', flavour: 'Orange', used: '' }]);
+  await page.reload();
+  await page.waitForSelector('#reviews:not([hidden])');
+  assert.deepEqual(await shown(), ['“Only one.”']);
+  assert.equal(await page.isHidden('#revs-prev'), true);
+  assert.equal(await page.isHidden('#revs-next'), true);
+  assert.equal(await page.isHidden('#revs-count'), true);
+
+  // None approved: the section stays hidden.
+  await page.unrouteAll();
+  await feed([]);
+  await page.reload();
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await page.isHidden('#reviews'), true);
+});
+
 test('trial page: links to the reviews site, in the header (also on a phone) and the footer', async (t) => {
   const { dev, page } = await open(t, { mode: 'ready' });
   await page.goto(dev.siteUrl + '/orderstrialpage/');

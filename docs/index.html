@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <link rel="stylesheet" href="app.css?v=20261112a">
-  <link rel="stylesheet" href="shop.css?v=20261113a">
+  <link rel="stylesheet" href="shop.css?v=20261113b">
   <script src="pixel.js?v=20261112p" async></script>
 </head>
 <body class="shop">
@@ -151,16 +151,23 @@
       </div>
     </section>
 
-    <!-- Reviews carousel. Hidden until reviews.js has at least one approved review to show
+    <!-- Reviews, one at a time. Hidden until reviews.js has at least one approved review to show
          (Show on site: yes in the Supa Juice Feedback Sheet). -->
     <section class="revs landing" id="reviews" aria-labelledby="revs-title" hidden>
       <div class="wrap revs-head">
         <h2 class="h-display" id="revs-title">What runners say</h2>
         <a class="revs-cta" href="https://supajuice.co.za/feedback/">Leave a review</a>
       </div>
-      <div class="revs-viewport" id="revs-viewport">
-        <ul class="revs-track" id="revs-track"></ul>
+      <div class="wrap revs-stage">
+        <button type="button" class="revs-nav" id="revs-prev" aria-label="Previous review" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <ul class="revs-list" id="revs-list" aria-live="polite"></ul>
+        <button type="button" class="revs-nav" id="revs-next" aria-label="Next review" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+        </button>
       </div>
+      <p class="revs-count" id="revs-count" hidden></p>
     </section>
 
     <section class="how landing" id="how" aria-labelledby="how-title">
@@ -349,7 +356,7 @@
   <script src="config.js?v=20261112a"></script>
   <script src="shared.js?v=20261112a"></script>
   <script src="order.js?v=20261112px"></script>
-  <script src="reviews.js?v=20261112r"></script>
+  <script src="reviews.js?v=20261113r"></script>
   <script src="ig-colour.js?v=20261112a"></script>
 </body>
 </html>
