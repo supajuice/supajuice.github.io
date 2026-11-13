@@ -185,6 +185,12 @@ function handle_(body) {
       return confirmPayment_({ reference: body.data.reference });
     }
 
+    // The insights dashboard: numbers only, with the read-only key (see insights_).
+    if (body.action === 'insights') {
+      requireReadKey_(body.key);
+      return insights_();
+    }
+
     // Everything else needs the admin key.
     requireAdmin_(body.key);
     switch (body.action) {
@@ -380,6 +386,66 @@ function listOrders_() {
       .map(rowToOrder_);
   }
   return { ok: true, orders: orders, config: adminConfig_(readTypedSettings_()), emailsLeft: MailApp.getRemainingDailyQuota() };
+}
+
+// ---------------------------------------------------------------------------
+// Insights: read only, for the dashboard (supa-juice-insights)
+// ---------------------------------------------------------------------------
+
+// Every order, oldest first, with only what the charts need. Never a customer's name, email,
+// phone number, address or order notes: each customer is a number (C1, C2, ...) in the order
+// they first ordered, so repeat customers can still be counted. Nothing is changed.
+function insights_() {
+  const sheet = ordersSheet_();
+  const last = sheet.getLastRow();
+  const rows = last >= 2 ? sheet.getRange(2, 1, last - 1, HEADERS.length).getValues() : [];
+  const orders = rows.filter(function (r) { return str_(r[COL.INVOICE]) !== ''; }).map(function (r) {
+    const o = rowToOrder_(r);
+    return {
+      row: r,
+      order: o,
+      created: cellText_(r[COL.CREATED])
+    };
+  }).sort(function (a, b) { return a.created < b.created ? -1 : a.created > b.created ? 1 : 0; });
+
+  const ids = {};
+  const out = orders.map(function (x) {
+    const o = x.order;
+    const r = x.row;
+    const who = o.email ? o.email.toLowerCase() : 'name:' + o.name.toLowerCase();
+    if (!ids[who]) ids[who] = 'C' + (Object.keys(ids).length + 1);
+    return {
+      invoice: o.invoice,
+      created: x.created,
+      source: o.source,
+      qty: o.qty,
+      price: o.price,
+      fee: o.fee,
+      total: o.total,
+      status: o.status,
+      paidOn: cellText_(r[COL.PAID]),
+      deliveredOn: cellText_(r[COL.DELIVERED]),
+      collect: yes_(r[COL.COLLECT]),
+      code: o.code,
+      discountPct: o.discountPct,
+      freeDelivery: yes_(r[COL.FREE_DELIVERY]),
+      flavours: o.flavours,
+      customer: ids[who],
+      card: /Paid by card \(Paystack/.test(o.notes)
+    };
+  });
+  return { ok: true, orders: out, today: nowString_().slice(0, 10) };
+}
+
+// A cell as text. Dates (a table column typed as a date) come back as "2026-11-12 10:00".
+function cellText_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  return str_(v);
+}
+
+// "yes", or a ticked checkbox (a table column typed as a checkbox).
+function yes_(v) {
+  return v === true || str_(v).toLowerCase() === 'yes';
 }
 
 function setStatus_(body) {
@@ -2238,6 +2304,17 @@ function requireAdmin_(key) {
   }
 }
 
+// READ_KEY only unlocks the insights action: it can't change anything or see a customer's details.
+// It is a different key from ADMIN_KEY, and ADMIN_KEY doesn't work for insights.
+function requireReadKey_(key) {
+  const expected = PropertiesService.getScriptProperties().getProperty('READ_KEY');
+  const given = typeof key === 'string' ? key : '';
+  if (!expected || !sameText_(given, expected)) {
+    Utilities.sleep(700); // slows down guessing
+    throw fail_('unauthorized', 'That read key is not right.');
+  }
+}
+
 function sameText_(a, b) {
   let diff = a.length ^ b.length;
   const n = Math.max(a.length, b.length);
@@ -2401,6 +2478,24 @@ function setup() {
 function showAdminKey() {
   const key = PropertiesService.getScriptProperties().getProperty('ADMIN_KEY');
   Logger.log(key ? 'Admin key: ' + key : 'No admin key yet. Run setup first.');
+}
+
+/**
+ * Makes the read-only key for the insights dashboard, once, and logs it. Run this from the editor
+ * (no need to run setup again). The key only unlocks the insights action: numbers, no customer
+ * details, and it can't change anything. Put it in the insights repo's secrets as ORDERS_READ_KEY.
+ */
+function makeReadKey() {
+  const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('READ_KEY')) props.setProperty('READ_KEY', newKey_());
+  Logger.log('Read-only key (for the insights dashboard): ' + props.getProperty('READ_KEY'));
+}
+
+/** Replaces the read-only key. The dashboard stops updating until its secret has the new one. */
+function rotateReadKey() {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('READ_KEY', newKey_());
+  Logger.log('New read-only key: ' + props.getProperty('READ_KEY'));
 }
 
 /** Replaces the admin key. The old key and any saved links stop working. */

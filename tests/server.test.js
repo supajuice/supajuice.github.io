@@ -2119,3 +2119,81 @@ test('a code for named customers works only with their emails, once each, and a 
   assert.equal(c.ok, true, JSON.stringify(c));
   assert.equal(gas.call(order({ code: 'THANKS25', expectedTotal: undefined })).ok, true);
 });
+
+// ---------------------------------------------------------------------------
+// The read-only key for the insights dashboard
+// ---------------------------------------------------------------------------
+
+test('makeReadKey makes a separate read-only key once, and logs it', () => {
+  const { gas, key } = ready();
+  assert.equal(gas.store.get('READ_KEY'), undefined, 'setup does not make one');
+  gas.run('makeReadKey()');
+  const read = gas.store.get('READ_KEY');
+  assert.match(read, /^[0-9a-f]{64}$/);
+  assert.notEqual(read, key);
+  gas.run('makeReadKey()');
+  assert.equal(gas.store.get('READ_KEY'), read, 'running it again keeps the same key');
+  assert.ok(gas.logs.join('\n').includes('Read-only key (for the insights dashboard): ' + read));
+  gas.run('rotateReadKey()');
+  assert.notEqual(gas.store.get('READ_KEY'), read);
+  assert.equal(gas.store.get('ADMIN_KEY'), key, 'the admin key is untouched');
+});
+
+test('insights: numbers only, customers as numbers, oldest first, and nothing changes', () => {
+  const { gas, key } = ready();
+  gas.run('makeReadKey()');
+  const read = gas.store.get('READ_KEY');
+  assert.equal(gas.call(order({ name: 'Jane Doe', email: 'Jane@Example.com', contact: '082 555 1234', notes: 'Ring twice' })).ok, true);
+  gas.clock.now += 60000;
+  assert.equal(gas.call(dm(key, { name: 'Cash Carl', contact: '083 000 0000', address: '1 Main Rd' })).ok, true);
+  gas.clock.now += 60000;
+  assert.equal(gas.call(order({ name: 'Jane D', email: 'jane@example.com', qty: 5, expectedTotal: 230 })).ok, true);
+  assert.equal(gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' }).ok, true);
+  const before = JSON.stringify([...gas.sheet('Orders').cells]);
+
+  const r = gas.call({ action: 'insights', key: read });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.orders.map((o) => [o.invoice, o.customer, o.status, o.qty]),
+    [['SJ-0001', 'C1', 'Paid', 3], ['SJ-0002', 'C2', 'Awaiting payment', 2], ['SJ-0003', 'C1', 'Awaiting payment', 5]]);
+  const o = r.orders[0];
+  assert.equal(o.total, 150);
+  assert.match(o.created, /^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+  assert.match(o.paidOn, /^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+  assert.equal(o.collect, false);
+  assert.equal(o.card, false);
+  assert.match(r.today, /^\d{4}-\d\d-\d\d$/);
+  // Nothing about the person.
+  const text = JSON.stringify(r);
+  for (const bit of ['Jane', 'jane@', 'Carl', '082 555', '083 000', 'Beach', 'Main Rd', 'Ring twice', '"name"', '"email"', '"contact"', '"address"', '"notes"']) {
+    assert.ok(!text.includes(bit), bit + ' must not be in the insights');
+  }
+  assert.equal(JSON.stringify([...gas.sheet('Orders').cells]), before, 'insights changes nothing');
+});
+
+test('insights: the read key opens nothing else, and the admin key does not open insights', () => {
+  const { gas, key } = ready();
+  assert.equal(gas.call({ action: 'insights', key: 'anything' }).error, 'unauthorized', 'no READ_KEY yet: nothing opens');
+  gas.run('makeReadKey()');
+  const read = gas.store.get('READ_KEY');
+  for (const action of ['list', 'getSettings', 'saveSettings', 'setStatus', 'create', 'bulk']) {
+    assert.equal(gas.call({ action, key: read, values: { price: '1' }, invoice: 'SJ-0001', status: 'Paid' }).error, 'unauthorized', action);
+  }
+  assert.equal(gas.call({ action: 'insights', key }).error, 'unauthorized');
+  const wrong = gas.call({ action: 'insights', key: read.slice(0, -1) + 'x' });
+  assert.deepEqual([wrong.error, wrong.message], ['unauthorized', 'That read key is not right.']);
+  assert.equal(gas.call({ action: 'insights' }).error, 'unauthorized');
+});
+
+test('insights: dates and ticked boxes from a table come back as text and yes/no', () => {
+  const { gas } = ready();
+  gas.run('makeReadKey()');
+  const placed = gas.call(order({ collect: true, address: '', qty: 3, expectedTotal: 120, collectAt: '2026-10-29 17:00' }));
+  assert.equal(placed.ok, true, JSON.stringify(placed));
+  const s = gas.sheet('Orders');
+  // As if the columns were typed in a Google Sheets table: a real date, and a checkbox.
+  s._cell(2, 2).v = gas.run('new Date(Date.UTC(2026, 9, 1, 8, 5))');
+  s._cell(2, 18).v = true;
+  const r = gas.call({ action: 'insights', key: gas.store.get('READ_KEY') });
+  assert.equal(r.orders[0].created, '2026-10-01 10:05');
+  assert.equal(r.orders[0].collect, true);
+});
