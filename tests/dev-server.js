@@ -17,7 +17,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { createGas } = require('./gas-mock');
+const { createGas, MockSpreadsheet } = require('./gas-mock');
 
 const DOCS = path.join(__dirname, '..', 'docs');
 const TYPES = {
@@ -105,10 +105,20 @@ function seedCollections(gas, key) {
   at(gas, '2026-10-28T13:41:00Z');
 }
 
+// A pretend Supa Juice Feedback Sheet, for the Reviews tab: Thandi has left a review.
+function feedbackSheet() {
+  const ss = new MockSpreadsheet();
+  const rows = [['Received', 'Stars', 'Flavour', 'Used for', 'Review', 'Name', 'Email', 'May post', 'Verified buyer', 'Invoice', 'Show on site'],
+    ['2026-10-26 08:30', 5, 'Orange', 'Road running', 'Tasted like real oranges.', 'Thandi', 'thandi@example.com', 'yes', 'yes', 'SJ-0001', '']];
+  ss.insertSheet('Reviews').getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  return ss;
+}
+
 function build(mode, opts) {
-  const gas = createGas();
+  const gas = createGas({ sheets: { 'feedback-sheet-id': feedbackSheet() } });
   gas.run('setup()');
   const key = gas.key();
+  gas.store.set('FEEDBACK_SHEET_ID', 'feedback-sheet-id');
   if (mode !== 'empty') {
     expectOk(gas.call({
       action: 'saveSettings', key,

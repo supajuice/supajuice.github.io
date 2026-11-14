@@ -162,6 +162,7 @@ function doPost(e) {
 function doGet(e) {
   const action = e && e.parameter ? e.parameter.action : '';
   if (action === 'config') return json_(handle_({ action: 'config' }));
+  if (action === 'noreviews') return noReviews_(e.parameter.t);
   return json_({ ok: true, service: 'orders' });
 }
 
@@ -207,6 +208,9 @@ function handle_(body) {
       case 'saveSettings': return saveSettings_(body);
       case 'setPhoto': return setPhoto_(body);
       case 'removePhoto': return removePhoto_();
+      case 'reviews': return reviewPanel_();
+      case 'previewReview': return previewReview_(body);
+      case 'sendReviews': return sendReviews_(body);
       default: throw fail_('bad_request', 'Unknown action.');
     }
   } catch (err) {
@@ -386,6 +390,329 @@ function listOrders_() {
       .map(rowToOrder_);
   }
   return { ok: true, orders: orders, config: adminConfig_(readTypedSettings_()), emailsLeft: MailApp.getRemainingDailyQuota() };
+}
+
+// ---------------------------------------------------------------------------
+// Review requests (the Reviews tab on Greg's admin page)
+// ---------------------------------------------------------------------------
+//
+// Greg picks customers and sends them an email asking how the gels were. The email has five
+// stars: each opens the review page (supajuice/feedback) with those stars and the customer's
+// email already filled in. A promo code can be added to the email: it is only written into the
+// email, so it must already be set up as a discount code on the Settings tab.
+//
+// Who was asked is kept in the "Review requests" tab of this Sheet. Who has reviewed is READ from
+// the Supa Juice Feedback Sheet (Script property FEEDBACK_SHEET_ID: its address or ID). Nothing
+// is ever written to the Feedback Sheet. Every email has a link to stop review emails (POPIA).
+
+const REQUESTS_TAB = 'Review requests';
+const REQUEST_HEADERS = ['Sent', 'Email', 'Name', 'Invoice', 'Code', 'Token', 'Opted out'];
+const RQ = { SENT: 0, EMAIL: 1, NAME: 2, INVOICE: 3, CODE: 4, TOKEN: 5, OPTED: 6 };
+const REVIEW_PAGE = 'https://supajuice.co.za/feedback/';
+const MAX_REVIEW_SENDS = 40; // per press of Send
+
+function requestsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(REQUESTS_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(REQUESTS_TAB);
+    sheet.getRange(1, 1, 1, REQUEST_HEADERS.length).setValues([REQUEST_HEADERS]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function requestRows_() {
+  const sheet = requestsSheet_();
+  const last = sheet.getLastRow();
+  return last >= 2 ? sheet.getRange(2, 1, last - 1, REQUEST_HEADERS.length).getValues() : [];
+}
+
+// Everyone with a paid or delivered order and an email, newest order first, by email.
+function buyers_() {
+  const sheet = ordersSheet_();
+  const last = sheet.getLastRow();
+  const rows = last >= 2 ? sheet.getRange(2, 1, last - 1, HEADERS.length).getValues() : [];
+  const by = {};
+  rows.forEach(function (r) {
+    const o = rowToOrder_(r);
+    if (o.status !== STATUS.PAID && o.status !== STATUS.DELIVERED) return;
+    const email = o.email.toLowerCase();
+    if (!EMAIL_PATTERN.test(email)) return;
+    const when = cellText_(r[COL.DELIVERED]) || cellText_(r[COL.PAID]) || cellText_(r[COL.CREATED]);
+    const b = by[email] || (by[email] = { email: email, name: o.name, orders: 0, sachets: 0, lastInvoice: '', lastBought: '' });
+    b.orders += 1;
+    b.sachets += o.qty;
+    if (when >= b.lastBought) {
+      b.lastBought = when;
+      b.lastInvoice = o.invoice;
+      b.name = o.name;
+    }
+  });
+  return by;
+}
+
+function feedbackSheetId_() {
+  const raw = str_(PropertiesService.getScriptProperties().getProperty('FEEDBACK_SHEET_ID'));
+  const m = /\/spreadsheets\/d\/([A-Za-z0-9_-]+)/.exec(raw);
+  return m ? m[1] : raw;
+}
+
+// Reviews from the Feedback Sheet, by email: { connected, message, by: { email: { stars, on } } }.
+// Only read. Columns are found by their headers.
+function reviewsByEmail_() {
+  const id = feedbackSheetId_();
+  if (!id) return { connected: false, message: 'Add FEEDBACK_SHEET_ID in Script properties to see who has reviewed.', by: {} };
+  let sheet;
+  try {
+    sheet = SpreadsheetApp.openById(id).getSheetByName('Reviews');
+  } catch (err) {
+    return { connected: false, message: 'Could not open the Feedback Sheet. Check FEEDBACK_SHEET_ID in Script properties.', by: {} };
+  }
+  if (!sheet) return { connected: false, message: 'The Feedback Sheet has no Reviews tab.', by: {} };
+  const last = sheet.getLastRow();
+  const width = sheet.getLastColumn();
+  const by = {};
+  if (last < 2 || width < 1) return { connected: true, message: '', by: by };
+  const head = sheet.getRange(1, 1, 1, width).getValues()[0].map(str_);
+  const c = { on: head.indexOf('Received'), stars: head.indexOf('Stars'), email: head.indexOf('Email') };
+  if (c.email < 0) return { connected: false, message: 'The Feedback Sheet\'s Reviews tab has no Email column.', by: {} };
+  sheet.getRange(2, 1, last - 1, width).getValues().forEach(function (r) {
+    const email = str_(r[c.email]).toLowerCase();
+    if (!email) return;
+    const on = c.on < 0 ? '' : cellText_(r[c.on]);
+    if (!by[email] || on >= by[email].on) by[email] = { stars: c.stars < 0 ? 0 : Number(r[c.stars]) || 0, on: on };
+  });
+  return { connected: true, message: '', by: by };
+}
+
+// The list for the Reviews tab: every buyer, with whether they were asked and whether they reviewed.
+// status: 'not_asked', 'asked', 'reviewed' or 'opted_out'.
+function reviewPanel_() {
+  const buyers = buyers_();
+  const asked = {};
+  requestRows_().forEach(function (r) {
+    const email = str_(r[RQ.EMAIL]).toLowerCase();
+    if (!email) return;
+    const a = asked[email] || (asked[email] = { times: 0, last: '', codes: [], optedOut: '' });
+    a.times += 1;
+    const sent = cellText_(r[RQ.SENT]);
+    if (sent >= a.last) a.last = sent;
+    const code = str_(r[RQ.CODE]);
+    if (code && a.codes.indexOf(code) === -1) a.codes.push(code);
+    const opted = cellText_(r[RQ.OPTED]);
+    if (opted) a.optedOut = opted;
+  });
+  const reviews = reviewsByEmail_();
+  const customers = Object.keys(buyers).map(function (email) {
+    const b = buyers[email];
+    const a = asked[email] || { times: 0, last: '', codes: [], optedOut: '' };
+    const rv = reviews.by[email] || null;
+    return {
+      email: email, name: b.name, orders: b.orders, sachets: b.sachets, lastInvoice: b.lastInvoice, lastBought: b.lastBought,
+      asked: a.times, askedOn: a.last, codes: a.codes, optedOut: a.optedOut,
+      reviewedOn: rv ? rv.on : '', stars: rv ? rv.stars : 0,
+      status: a.optedOut ? 'opted_out' : rv ? 'reviewed' : a.times ? 'asked' : 'not_asked'
+    };
+  }).sort(function (x, y) { return x.lastBought < y.lastBought ? 1 : x.lastBought > y.lastBought ? -1 : 0; });
+  return {
+    ok: true,
+    customers: customers,
+    reviewsConnected: reviews.connected,
+    reviewsMessage: reviews.message,
+    defaults: reviewDefaults_(),
+    emailsLeft: MailApp.getRemainingDailyQuota()
+  };
+}
+
+function reviewDefaults_() {
+  const out = {};
+  Object.keys(REVIEW_WORDS).forEach(function (k) { out[k] = REVIEW_WORDS[k].text; });
+  return out;
+}
+
+function cleanCode_(v) {
+  const code = str_(v).toUpperCase();
+  if (!code) return '';
+  if (!/^[A-Z0-9]{3,20}$/.test(code)) throw fail_('invalid', 'A promo code is 3 to 20 letters or digits: ' + code.slice(0, 20));
+  return code;
+}
+
+// The words Greg can change on the Reviews tab. {name} is the customer's first name.
+// The stars, the button and the "don't ask me again" link are always there and can't be changed.
+const REVIEW_WORDS = {
+  subject: { text: 'How were your {brand} gels?', max: 120 },
+  heading: { text: 'How were your gels?', max: 80 },
+  message: { text: 'Hi {name}, thank you for ordering from us. Tap a star to tell us how they were. It takes a minute, and it helps other people pick their gels.', max: 1200 },
+  codeLine: { text: 'As a thank you for your order, here\'s a code for next time:', max: 200 }
+};
+
+// The words to use: what Greg typed (plain text, trimmed, no longer than allowed), or the default.
+function reviewWords_(given) {
+  const out = {};
+  Object.keys(REVIEW_WORDS).forEach(function (k) {
+    let t = given && typeof given[k] === 'string' ? given[k] : '';
+    t = t.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000B-\u001F\u007F\u2028\u2029]+/g, ' ').trim();
+    if (k !== 'message') t = t.replace(/\s*\n\s*/g, ' ');
+    if (t.length > REVIEW_WORDS[k].max) throw fail_('invalid', 'The ' + ({ subject: 'subject', heading: 'heading', message: 'message', codeLine: 'line above the code' })[k] + ' is too long: at most ' + REVIEW_WORDS[k].max + ' characters.');
+    out[k] = t || REVIEW_WORDS[k].text;
+  });
+  return out;
+}
+
+// {name} and {brand} filled in. With no first name, "Hi {name}," becomes "Hi,".
+function fillWords_(text, first, brand) {
+  return String(text)
+    .replace(/\s*\{name\}/g, first ? ' ' + first : '')
+    .replace(/^ /, '')
+    .replace(/\{brand\}/g, brand);
+}
+
+// The review email for one customer. token: for the "stop these emails" link. words: from reviewWords_.
+function reviewEmail_(c, code, token, s, words) {
+  words = words || reviewWords_({});
+  const first = String(c.name || '').trim().split(/\s+/)[0];
+  const say = function (k) { return fillWords_(words[k], first, s.brand); };
+  const page = function (stars) {
+    // After # the browser keeps it to itself: the email never reaches a server or a log.
+    return REVIEW_PAGE + '#review&stars=' + stars + '&email=' + encodeURIComponent(c.email);
+  };
+  const stop = ScriptApp.getService().getUrl() + '?action=noreviews&t=' + encodeURIComponent(token);
+  const subject = say('subject');
+  const blue = '#1340c8';
+  const stars = [1, 2, 3, 4, 5].map(function (n) {
+    return '<a href="' + esc_(page(n)) + '" title="' + n + ' star' + (n > 1 ? 's' : '') + '" ' +
+      'style="color:#f7931e;text-decoration:none;font-size:40px;line-height:1;padding:0 3px">&#9733;</a>';
+  }).join('');
+  const html = [
+    '<div style="background:#fff8db;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;color:#0e1a3d">',
+    '<div style="max-width:520px;margin:0 auto;background:#ffffff;border:3px solid ' + blue + ';border-radius:16px;padding:28px 24px">',
+    '<p style="margin:0 0 4px;font-size:13px;font-weight:bold;letter-spacing:1px;color:' + blue + '">' + esc_(s.brand.toUpperCase()) + '</p>',
+    '<h1 style="margin:0 0 14px;font-size:24px;line-height:1.25;color:' + blue + '">' + esc_(say('heading')) + '</h1>',
+    say('message').split(/\n\s*\n/).map(function (para) {
+      return '<p style="margin:0 0 18px;font-size:16px;line-height:1.5">' + esc_(para).replace(/\n/g, '<br>') + '</p>';
+    }).join(''),
+    '<p style="margin:0 0 6px;text-align:center">' + stars + '</p>',
+    '<p style="margin:0 0 20px;text-align:center;font-size:13px;color:#5b6383">1 star: not for me &nbsp;·&nbsp; 5 stars: love them</p>',
+    '<p style="margin:0 0 4px;text-align:center"><a href="' + esc_(page(0)) + '" style="display:inline-block;background:' + blue + ';color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:999px">Write a review</a></p>',
+    code ? '<div style="margin:24px 0 0;padding:14px 16px;background:#fff1b8;border-radius:12px;text-align:center;font-size:15px;line-height:1.5">' +
+      esc_(say('codeLine')) + '<br><strong style="font-size:20px;letter-spacing:1px;color:' + blue + '">' + esc_(code) + '</strong></div>' : '',
+    '</div>',
+    '<p style="max-width:520px;margin:16px auto 0;font-size:12px;line-height:1.5;color:#5b6383;text-align:center">',
+    'We asked because you ordered from ' + esc_(s.brand) + (c.lastInvoice ? ' (' + esc_(c.lastInvoice) + ')' : '') + '. ',
+    '<a href="' + esc_(stop) + '" style="color:#5b6383">Don\'t ask me for reviews again</a></p>',
+    '</div>'
+  ].join('');
+  const text = say('heading') + '\n\n' + say('message') + '\n\n' +
+    'Leave a review here: ' + page(0) + '\n\n' +
+    (code ? say('codeLine') + ' ' + code + '\n\n' : '') +
+    'Don\'t want review emails? ' + stop + '\n';
+  return { subject: subject, html: html, text: text };
+}
+
+// A preview of the email for one customer, without sending anything.
+function previewReview_(body) {
+  const email = str_(body.email).toLowerCase();
+  const buyer = buyers_()[email];
+  if (!buyer) throw fail_('not_found', 'Pick someone from the list to preview their email.');
+  const mail = reviewEmail_(buyer, cleanCode_(body.code), 'preview', readTypedSettings_(), reviewWords_(body.words));
+  return { ok: true, subject: mail.subject, html: mail.html, defaults: reviewDefaults_() };
+}
+
+// Sends the review email to each { email, code } in body.list. Only to buyers, never to anyone
+// who opted out, and never more than the day's email quota. Notes each one in Review requests.
+function sendReviews_(body) {
+  const list = Array.isArray(body.list) ? body.list : [];
+  if (!list.length) throw fail_('invalid', 'Pick at least one person.');
+  if (list.length > MAX_REVIEW_SENDS) throw fail_('invalid', 'Send to at most ' + MAX_REVIEW_SENDS + ' people at a time.');
+  const wanted = list.map(function (x) { return { email: str_(x && x.email).toLowerCase(), code: cleanCode_(x && x.code) }; });
+  const words = reviewWords_(body.words);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    throw fail_('busy', 'Busy right now. Please try again.');
+  }
+  const results = [];
+  try {
+    const s = readTypedSettings_();
+    const panel = reviewPanel_();
+    const by = {};
+    panel.customers.forEach(function (c) { by[c.email] = c; });
+    const sheet = requestsSheet_();
+    const done = {};
+    wanted.forEach(function (w) {
+      const c = by[w.email];
+      if (done[w.email]) return;
+      done[w.email] = true;
+      if (!c) return results.push({ email: w.email, ok: false, reason: 'Not a customer with a paid order.' });
+      if (c.status === 'opted_out') return results.push({ email: w.email, ok: false, reason: 'Asked not to get review emails.' });
+      if (MailApp.getRemainingDailyQuota() < 1) return results.push({ email: w.email, ok: false, reason: 'No emails left today.' });
+      const token = newKey_().slice(0, 32);
+      const mail = reviewEmail_(c, w.code, token, s, words);
+      try {
+        const message = { to: c.email, subject: mail.subject, body: mail.text, htmlBody: mail.html, name: s.brand };
+        if (EMAIL_PATTERN.test(s.alertEmail)) message.replyTo = s.alertEmail;
+        MailApp.sendEmail(message);
+      } catch (err) {
+        console.error('Review email failed for ' + c.email + ': ' + err);
+        return results.push({ email: w.email, ok: false, reason: 'The email could not be sent.' });
+      }
+      const row = sheet.getLastRow() + 1;
+      setFormats_(sheet.getRange(row, 1, 1, REQUEST_HEADERS.length), [REQUEST_HEADERS.map(function () { return '@'; })])
+        .setValues([[nowString_(), c.email, c.name, c.lastInvoice, w.code, token, '']]);
+      results.push({ email: w.email, ok: true });
+    });
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return { ok: true, results: results, sent: results.filter(function (r) { return r.ok; }).length, emailsLeft: MailApp.getRemainingDailyQuota() };
+}
+
+// The "Don't ask me for reviews again" link. Marks every request to that email as opted out.
+function noReviews_(token) {
+  const t = str_(token);
+  let done = false;
+  if (/^[A-Za-z0-9]{16,64}$/.test(t)) {
+    const lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(20000);
+      const sheet = requestsSheet_();
+      const rows = requestRows_();
+      let email = '';
+      rows.forEach(function (r) { if (str_(r[RQ.TOKEN]) === t) email = str_(r[RQ.EMAIL]).toLowerCase(); });
+      if (email) {
+        const now = nowString_();
+        rows.forEach(function (r, i) {
+          if (str_(r[RQ.EMAIL]).toLowerCase() === email && !cellText_(r[RQ.OPTED])) {
+            setFormats_(sheet.getRange(i + 2, RQ.OPTED + 1), [['@']]).setValue(now);
+          }
+        });
+        SpreadsheetApp.flush();
+        done = true;
+      }
+    } catch (err) {
+      console.error('Opt-out failed: ' + err);
+    } finally {
+      lock.releaseLock();
+    }
+  }
+  const brand = esc_(readTypedSettings_().brand);
+  const message = done
+    ? 'Done. You won\'t get review emails from ' + brand + ' again.'
+    : 'That link didn\'t work. Reply to our email and we\'ll take you off the list.';
+  return HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:48px auto;padding:0 16px;color:#0e1a3d">' +
+    '<h1 style="color:#1340c8;font-size:22px">' + brand + '</h1><p style="font-size:16px;line-height:1.5">' + message + '</p></div>'
+  ).setTitle(readTypedSettings_().brand);
+}
+
+/** Checks the review setup: the Feedback Sheet can be read. Run once after adding FEEDBACK_SHEET_ID. */
+function checkReviews() {
+  const r = reviewsByEmail_();
+  Logger.log(r.connected ? 'Connected to the Feedback Sheet: ' + Object.keys(r.by).length + ' people have reviewed.' : r.message);
+  Logger.log('Emails left today: ' + MailApp.getRemainingDailyQuota());
 }
 
 // ---------------------------------------------------------------------------

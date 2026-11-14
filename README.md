@@ -166,6 +166,24 @@ Starting prices (The Courier Guy, August 2026): boxes R6 / R15 / R18; locker to 
 
 Greg's new-order email says which box to pack and how to send it. Orders bigger than the Medium box are turned away with "send us a DM". Untick **Work out delivery fees from the box and Pudo price** to go back to the single delivery fee.
 
+## Asking customers for reviews
+
+The **Reviews** tab on Greg's page lists everyone with a paid or delivered order, sorted into **Not asked**, **Asked** (no review yet), **Reviewed** and **Opted out**. Tick people, optionally add a promo code, press **Preview email**, then **Send**.
+
+- **The email** asks "How were your gels?" with five stars. Each star opens the review page (supajuice.co.za/feedback/) with those stars and the customer's email already filled in. The email is after `#` in the link, so it never reaches a server, and the page takes it out of the address straight away.
+- **The words can be changed** on the tab before sending: the subject, heading, message and the line above the promo code. `{name}` becomes each person's first name and `{brand}` the shop's name. The changes are remembered on that phone; **Reset to the usual words** puts them back. The five stars, the button and the "Don't ask me for reviews again" link are always added.
+- **Promo codes:** none, one code for everyone ticked, or a different code per person. The code is only written into the email. It must already be set up and switched on under **Settings > Discount codes**, and allowed for those emails if it is limited to named customers.
+- **Who was asked** is kept in a **Review requests** tab in this Sheet (made the first time an email is sent): when, who, which order, which code.
+- **Who has reviewed** is read from the **Supa Juice Feedback** Sheet. It is only read, never changed.
+- **Stopping:** every email has a "Don't ask me for reviews again" link. After that, that person shows as **Opted out** and can't be emailed again from the tab (POPIA).
+- The emails count towards Google's daily limit of about 100, shared with invoices. The tab shows how many are left. At most 40 per press of Send.
+
+**Setting it up (once, from the shop account):**
+1. Paste the new `Code.gs` into the order Sheet's Apps Script and **Save**.
+2. **Project Settings > Script Properties > Add script property:** `FEEDBACK_SHEET_ID`, value: the Supa Juice Feedback Sheet's address (copy it from the browser).
+3. In the editor choose **checkReviews** and **Run**. Allow the new permission (it now reads the Feedback Sheet). The log says how many people have reviewed.
+4. **Deploy > Manage deployments >** pencil **> Version: New version > Deploy.**
+
 ## Card payments for collections (Paystack)
 
 Customers who collect can pay by card, Apple Pay or instant EFT on Paystack's secure page. When they come back, the order turns **Paid** by itself and they get the paid invoice and calendar invite. Bank transfer stays on the page as the other option. Delivery orders are still paid by bank transfer.

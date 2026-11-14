@@ -279,7 +279,7 @@
   }
 
   function syncPanels() {
-    ['orders', 'new', 'settings'].forEach(function (t) {
+    ['orders', 'new', 'reviews', 'settings'].forEach(function (t) {
       $('panel-' + t).hidden = !(state.screen === 'app' && state.tab === t);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
@@ -306,6 +306,7 @@
     window.scrollTo(0, 0);
     if (name === 'orders' && state.shown && Date.now() - state.loadedAt > STALE_AFTER) refresh({ quiet: true });
     if (name === 'settings' && !state.settingsLoaded) loadSettings();
+    if (name === 'reviews' && !rv.loading) loadReviews();
   }
 
   // ---------- Sign in ----------
@@ -2772,6 +2773,392 @@
       savingSettings = false;
       btn.disabled = false;
       btn.textContent = 'Save settings';
+    }
+  }
+
+  // ---------- Reviews tab: ask customers for a review ----------
+  //
+  // Everyone with a paid or delivered order, sorted into: not asked yet, asked (no review yet),
+  // reviewed, and asked not to get review emails. Greg ticks people, can add a promo code (one for
+  // everyone, or one per person), previews the email and sends it. The code is only written into
+  // the email: it has to be set up as a discount code in Settings already.
+
+  var RV_FILTERS = [
+    { id: 'not_asked', label: 'Not asked' },
+    { id: 'asked', label: 'Asked' },
+    { id: 'reviewed', label: 'Reviewed' },
+    { id: 'opted_out', label: 'Opted out' },
+    { id: 'all', label: 'All' }
+  ];
+  var WORDS_STORE = 'sj_review_words';
+  var RV_STATUS = { not_asked: 'Not asked yet', asked: 'Asked, no review yet', reviewed: 'Reviewed', opted_out: 'Asked not to get review emails' };
+
+  var rv = {
+    loaded: false, loading: false, error: '', data: null,
+    filter: 'not_asked', query: '', selected: {},
+    codeMode: 'none', code: '', codes: {},
+    preview: null, confirm: false, sending: false, result: null, problem: '',
+    words: SJ.store.get(WORDS_STORE) || {} // Greg's own wording, kept on this phone. Empty: the usual words.
+  };
+
+  // The words that can be changed, in the order the email shows them.
+  var WORD_FIELDS = [
+    { k: 'subject', label: 'Subject', max: 120 },
+    { k: 'heading', label: 'Heading', max: 80 },
+    { k: 'message', label: 'Message', max: 1200, long: true },
+    { k: 'codeLine', label: 'Line above the promo code', max: 200 }
+  ];
+
+  function wordsFor() {
+    var d = (rv.data && rv.data.defaults) || {};
+    var out = {};
+    WORD_FIELDS.forEach(function (f) { out[f.k] = typeof rv.words[f.k] === 'string' ? rv.words[f.k] : (d[f.k] || ''); });
+    return out;
+  }
+
+  function changedWords() {
+    var d = (rv.data && rv.data.defaults) || {};
+    return WORD_FIELDS.some(function (f) { return typeof rv.words[f.k] === 'string' && rv.words[f.k] !== d[f.k]; });
+  }
+
+  // The email's words, editable. The stars, the button and the stop link are always added.
+  function wordsEditor() {
+    var w = wordsFor();
+    var box = el('section', { class: 'stack-sm', 'aria-labelledby': 'rv-words-title', 'data-role': 'rv-words' },
+      el('h3', { class: 'section-title', id: 'rv-words-title' }, 'The email'),
+      el('p', { class: 'fine' }, '{name} becomes each person\u2019s first name and {brand} the shop\u2019s name. The five stars, the Write a review button and the \u201cDon\u2019t ask me again\u201d link are always added.'));
+    WORD_FIELDS.forEach(function (f) {
+      var id = 'rv-word-' + f.k;
+      var input = f.long
+        ? el('textarea', { id: id, rows: '5', maxlength: String(f.max), 'data-role': id })
+        : el('input', { type: 'text', id: id, maxlength: String(f.max), 'data-role': id });
+      input.value = w[f.k];
+      input.addEventListener('input', function () {
+        rv.words[f.k] = input.value;
+        SJ.store.set(WORDS_STORE, rv.words);
+        rv.confirm = false;
+        var stale = $('panel-reviews').querySelector('[data-role="rv-preview-stale"]');
+        if (stale) stale.hidden = false;
+      });
+      box.appendChild(el('div', { class: 'field' }, el('label', { for: id }, f.label), input));
+    });
+    if (changedWords()) {
+      box.appendChild(el('div', { class: 'order-actions' }, actionButton('Reset to the usual words', 'btn-quiet', 'rv-words-reset', function () {
+        rv.words = {};
+        SJ.store.remove(WORDS_STORE);
+        rv.preview = null;
+        renderReviews();
+      }, rv.sending)));
+    }
+    return box;
+  }
+
+  async function loadReviews() {
+    rv.loading = true;
+    renderReviews();
+    try {
+      var res = await SJ.api('reviews', { key: state.key });
+      rv.data = res;
+      rv.loaded = true;
+      rv.error = '';
+      if (typeof res.emailsLeft === 'number') state.emailsLeft = res.emailsLeft;
+      // Ticks on people who are no longer in that list are dropped.
+      var still = {};
+      res.customers.forEach(function (c) { if (rv.selected[c.email] && pickableCustomer(c)) still[c.email] = true; });
+      rv.selected = still;
+    } catch (err) {
+      if (err.code === 'unauthorized') {
+        lock(err.message);
+        return;
+      }
+      rv.error = err.message;
+    } finally {
+      rv.loading = false;
+    }
+    renderReviews();
+  }
+
+  function pickableCustomer(c) {
+    return c.status === 'not_asked' || c.status === 'asked';
+  }
+
+  function rvCount(id) {
+    var list = (rv.data && rv.data.customers) || [];
+    return id === 'all' ? list.length : list.filter(function (c) { return c.status === id; }).length;
+  }
+
+  function rvVisible() {
+    var list = (rv.data && rv.data.customers) || [];
+    var q = rv.query.trim().toLowerCase();
+    return list.filter(function (c) {
+      if (q) return (c.name + ' ' + c.email + ' ' + c.lastInvoice).toLowerCase().indexOf(q) !== -1;
+      return rv.filter === 'all' || c.status === rv.filter;
+    });
+  }
+
+  function rvChosen() {
+    return ((rv.data && rv.data.customers) || []).filter(function (c) { return rv.selected[c.email]; });
+  }
+
+  function codeFor(c) {
+    return rv.codeMode === 'one' ? rv.code : rv.codeMode === 'each' ? (rv.codes[c.email] || '') : '';
+  }
+
+  function cleanCodeText(v) {
+    return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+  }
+
+  function rvStars(n) {
+    var s = '';
+    for (var i = 1; i <= 5; i++) s += i <= n ? '★' : '☆';
+    return s;
+  }
+
+  function rvStatusLine(c) {
+    if (c.status === 'reviewed') return 'Reviewed ' + SJ.formatDay(c.reviewedOn) + ' · ' + rvStars(c.stars);
+    if (c.status === 'opted_out') return 'Asked not to get review emails (' + SJ.formatDay(c.optedOut) + ')';
+    if (c.status === 'asked') {
+      return 'Asked ' + SJ.formatDay(c.askedOn) + (c.asked > 1 ? ' (' + plural(c.asked, 'time') + ')' : '') +
+        (c.codes.length ? ' · code ' + c.codes.join(', ') : '');
+    }
+    return 'Not asked yet';
+  }
+
+  function customerCard(c) {
+    var card = el('article', { class: 'order' + (rv.selected[c.email] ? ' order--picked' : ''), 'aria-label': c.name || c.email, 'data-email': c.email });
+    var head = el('span', { class: 'order-name' }, c.name || c.email);
+    if (pickableCustomer(c)) {
+      var pick = el('input', { type: 'checkbox', 'data-role': 'rv-pick', 'aria-label': 'Select ' + (c.name || c.email) });
+      pick.checked = !!rv.selected[c.email];
+      pick.addEventListener('change', function () {
+        if (pick.checked) rv.selected[c.email] = true;
+        else delete rv.selected[c.email];
+        rv.confirm = false;
+        rv.preview = null;
+        renderReviews();
+      });
+      head = el('label', { class: 'pick' }, pick, head);
+    }
+    card.appendChild(el('div', { class: 'order-who' }, head,
+      el('span', { class: 'order-tags' }, el('span', { class: 'status status-' + (c.status === 'reviewed' ? 'delivered' : c.status === 'opted_out' ? 'cancelled' : c.status === 'asked' ? 'paid' : 'awaiting'), 'data-role': 'rv-status' }, RV_STATUS[c.status]))));
+    card.appendChild(el('p', { class: 'order-text' }, c.email));
+    card.appendChild(el('p', { class: 'order-meta' },
+      plural(c.orders, 'order') + ' · last ' + c.lastInvoice + ' on ' + SJ.formatDay(c.lastBought)));
+    card.appendChild(el('p', { class: 'order-meta', 'data-role': 'rv-line' }, rvStatusLine(c)));
+    if (rv.codeMode === 'each' && rv.selected[c.email]) {
+      var input = el('input', {
+        type: 'text', 'data-role': 'rv-code', maxlength: '20', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'characters',
+        'aria-label': 'Promo code for ' + (c.name || c.email), placeholder: 'No code'
+      });
+      input.value = rv.codes[c.email] || '';
+      input.addEventListener('input', function () {
+        rv.codes[c.email] = cleanCodeText(input.value);
+        rv.preview = null;
+        rv.confirm = false;
+      });
+      card.appendChild(el('div', { class: 'field' }, el('label', null, 'Promo code for ' + (c.name.split(' ')[0] || 'them')), input));
+    }
+    return card;
+  }
+
+  function codeChoice() {
+    var wrap = el('div', { class: 'stack-sm' }, el('p', { class: 'method-title', id: 'rv-code-title' }, 'Promo code in the email'));
+    var row = el('div', { class: 'seg', role: 'group', 'aria-labelledby': 'rv-code-title' });
+    [['none', 'No code'], ['one', 'Same code for all'], ['each', 'A code per person']].forEach(function (m) {
+      var b = el('button', { type: 'button', class: 'seg-btn', 'aria-pressed': rv.codeMode === m[0] ? 'true' : 'false', 'data-role': 'rv-mode-' + m[0] }, m[1]);
+      b.addEventListener('click', function () {
+        rv.codeMode = m[0];
+        rv.preview = null;
+        rv.confirm = false;
+        renderReviews();
+      });
+      row.appendChild(b);
+    });
+    wrap.appendChild(row);
+    if (rv.codeMode === 'one') {
+      var input = el('input', { type: 'text', id: 'rv-code-all', 'data-role': 'rv-code-all', maxlength: '20', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'characters', placeholder: 'For example THANKS25' });
+      input.value = rv.code;
+      input.addEventListener('input', function () {
+        rv.code = cleanCodeText(input.value);
+        rv.preview = null;
+        rv.confirm = false;
+      });
+      wrap.appendChild(el('div', { class: 'field' }, el('label', { for: 'rv-code-all' }, 'Code for everyone ticked'), input));
+    }
+    if (rv.codeMode === 'each') wrap.appendChild(el('p', { class: 'fine' }, 'Type each person’s code on their card above. Leave one empty for no code.'));
+    if (rv.codeMode !== 'none') {
+      wrap.appendChild(el('p', { class: 'fine' }, 'The code is only written into the email. It must already be set up and switched on in Settings, and allowed for these emails, or it won’t work for them.'));
+    }
+    return wrap;
+  }
+
+  function reviewsBar(chosen) {
+    var working = rv.sending;
+    var bar = el('section', { class: 'bulk-bar stack-sm', 'aria-label': 'Selected customers' });
+    bar.appendChild(el('p', { class: 'bulk-count', role: 'status' }, plural(chosen.length, 'person', 'people') + ' selected'));
+    bar.appendChild(codeChoice());
+    if (rv.problem) bar.appendChild(el('div', { class: 'alert alert-bad', role: 'alert' }, el('p', null, rv.problem)));
+    var row = el('div', { class: 'order-actions' });
+    if (rv.confirm) {
+      bar.appendChild(el('p', { 'data-role': 'rv-confirm-text' }, 'Send the review email to ' + plural(chosen.length, 'person', 'people') + '?' +
+        (typeof state.emailsLeft === 'number' ? ' ' + plural(state.emailsLeft, 'email') + ' left today.' : '')));
+      row.appendChild(actionButton(working ? 'Sending…' : 'Yes, send', 'btn-primary', 'rv-send-yes', sendReviewEmails, working));
+      row.appendChild(actionButton('Cancel', 'btn-quiet', 'rv-send-no', function () { rv.confirm = false; renderReviews(); }, working));
+    } else {
+      row.appendChild(actionButton('Preview email', 'btn-quiet', 'rv-preview', previewReviewEmail, working));
+      row.appendChild(actionButton('Send to ' + plural(chosen.length, 'person', 'people'), 'btn-primary', 'rv-send', function () {
+        rv.confirm = true;
+        rv.problem = '';
+        renderReviews();
+      }, working));
+      row.appendChild(actionButton('Clear', 'btn-quiet', 'rv-clear', function () {
+        rv.selected = {};
+        rv.preview = null;
+        renderReviews();
+      }, working));
+    }
+    bar.appendChild(row);
+    return bar;
+  }
+
+  async function previewReviewEmail() {
+    var c = rvChosen()[0];
+    if (!c) return;
+    rv.problem = '';
+    try {
+      var res = await SJ.api('previewReview', { key: state.key, email: c.email, code: codeFor(c), words: wordsFor() });
+      rv.preview = { email: c.email, subject: res.subject, html: res.html };
+      rv.scrollToPreview = true;
+    } catch (err) {
+      if (err.code === 'unauthorized') { lock(err.message); return; }
+      rv.problem = err.message;
+    }
+    renderReviews();
+  }
+
+  async function sendReviewEmails() {
+    var chosen = rvChosen();
+    if (!chosen.length) return;
+    rv.sending = true;
+    rv.problem = '';
+    renderReviews();
+    try {
+      var res = await SJ.api('sendReviews', {
+        key: state.key,
+        list: chosen.map(function (c) { return { email: c.email, code: codeFor(c) }; }),
+        words: wordsFor()
+      });
+      if (typeof res.emailsLeft === 'number') state.emailsLeft = res.emailsLeft;
+      var failed = res.results.filter(function (r) { return !r.ok; });
+      rv.result = { sent: res.sent, failed: failed };
+      // The ones that went out are no longer ticked; the ones that didn't stay ticked.
+      var keep = {};
+      failed.forEach(function (r) { keep[r.email] = true; });
+      rv.selected = keep;
+      rv.confirm = false;
+      rv.preview = null;
+      rv.sending = false;
+      await loadReviews();
+      return;
+    } catch (err) {
+      if (err.code === 'unauthorized') { lock(err.message); return; }
+      rv.problem = err.message;
+    }
+    rv.sending = false;
+    rv.confirm = false;
+    renderReviews();
+  }
+
+  function renderReviews() {
+    var panel = $('panel-reviews');
+    var active = document.activeElement;
+    var keepSearch = active && active.id === 'rv-search' ? active.selectionStart : null;
+    SJ.clear(panel);
+    panel.appendChild(el('div', { class: 'stack-sm' },
+      el('h2', { class: 'section-title' }, 'Ask for reviews'),
+      el('p', { class: 'fine' }, 'Everyone who has paid for an order. Tick people and send them an email with five stars: tapping one opens the review page with their stars and email filled in. Each email has a link to stop review emails.')));
+    if (!rv.loaded) {
+      if (rv.error) {
+        panel.appendChild(el('div', { class: 'stack' }, el('p', null, rv.error),
+          el('button', { type: 'button', class: 'btn btn-primary', onclick: loadReviews }, 'Try again')));
+      } else {
+        panel.appendChild(el('p', { class: 'fine', role: 'status' }, 'Loading customers…'));
+      }
+      return;
+    }
+    var d = rv.data;
+    if (!d.reviewsConnected) panel.appendChild(el('div', { class: 'alert alert-wait', role: 'status', 'data-role': 'rv-not-connected' }, el('p', null, d.reviewsMessage + ' Until then nobody shows as reviewed.')));
+    if (rv.result) {
+      var r = rv.result;
+      panel.appendChild(el('div', { class: 'alert ' + (r.failed.length ? 'alert-bad' : 'alert-ok'), role: 'status', 'data-role': 'rv-result' },
+        el('p', null, plural(r.sent, 'email') + ' sent.' + (r.failed.length ? ' These were not sent and are still ticked:' : '')),
+        r.failed.length ? el('ul', null, r.failed.map(function (f) { return el('li', null, f.email + ': ' + f.reason); })) : null));
+    }
+    if (typeof state.emailsLeft === 'number') {
+      panel.appendChild(el('p', { class: 'fine', 'data-role': 'rv-left' }, plural(state.emailsLeft, 'email') + ' can still be sent today (invoices use them too).'));
+    }
+    var search = el('input', { type: 'search', id: 'rv-search', 'aria-label': 'Search customers', autocomplete: 'off', spellcheck: 'false', placeholder: 'Search name, email or invoice' });
+    search.value = rv.query;
+    search.addEventListener('input', function () {
+      rv.query = search.value;
+      renderReviews();
+    });
+    panel.appendChild(el('div', { class: 'field search-field' }, search));
+    var chips = el('div', { class: 'chips', role: 'group', 'aria-label': 'Show customers who are' });
+    RV_FILTERS.forEach(function (f) {
+      var b = el('button', { type: 'button', class: 'chip', 'aria-pressed': rv.filter === f.id && !rv.query.trim() ? 'true' : 'false', 'data-role': 'rv-chip-' + f.id },
+        f.label, el('span', { class: 'chip-count' }, String(rvCount(f.id))));
+      b.addEventListener('click', function () {
+        rv.filter = f.id;
+        rv.query = '';
+        rv.result = null;
+        renderReviews();
+      });
+      chips.appendChild(b);
+    });
+    panel.appendChild(chips);
+
+    var list = rvVisible();
+    var canPick = list.filter(pickableCustomer);
+    if (canPick.length) {
+      var all = canPick.every(function (c) { return rv.selected[c.email]; });
+      panel.appendChild(el('div', { class: 'order-actions' },
+        actionButton(all ? 'Untick all shown' : 'Tick all shown (' + canPick.length + ')', 'btn-quiet', 'rv-all', function () {
+          canPick.forEach(function (c) { if (all) delete rv.selected[c.email]; else rv.selected[c.email] = true; });
+          rv.preview = null;
+          rv.confirm = false;
+          renderReviews();
+        }, rv.sending)));
+    }
+    if (!list.length) {
+      panel.appendChild(el('div', { class: 'empty' }, el('p', null, rv.query.trim() ? 'Nobody matches.' : {
+        not_asked: 'Everyone has been asked.', asked: 'Nobody is waiting to review.', reviewed: 'No reviews yet.',
+        opted_out: 'Nobody has asked to stop review emails.', all: 'Nobody has a paid order yet.'
+      }[rv.filter])));
+    } else {
+      var ul = el('ul', { class: 'orders', 'data-role': 'rv-list' });
+      list.forEach(function (c) { ul.appendChild(el('li', null, customerCard(c))); });
+      panel.appendChild(ul);
+    }
+    var chosen = rvChosen();
+    if (chosen.length) panel.appendChild(wordsEditor());
+    if (chosen.length && rv.preview) {
+      // The email as it will look, sandboxed: its links don't open from here.
+      panel.appendChild(el('section', { class: 'stack-sm', 'aria-label': 'Email preview', 'data-role': 'rv-preview-box' },
+        el('h3', { class: 'section-title' }, 'Preview'),
+        el('p', { class: 'fine' }, 'For ' + rv.preview.email + ' · Subject: ' + rv.preview.subject),
+        el('p', { class: 'alert alert-wait', 'data-role': 'rv-preview-stale', hidden: true }, 'You changed the words. Press Preview email again to see them.'),
+        el('iframe', { class: 'rv-preview', 'data-role': 'rv-preview-frame', title: 'Email preview', sandbox: '', srcdoc: rv.preview.html })));
+    }
+    if (chosen.length) panel.appendChild(reviewsBar(chosen));
+    if (rv.scrollToPreview && $('panel-reviews').querySelector('[data-role="rv-preview-box"]')) {
+      rv.scrollToPreview = false;
+      $('panel-reviews').querySelector('[data-role="rv-preview-box"]').scrollIntoView({ block: 'start' });
+    }
+    if (keepSearch !== null) {
+      var box = $('rv-search');
+      box.focus({ preventScroll: true });
+      box.setSelectionRange(keepSearch, keepSearch);
     }
   }
 

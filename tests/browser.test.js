@@ -2843,3 +2843,92 @@ test('send by: Pudo locker, door and collection each list the paid orders still 
   assert.equal(await page.locator('[data-role="chip-collections"]').count(), 1);
   noErrors(errors);
 });
+
+test('admin: the Reviews tab sorts buyers, previews and sends the review email with a code per person', async (t) => {
+  // Sample orders: Liam has paid and not been asked; Thandi has already reviewed (pretend Feedback Sheet).
+  const { dev, page, errors } = await openAdmin(t, { mode: 'seeded' });
+  await page.click('.tab[data-tab="reviews"]');
+  await page.waitForSelector('[data-role="rv-list"]');
+  assert.equal(await text(page, '[data-role="rv-chip-not_asked"] .chip-count'), '1');
+  assert.equal(await text(page, '[data-role="rv-chip-reviewed"] .chip-count'), '1');
+  assert.equal(await page.isHidden('[data-role="rv-not-connected"]'), true, 'the Feedback Sheet is connected');
+  assert.deepEqual(await page.locator('[data-role="rv-list"] [data-email]').evaluateAll((a) => a.map((x) => x.getAttribute('data-email'))), ['liam@example.com']);
+
+  // Reviewed people can't be ticked.
+  await page.click('[data-role="rv-chip-reviewed"]');
+  await page.waitForSelector('[data-email="thandi@example.com"]');
+  assert.match(await text(page, '[data-email="thandi@example.com"] [data-role="rv-line"]'), /Reviewed .* ★★★★★/);
+  assert.equal(await page.locator('[data-email="thandi@example.com"] [data-role="rv-pick"]').count(), 0);
+
+  // Tick Liam, give him his own code, preview, send.
+  await page.click('[data-role="rv-chip-not_asked"]');
+  await page.check('[data-email="liam@example.com"] [data-role="rv-pick"]');
+  await page.click('[data-role="rv-mode-each"]');
+  await page.fill('[data-email="liam@example.com"] [data-role="rv-code"]', 'thanks25');
+  const mailsBefore = dev.gas.mail.length;
+  await page.click('[data-role="rv-preview"]');
+  await page.waitForSelector('[data-role="rv-preview-frame"]');
+  const preview = await page.locator('[data-role="rv-preview-frame"]').getAttribute('srcdoc');
+  assert.match(preview, /How were your gels\?/);
+  assert.match(preview, /THANKS25/);
+  assert.equal(dev.gas.mail.length, mailsBefore, 'the preview sends nothing');
+
+  await page.click('[data-role="rv-send"]');
+  assert.match(await text(page, '[data-role="rv-confirm-text"]'), /Send the review email to 1 person\?/);
+  await page.click('[data-role="rv-send-yes"]');
+  await page.waitForSelector('[data-role="rv-result"]');
+  assert.match(await text(page, '[data-role="rv-result"]'), /1 email sent/);
+  const sent = dev.gas.mail[dev.gas.mail.length - 1];
+  assert.equal(sent.to, 'liam@example.com');
+  assert.match(sent.htmlBody, /THANKS25/);
+  assert.equal(await text(page, '[data-role="rv-chip-not_asked"] .chip-count'), '0');
+  assert.equal(await text(page, '[data-role="rv-chip-asked"] .chip-count'), '1');
+  await page.click('[data-role="rv-chip-asked"]');
+  assert.match(await text(page, '[data-email="liam@example.com"] [data-role="rv-line"]'), /Asked .* code THANKS25/);
+  assert.equal(dev.gas.rows('Review requests')[0].Code, 'THANKS25');
+  assert.deepEqual(errors, []);
+});
+
+test('admin: the review email words can be changed, are remembered, and can be reset', async (t) => {
+  const { dev, page, errors } = await openAdmin(t, { mode: 'seeded' });
+  await page.click('.tab[data-tab="reviews"]');
+  await page.waitForSelector('[data-role="rv-list"]');
+  assert.equal(await page.locator('[data-role="rv-words"]').count(), 0, 'the words show once someone is ticked');
+  await page.check('[data-email="liam@example.com"] [data-role="rv-pick"]');
+  assert.equal(await page.inputValue('#rv-word-heading'), 'How were your gels?');
+  await page.fill('#rv-word-subject', 'Quick one, {name}?');
+  await page.fill('#rv-word-heading', 'Tell us straight');
+  await page.fill('#rv-word-message', 'Hi {name},\n\nWe made these by hand.');
+  await page.click('[data-role="rv-preview"]');
+  await page.waitForSelector('[data-role="rv-preview-frame"]');
+  const html = await page.locator('[data-role="rv-preview-frame"]').getAttribute('srcdoc');
+  assert.match(html, /Tell us straight/);
+  assert.match(html, /Hi Liam,<\/p>.*We made these by hand\./s);
+  assert.match(await text(page, '[data-role="rv-preview-box"]'), /Subject: Quick one, Liam\?/);
+  // Changing the words again says the preview is out of date.
+  await page.fill('#rv-word-heading', 'Tell us straight, please');
+  assert.equal(await page.isVisible('[data-role="rv-preview-stale"]'), true);
+
+  // Remembered on this phone after a reload.
+  await page.reload();
+  await page.waitForSelector('.tabs');
+  await page.click('.tab[data-tab="reviews"]');
+  await page.waitForSelector('[data-role="rv-list"]');
+  await page.check('[data-email="liam@example.com"] [data-role="rv-pick"]');
+  assert.equal(await page.inputValue('#rv-word-heading'), 'Tell us straight, please');
+
+  await page.click('[data-role="rv-send"]');
+  await page.click('[data-role="rv-send-yes"]');
+  await page.waitForSelector('[data-role="rv-result"]');
+  const sent = dev.gas.mail[dev.gas.mail.length - 1];
+  assert.equal(sent.subject, 'Quick one, Liam?');
+  assert.match(sent.htmlBody, /Tell us straight, please/);
+
+  // Reset puts the usual words back.
+  await page.click('[data-role="rv-chip-asked"]');
+  await page.check('[data-email="liam@example.com"] [data-role="rv-pick"]');
+  await page.click('[data-role="rv-words-reset"]');
+  assert.equal(await page.inputValue('#rv-word-heading'), 'How were your gels?');
+  assert.equal(await page.locator('[data-role="rv-words-reset"]').count(), 0);
+  assert.deepEqual(errors, []);
+});

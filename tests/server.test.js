@@ -2197,3 +2197,165 @@ test('insights: dates and ticked boxes from a table come back as text and yes/no
   assert.equal(r.orders[0].created, '2026-10-01 10:05');
   assert.equal(r.orders[0].collect, true);
 });
+
+// ---------------------------------------------------------------------------
+// Review requests (the Reviews tab on Greg's admin page)
+// ---------------------------------------------------------------------------
+
+const { MockSpreadsheet } = require('./gas-mock');
+
+// Two buyers (Jane twice, Liam), one unpaid order, and a Feedback Sheet where Liam has reviewed.
+function withBuyers() {
+  const feedback = new MockSpreadsheet();
+  const reviews = [['Received', 'Stars', 'Flavour', 'Used for', 'Review', 'Name', 'Email', 'May post', 'Verified buyer', 'Invoice', 'Show on site'],
+    ['2026-10-30 09:00', 5, 'Orange', '', 'Great', 'Liam', 'Liam@Example.com', 'yes', 'yes', 'SJ-0002', '']];
+  feedback.insertSheet('Reviews').getRange(1, 1, reviews.length, reviews[0].length).setValues(reviews);
+  const gas = createGas({ sheets: { 'feedback-id': feedback } });
+  gas.run('setup()');
+  const key = gas.key();
+  gas.call(Object.assign({ action: 'saveSettings', key }, { values: Object.assign({ price: '40', delivery_fee: '30', delivery_quote: 'no', pudo_shipping: 'no', alert_email: 'greg@example.com' }, BANK) }));
+  gas.store.set('FEEDBACK_SHEET_ID', 'https://docs.google.com/spreadsheets/d/feedback-id/edit#gid=0');
+  const place = (over) => { const r = gas.call(order(over)); assert.equal(r.ok, true, JSON.stringify(r)); gas.clock.now += 3600000; return r.order.invoice; };
+  const jane1 = place({ name: 'Jane Doe', email: 'jane@example.com' });
+  const liam = place({ name: 'Liam Botha', email: 'liam@example.com' });
+  const jane2 = place({ name: 'Jane Doe', email: 'Jane@Example.com', qty: 5, expectedTotal: 230 });
+  place({ name: 'Unpaid Una', email: 'una@example.com' });
+  [jane1, liam, jane2].forEach((inv) => assert.equal(gas.call({ action: 'setStatus', key, invoice: inv, status: 'Paid' }).ok, true));
+  gas.call({ action: 'setStatus', key, invoice: jane1, status: 'Delivered' });
+  gas.mail.length = 0;
+  return { gas, key, jane1, jane2, liam };
+}
+
+test('reviews: buyers by email, with who was asked and who reviewed', () => {
+  const { gas, key, jane2 } = withBuyers();
+  const r = gas.call({ action: 'reviews', key });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.reviewsConnected, true);
+  const by = Object.fromEntries(r.customers.map((c) => [c.email, c]));
+  assert.deepEqual(Object.keys(by).sort(), ['jane@example.com', 'liam@example.com'], 'only paid or delivered orders with an email');
+  assert.equal(by['jane@example.com'].orders, 2);
+  assert.equal(by['jane@example.com'].lastInvoice, jane2);
+  assert.equal(by['jane@example.com'].status, 'not_asked');
+  assert.equal(by['liam@example.com'].status, 'reviewed', 'matched by email, whatever the capitals');
+  assert.equal(by['liam@example.com'].stars, 5);
+  assert.equal(by['liam@example.com'].reviewedOn, '2026-10-30 09:00');
+  assert.equal(typeof r.emailsLeft, 'number');
+
+  // Without the Feedback Sheet, it still works and says why reviews are missing.
+  gas.store.delete('FEEDBACK_SHEET_ID');
+  const r2 = gas.call({ action: 'reviews', key });
+  assert.equal(r2.reviewsConnected, false);
+  assert.match(r2.reviewsMessage, /FEEDBACK_SHEET_ID/);
+  assert.equal(r2.customers.find((c) => c.email === 'liam@example.com').status, 'not_asked');
+});
+
+test('reviews: the email has five star links with the email after #, the code, and a way to stop', () => {
+  const { gas, key, jane2 } = withBuyers();
+  const r = gas.call({ action: 'sendReviews', key, list: [{ email: 'jane@example.com', code: 'thanks25' }] });
+  assert.deepEqual([r.ok, r.sent], [true, 1], JSON.stringify(r));
+  assert.equal(gas.mail.length, 1);
+  const m = gas.mail[0];
+  assert.equal(m.to, 'jane@example.com');
+  assert.equal(m.subject, 'How were your Supa Juice gels?');
+  assert.equal(m.replyTo, 'greg@example.com');
+  for (let n = 1; n <= 5; n++) assert.ok(m.htmlBody.includes('https://supajuice.co.za/feedback/#review&amp;stars=' + n + '&amp;email=jane%40example.com'), 'star ' + n);
+  assert.match(m.htmlBody, /Hi Jane,/);
+  assert.match(m.htmlBody, /THANKS25/);
+  assert.match(m.body, /THANKS25/);
+  const row = gas.rows('Review requests')[0];
+  assert.match(row.Token, /^[0-9a-f]{32}$/);
+  assert.ok(m.htmlBody.includes('?action=noreviews&amp;t=' + row.Token));
+  assert.deepEqual([row.Email, row.Name, row.Invoice, row.Code, row['Opted out']], ['jane@example.com', 'Jane Doe', jane2, 'THANKS25', '']);
+  assert.match(row.Sent, /^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+  const jane = gas.call({ action: 'reviews', key }).customers.find((c) => c.email === 'jane@example.com');
+  assert.deepEqual([jane.status, jane.asked, jane.codes], ['asked', 1, ['THANKS25']]);
+
+  // Without a code, there is no code in the email.
+  gas.call({ action: 'sendReviews', key, list: [{ email: 'liam@example.com' }] });
+  assert.doesNotMatch(gas.mail[1].htmlBody, /code for next time/);
+});
+
+test('reviews: a different code per person, only to buyers, once per send, and checked codes', () => {
+  const { gas, key } = withBuyers();
+  const r = gas.call({ action: 'sendReviews', key, list: [
+    { email: 'jane@example.com', code: 'RUN10' }, { email: 'liam@example.com', code: 'THANKS25' },
+    { email: 'jane@example.com', code: 'RUN10' }, { email: 'una@example.com' }, { email: 'stranger@example.com' }] });
+  assert.equal(r.sent, 2);
+  assert.deepEqual(gas.mail.map((m) => [m.to, /RUN10/.test(m.htmlBody), /THANKS25/.test(m.htmlBody)]),
+    [['jane@example.com', true, false], ['liam@example.com', false, true]]);
+  assert.deepEqual(r.results.filter((x) => !x.ok).map((x) => x.email), ['una@example.com', 'stranger@example.com'], 'unpaid and unknown people are never emailed');
+  assert.equal(gas.call({ action: 'sendReviews', key, list: [{ email: 'jane@example.com', code: 'no good!' }] }).error, 'invalid');
+  assert.equal(gas.call({ action: 'sendReviews', key, list: [] }).error, 'invalid');
+  assert.equal(gas.call({ action: 'sendReviews', key, list: Array.from({ length: 41 }, () => ({ email: 'jane@example.com' })) }).error, 'invalid');
+});
+
+test("reviews: the stop link means no more review emails to that person", () => {
+  const { gas, key } = withBuyers();
+  gas.call({ action: 'sendReviews', key, list: [{ email: 'jane@example.com' }] });
+  const token = gas.rows('Review requests')[0].Token;
+  const page = gas.ctx.doGet({ parameter: { action: 'noreviews', t: token } });
+  assert.match(page.getContent(), /get review emails from Supa Juice again/);
+  assert.match(gas.rows('Review requests')[0]['Opted out'], /^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+  const jane = gas.call({ action: 'reviews', key }).customers.find((c) => c.email === 'jane@example.com');
+  assert.equal(jane.status, 'opted_out');
+  const again = gas.call({ action: 'sendReviews', key, list: [{ email: 'jane@example.com' }] });
+  assert.deepEqual([again.sent, again.results[0].reason], [0, 'Asked not to get review emails.']);
+  assert.equal(gas.mail.length, 1, 'no second email');
+  // A made-up token does nothing.
+  assert.match(gas.ctx.doGet({ parameter: { action: 'noreviews', t: 'abcdefabcdefabcdefabcdef' } }).getContent(), /link didn/);
+  assert.match(gas.ctx.doGet({ parameter: { action: 'noreviews', t: '<script>' } }).getContent(), /link didn/);
+});
+
+test('reviews: preview sends nothing, the quota is respected, and only the admin key opens it', () => {
+  const { gas, key } = withBuyers();
+  const p = gas.call({ action: 'previewReview', key, email: 'jane@example.com', code: 'thanks25' });
+  assert.equal(p.ok, true, JSON.stringify(p));
+  assert.match(p.html, /How were your gels\?/);
+  assert.match(p.html, /THANKS25/);
+  assert.equal(gas.mail.length, 0);
+  assert.equal(gas.sheet('Review requests'), null, 'nothing noted');
+  assert.equal(gas.call({ action: 'previewReview', key, email: 'stranger@example.com' }).error, 'not_found');
+
+  gas.mailQuota.left = 1;
+  const r = gas.call({ action: 'sendReviews', key, list: [{ email: 'jane@example.com' }, { email: 'liam@example.com' }] });
+  assert.equal(r.sent, 1);
+  assert.equal(r.results[1].reason, 'No emails left today.');
+  assert.equal(r.emailsLeft, 0);
+
+  gas.run('makeReadKey()');
+  for (const action of ['reviews', 'previewReview', 'sendReviews']) {
+    assert.equal(gas.call({ action, email: 'jane@example.com', list: [{ email: 'jane@example.com' }] }).error, 'unauthorized', action);
+    assert.equal(gas.call({ action, key: gas.store.get('READ_KEY'), list: [] }).error, 'unauthorized', action + ' with the read key');
+  }
+});
+
+test('reviews: Greg can change the words; {name} is filled in, text stays text, and the stars and stop link stay', () => {
+  const { gas, key } = withBuyers();
+  const words = {
+    subject: 'A quick one, {name}?',
+    heading: 'Loved them? <b>Tell us</b>',
+    message: 'Hi {name},\n\nThanks for running with us.\nTap a star below.',
+    codeLine: 'Your next gels are cheaper with:'
+  };
+  const p = gas.call({ action: 'previewReview', key, email: 'jane@example.com', code: 'RUN10', words });
+  assert.equal(p.ok, true, JSON.stringify(p));
+  assert.equal(p.subject, 'A quick one, Jane?');
+  assert.ok(p.html.includes('Loved them? &lt;b&gt;Tell us&lt;/b&gt;'), 'typed HTML is shown as text');
+  assert.ok(!p.html.includes('<b>Tell us'));
+  assert.match(p.html, /Hi Jane,<\/p>.*Thanks for running with us\.<br>Tap a star below\./s);
+  assert.match(p.html, /Your next gels are cheaper with:<br><strong[^>]*>RUN10/);
+  assert.equal((p.html.match(/#review&amp;stars=[1-5]&amp;/g) || []).length, 5, 'the five stars are always there');
+  assert.match(p.html, /Don't ask me for reviews again/);
+  assert.equal(p.defaults.heading, 'How were your gels?');
+
+  const r = gas.call({ action: 'sendReviews', key, list: [{ email: 'jane@example.com' }], words });
+  assert.equal(r.sent, 1);
+  assert.equal(gas.mail[0].subject, 'A quick one, Jane?');
+  assert.match(gas.mail[0].body, /Hi Jane,\n\nThanks for running with us\./);
+
+  // Empty boxes fall back to the usual words; too long is refused.
+  const d = gas.call({ action: 'previewReview', key, email: 'liam@example.com', words: { subject: '  ', message: '' } });
+  assert.equal(d.subject, 'How were your Supa Juice gels?');
+  assert.match(d.html, /Hi Liam, thank you for ordering from us\./);
+  assert.equal(gas.call({ action: 'previewReview', key, email: 'liam@example.com', words: { subject: 'x'.repeat(121) } }).error, 'invalid');
+});

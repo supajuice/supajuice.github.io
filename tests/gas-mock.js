@@ -173,7 +173,10 @@ function formatDate(date, tz, fmt) {
   return parts.year + '-' + parts.month + '-' + parts.day + ' ' + parts.hour + ':' + parts.minute;
 }
 
-function createGas() {
+// opts.sheets: other spreadsheets the script can open with SpreadsheetApp.openById, by ID,
+// such as the Feedback Sheet the review requests read.
+function createGas(opts) {
+  opts = opts || {};
   const ss = new MockSpreadsheet();
   const clock = { now: Date.UTC(2026, 9, 28, 13, 41, 0) }; // 15:41 in Cape Town
   const mail = [];
@@ -223,7 +226,19 @@ function createGas() {
     Date: FakeDate,
     console: { log() {}, error: (m) => errors.push(String(m)), warn() {} },
     Logger: { log: (m) => logs.push(String(m)) },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ss, flush() { throwPending(); } },
+    SpreadsheetApp: {
+      getActiveSpreadsheet: () => ss,
+      openById: (id) => {
+        const other = opts.sheets && opts.sheets[id];
+        if (!other) throw new Error('Unexpected error while getting the method or property openById on object SpreadsheetApp.');
+        return other;
+      },
+      flush() { throwPending(); }
+    },
+    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/TEST/exec' }) },
+    HtmlService: {
+      createHtmlOutput: (html) => ({ html, title: '', setTitle(t) { this.title = t; return this; }, getContent() { return this.html; } })
+    },
     LockService: {
       getScriptLock: () => ({
         waitLock() {
@@ -315,4 +330,4 @@ function createGas() {
   return gas;
 }
 
-module.exports = { createGas };
+module.exports = { createGas, MockSpreadsheet };
