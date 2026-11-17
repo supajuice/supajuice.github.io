@@ -214,6 +214,7 @@ Put your **order page address** in your Instagram bio. That's it, you're open.
 | **Several orders at once** | Tick the boxes on the orders (or **Select all**), then pick an action in the bar at the bottom: mark paid, delivered or collected, email invoices, send a message, cancel, decline or reopen. |
 | **List for a driver** | Under **Paid**, tick the orders and tap **Copy hand-over list**, then paste it into WhatsApp. |
 | **Find an order** | Type a name, invoice number, phone or email into the search box on the Orders tab. |
+| **Collection reminders** | Automatic. At about 5pm the day before, everyone collecting tomorrow (paid or still awaiting payment) is emailed when and where to collect and what they ordered. If they reply, the reply comes to your **Email me new orders** address. To switch them off: **Settings** → **Collection** → untick **Email a reminder the day before**. |
 | **Move a paid collection** | On the order, tap **More** → **Change collection time**. The customer is emailed an updated calendar invite. |
 | **Someone orders by DM** | Admin page → **New order**. Enter the quantity and their name (email optional), then tap **Create order**. Tap **Copy invoice** and paste it into the DM. |
 | **Money arrives** | Find the invoice number (e.g. SJ-0004) in your bank statement reference. Tap **Mark paid** on that order. The customer is emailed the paid invoice. |
@@ -252,7 +253,7 @@ Put your **order page address** in your Instagram bio. That's it, you're open.
 If you are sent a new `Code.gs`:
 
 1. Apps Script → `Code.gs` → select all, delete, paste the new code, **⌘ + S**.
-2. Choose **setup** and click **Run**. It keeps your orders, settings and key.
+2. Choose **setup** and click **Run**. It keeps your orders, settings and key. If Google asks for permission again (for example to run the daily collection reminder), allow it the same way as the first time.
 3. Click **Deploy → Manage deployments**, click the **pencil icon**, set **Version** to **New version**, and click **Deploy**.
 
 Your web app address stays the same, so you do not need to change anything on GitHub.

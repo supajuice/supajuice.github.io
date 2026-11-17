@@ -217,6 +217,8 @@ function createGas(opts) {
     return reply(404, { status: false, message: 'Not found' });
   }
 
+  const triggers = [];
+
   class FakeDate extends Date {
     constructor(...a) { if (a.length === 0) super(clock.now); else super(...a); }
     static now() { return clock.now; }
@@ -235,7 +237,27 @@ function createGas(opts) {
       },
       flush() { throwPending(); }
     },
-    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/TEST/exec' }) },
+    ScriptApp: {
+      getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/TEST/exec' }),
+      // Time-driven triggers: kept in the triggers list so tests can see what setup made.
+      getProjectTriggers: () => triggers.slice(),
+      deleteTrigger: (t) => { const i = triggers.indexOf(t); if (i !== -1) triggers.splice(i, 1); },
+      newTrigger: (handler) => {
+        const spec = { handler };
+        const b = {
+          timeBased() { return b; },
+          everyDays(n) { spec.everyDays = n; return b; },
+          atHour(h) { spec.atHour = h; return b; },
+          nearMinute(m) { spec.nearMinute = m; return b; },
+          create() {
+            const t = Object.assign({ getHandlerFunction: () => handler }, spec);
+            triggers.push(t);
+            return t;
+          }
+        };
+        return b;
+      }
+    },
     HtmlService: {
       createHtmlOutput: (html) => ({ html, title: '', setTitle(t) { this.title = t; return this; }, getContent() { return this.html; } })
     },
@@ -295,7 +317,7 @@ function createGas(opts) {
   vm.runInContext(code, ctx, { filename: 'Code.gs' });
 
   const gas = {
-    ctx, ss, clock, mail, mailQuota, paystack, logs, errors, sleeps, lock, store, cacheStore,
+    ctx, ss, clock, mail, mailQuota, triggers, paystack, logs, errors, sleeps, lock, store, cacheStore,
     // Send one request through doPost, like the pages do.
     call(body) {
       const out = ctx.doPost({ postData: { contents: JSON.stringify(body), type: 'text/plain' } });

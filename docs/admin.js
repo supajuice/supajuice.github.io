@@ -98,6 +98,7 @@
         { key: 'collection_hours', label: 'Usual times', hint: 'New dates start with these. You can change any date below.', type: 'hours' },
         { key: 'collection_slot_minutes', label: 'Length of each time', type: 'select', options: [['15', '15 minutes'], ['30', '30 minutes'], ['60', '1 hour']] },
         { key: 'collection_per_slot', label: 'Customers per time', hint: '1 means no two customers share a time', mode: 'numeric', max: 2 },
+        { key: 'collection_reminders', label: 'Email a reminder the day before', hint: 'At about 5pm the day before, everyone collecting tomorrow is emailed when, where and what they are collecting. They can reply to it if they can\'t make it.', type: 'checkbox', wide: true },
         { key: 'collection_dates', label: 'Dates and times you hand over orders', hint: 'Tap a date, then set From and To for each time you are there that day. Customers pick a time inside it. From tomorrow up to 30 days ahead. Add new dates as the weeks go by.', type: 'dates' }
       ]
     },

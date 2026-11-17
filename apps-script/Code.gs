@@ -26,6 +26,8 @@
  * Customers who collect pick a time slot from the collection hours in Settings. When
  * the order is marked paid, the paid invoice email carries a calendar invite (.ics).
  * Moving the time or cancelling a paid order emails an update to that invite.
+ * At about 17:00 the day before, each customer collecting tomorrow is emailed a reminder
+ * (sendCollectionReminders, a daily trigger made by setup). Replies go to Greg.
  *
  * Collection orders can be paid by card through Paystack when PAYSTACK_SECRET_KEY is
  * set in Script properties. The order is marked paid only after this script asks
@@ -108,6 +110,7 @@ const SETTING_DEFS = [
   { key: 'collection_hours', value: '17:00-19:00', note: 'The usual collection times, for example 17:00-19:00. New dates start with these, and each date can have its own.' },
   { key: 'collection_slot_minutes', value: '30', note: 'Length of one collection time in minutes: 15, 30 or 60.' },
   { key: 'collection_per_slot', value: '1', note: 'How many customers can book the same collection time.' },
+  { key: 'collection_reminders', value: 'yes', note: 'yes: at about 17:00 the day before, everyone collecting tomorrow is emailed a reminder of when, where and what. Replies come to the alert email. no: no reminders.' },
   { key: 'pudo_shipping', value: 'yes', note: 'yes: the delivery fee is worked out from the box and Pudo price for the number of sachets, to the door or to a Pudo locker. no: use the delivery fee above.' },
   { key: 'pudo_collection_box', value: 'yes', note: 'yes: collection orders pay for their box too (shown as the collection fee). no: collection is free.' },
   { key: 'sachet_grams', value: '130', note: 'Weight of one full sachet in grams. A box is never filled past its Pudo weight limit.' },
@@ -1639,6 +1642,117 @@ function emailInvite_(order, s, kind) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Collection reminders
+// ---------------------------------------------------------------------------
+
+// The day before a collection, at about 17:00 Cape Town time, each customer collecting
+// tomorrow is emailed a reminder: when, where, and what they are collecting. Replies go to
+// Greg (the alert email), so a customer who can't make it just replies.
+// setup() turns on the daily run. It skips cancelled orders, orders already handed over,
+// new requests and orders without an email. Each order is reminded once per collection time.
+const REMINDER_HOUR = 17;
+const REMINDER_HANDLER = 'sendCollectionReminders';
+
+/** Runs every day at about 17:00 (started by setup). Can also be run by hand from the editor. */
+function sendCollectionReminders() {
+  const s = readTypedSettings_();
+  if (!s.reminders) {
+    Logger.log('Collection reminders are switched off in Settings.');
+    return { sent: 0, failed: 0 };
+  }
+  const tz = Session.getScriptTimeZone();
+  const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm').slice(0, 10);
+  const tomorrow = Utilities.formatDate(new Date(Date.now() + 86400000), tz, 'yyyy-MM-dd HH:mm').slice(0, 10);
+
+  const props = PropertiesService.getScriptProperties();
+  let done = {};
+  try { done = JSON.parse(props.getProperty('REMINDED') || '{}') || {}; } catch (err) { done = {}; }
+  // Forget reminders for collections that are already past.
+  Object.keys(done).forEach(function (k) { if (str_(done[k]).slice(0, 10) < today) delete done[k]; });
+
+  const sheet = ordersSheet_();
+  const last = sheet.getLastRow();
+  let sent = 0;
+  let failed = 0;
+  if (last >= 2) {
+    const first = Math.max(2, last - 999);
+    sheet.getRange(first, 1, last - first + 1, HEADERS.length).getValues().forEach(function (r) {
+      const o = rowToOrder_(r);
+      if (!o.invoice || !o.collect || !SLOT_PATTERN.test(o.collectAt) || o.collectAt.slice(0, 10) !== tomorrow) return;
+      if (o.status !== STATUS.PAID && o.status !== STATUS.AWAITING) return;
+      if (!EMAIL_PATTERN.test(o.email) || done[o.invoice] === o.collectAt) return;
+      if (emailReminder_(o, s)) {
+        done[o.invoice] = o.collectAt;
+        sent++;
+      } else {
+        failed++;
+      }
+    });
+  }
+  props.setProperty('REMINDED', JSON.stringify(done));
+  Logger.log('Collection reminders for ' + tomorrow + ': ' + sent + ' sent' + (failed ? ', ' + failed + ' failed' : '') + '.');
+  return { sent: sent, failed: failed };
+}
+
+// "17:00 to 17:30" for a collection at 17:00 with 30-minute times.
+function reminderTime_(o, s) {
+  const m = SLOT_PATTERN.exec(o.collectAt);
+  const start = Number(m[4]) * 60 + Number(m[5]);
+  return clock_(start) + ' to ' + clock_(Math.min(start + s.slots.step, 23 * 60 + 59));
+}
+
+function reminderText_(o, s) {
+  const what = o.qty + ' x ' + s.product + (flavourText_(o) ? ' (' + flavourText_(o) + ')' : '');
+  const lines = [
+    'Hi ' + o.name + ',',
+    '',
+    'Just a friendly reminder that your ' + s.brand + ' order is ready for you to collect tomorrow.',
+    '',
+    'When:   ' + dayOf_(Date.UTC(Number(o.collectAt.slice(0, 4)), Number(o.collectAt.slice(5, 7)) - 1, Number(o.collectAt.slice(8, 10)))).label +
+      ', ' + reminderTime_(o, s),
+    'Where:  ' + collectPlace_(o, s),
+    'What:   ' + what,
+    'Order:  ' + o.invoice
+  ];
+  if (o.status === STATUS.AWAITING) {
+    lines.push('', 'We have not received payment for this order yet (' + money_(o.total, s.currency) + '). ' +
+      'Please pay before you collect, using ' + o.invoice + ' as the reference. If you have already paid, thank you, and please ignore this.');
+  }
+  lines.push('',
+    'Can\'t make it, or has something come up? Just reply to this email and we\'ll find another time that works.',
+    '', 'See you tomorrow!', s.brand);
+  return lines.join('\n');
+}
+
+// Returns true when sent. Never throws.
+function emailReminder_(o, s) {
+  try {
+    if (MailApp.getRemainingDailyQuota() < 1) throw new Error('the daily email quota is used up');
+    const message = {
+      to: o.email,
+      subject: 'Reminder: collect your ' + s.brand + ' order tomorrow (' + o.invoice + ')',
+      body: reminderText_(o, s),
+      name: s.brand
+    };
+    // Mail comes from the account that deployed the script. Replies go to Greg.
+    if (EMAIL_PATTERN.test(s.alertEmail)) message.replyTo = s.alertEmail;
+    MailApp.sendEmail(message);
+    return true;
+  } catch (err) {
+    console.error('Reminder email failed for ' + o.invoice + ': ' + err);
+    return false;
+  }
+}
+
+// Makes sure exactly one daily run exists. Called by setup().
+function installReminderTrigger_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === REMINDER_HANDLER) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger(REMINDER_HANDLER).timeBased().everyDays(1).atHour(REMINDER_HOUR).nearMinute(0).create();
+}
+
 function lineTotal_(o) {
   return Math.round(o.price * 100) * o.qty / 100;
 }
@@ -1860,6 +1974,7 @@ function readTypedSettings_() {
     maxQty: maxQty,
     prefix: (raw.invoice_prefix || 'SJ').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'SJ',
     alertEmail: raw.alert_email,
+    reminders: String(raw.collection_reminders).toLowerCase() !== 'no',
     bank: bank,
     paymentNote: raw.payment_note,
     slots: readSlots_(raw),
@@ -2012,6 +2127,12 @@ function validateSetting_(key, value) {
       if (t === 'yes' || t === 'true') return 'yes';
       if (t === 'no' || t === 'false') return 'no';
       throw fail_('invalid', 'Pudo settings must be yes or no.');
+    }
+    case 'collection_reminders': {
+      const t = text.toLowerCase();
+      if (t === 'yes' || t === 'true') return 'yes';
+      if (t === 'no' || t === 'false') return 'no';
+      throw fail_('invalid', 'Collection reminders must be yes or no.');
     }
     case 'sachet_grams': {
       const n = parseNumber_(text, NaN);
@@ -2796,7 +2917,11 @@ function setup() {
     props.setProperty('ADMIN_KEY', newKey_());
     created = true;
   }
+  // The daily collection reminder, at about 17:00.
+  installReminderTrigger_();
+
   Logger.log(created ? 'Setup done. Admin key created.' : 'Setup done. Admin key already existed.');
+  Logger.log('Collection reminders run every day at about 17:00.');
   Logger.log('Admin key: ' + props.getProperty('ADMIN_KEY'));
   Logger.log('Give the key only to the person who runs the orders.');
 }

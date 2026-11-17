@@ -2359,3 +2359,81 @@ test('reviews: Greg can change the words; {name} is filled in, text stays text, 
   assert.match(d.html, /Hi Liam, thank you for ordering from us\./);
   assert.equal(gas.call({ action: 'previewReview', key, email: 'liam@example.com', words: { subject: 'x'.repeat(121) } }).error, 'invalid');
 });
+
+// ---------------------------------------------------------------------------
+// Collection reminders
+// ---------------------------------------------------------------------------
+// The mock clock is Wed 28 Oct 2026, 15:41 in Cape Town, so "tomorrow" is Thu 29 Oct.
+
+const remind = (gas) => gas.run('sendCollectionReminders()');
+const reminders = (gas) => gas.mail.filter((m) => /^Reminder:/.test(m.subject));
+
+test('setup turns on one daily reminder run at about 5pm, and running it again keeps just one', () => {
+  const gas = createGas();
+  gas.run('setup()');
+  gas.run('setup()');
+  assert.equal(gas.triggers.length, 1);
+  const t = gas.triggers[0];
+  assert.equal(t.getHandlerFunction(), 'sendCollectionReminders');
+  assert.equal(t.everyDays, 1);
+  assert.equal(t.atHour, 17);
+  assert.equal(t.nearMinute, 0);
+});
+
+test('everyone collecting tomorrow gets one reminder with when, where and what, and replies go to Greg', () => {
+  const { gas, key } = ready();
+  gas.call({ action: 'saveSettings', key, values: { collection_address: '267 High Level Road, Sea Point' } });
+  gas.call(pickup({ qty: 5, expectedTotal: 200, flavours: { orange: 3, cranberry: 2 } })); // SJ-0001, awaiting payment
+  gas.call(pickup({ name: 'Paid Pam', email: 'pam@example.com', collectAt: TOMORROW + ' 17:30' })); // SJ-0002
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0002', status: 'Paid' });
+  gas.call(pickup({ name: 'Cancel Carl', email: 'carl@example.com', collectAt: TOMORROW + ' 18:00' })); // SJ-0003
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0003', status: 'Cancelled' });
+  gas.call(pickup({ name: 'Later Lu', email: 'lu@example.com', collectAt: '2026-10-30 17:00' })); // SJ-0004, not tomorrow
+  gas.call(order({ name: 'Door Dee', email: 'dee@example.com' })); // SJ-0005, a delivery
+  gas.call(dm(key, { collect: true, collectAt: TOMORROW + ' 18:30' })); // SJ-0006, no email
+
+  const r = remind(gas);
+  assert.equal(r.sent, 2);
+  const sent = reminders(gas);
+  assert.deepEqual(sent.map((m) => m.to).sort(), ['jane@example.com', 'pam@example.com']);
+
+  const jane = sent.find((m) => m.to === 'jane@example.com');
+  assert.equal(jane.subject, 'Reminder: collect your Supa Juice order tomorrow (SJ-0001)');
+  assert.equal(jane.replyTo, 'greg@example.com');
+  assert.match(jane.body, /^Hi Jane Doe,/);
+  assert.match(jane.body, /When: +Thu 29 Oct, 17:00 to 17:30/);
+  assert.match(jane.body, /Where: +267 High Level Road, Sea Point/);
+  assert.match(jane.body, /What: +5 x Running gel sachet \(3 Orange, 2 Cranberry\)/);
+  assert.match(jane.body, /Order: +SJ-0001/);
+  assert.match(jane.body, /not received payment for this order yet \(R200\)/);
+  assert.match(jane.body, /reply to this email/i);
+
+  const pam = sent.find((m) => m.to === 'pam@example.com');
+  assert.doesNotMatch(pam.body, /payment/);
+  assert.match(pam.body, /17:30 to 18:00/);
+
+  // A second run the same day sends nothing new.
+  assert.equal(remind(gas).sent, 0);
+  assert.equal(reminders(gas).length, 2);
+});
+
+test('a moved collection gets a fresh reminder, and switching reminders off stops them', () => {
+  const { gas, key } = ready();
+  gas.call(pickup()); // SJ-0001, tomorrow 17:00
+  gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
+  assert.equal(remind(gas).sent, 1);
+  gas.call({ action: 'setCollectTime', key, invoice: 'SJ-0001', collectAt: TOMORROW + ' 18:00' });
+  assert.equal(remind(gas).sent, 1, 'the new time is reminded');
+  assert.match(reminders(gas)[1].body, /18:00 to 18:30/);
+
+  // The next day, Friday's collection is reminded on Thursday.
+  gas.call(pickup({ name: 'Fri', email: 'fri@example.com', collectAt: '2026-10-30 17:00' }));
+  gas.clock.now += 86400000;
+  assert.equal(remind(gas).sent, 1);
+
+  const off = gas.call({ action: 'saveSettings', key, values: { collection_reminders: 'no' } });
+  assert.equal(off.ok, true, JSON.stringify(off));
+  gas.call(pickup({ name: 'Sat', email: 'sat@example.com', collectAt: '2026-10-31 17:00' }));
+  assert.equal(remind(gas).sent, 0);
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { collection_reminders: 'maybe' } }).error, 'invalid');
+});
