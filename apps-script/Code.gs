@@ -29,7 +29,7 @@
  * At about 17:00 the day before, each customer collecting tomorrow is emailed a reminder
  * (sendCollectionReminders, a daily trigger made by setup). Replies go to Greg.
  *
- * Collection orders can be paid by card through Paystack when PAYSTACK_SECRET_KEY is
+ * Collection and Pudo locker orders can be paid by card through Paystack when PAYSTACK_SECRET_KEY is
  * set in Script properties. The order is marked paid only after this script asks
  * Paystack itself that the payment went through, so a faked message changes nothing.
  *
@@ -361,7 +361,10 @@ function createOrder_(body, source) {
 
   if (kiosk) sendAlert_(order, settings);
   // A request gets no email yet: the invoice goes out when Greg accepts it.
-  const emailed = order.email && order.status === STATUS.AWAITING ? emailInvoice_(order, settings) : undefined;
+  // A collection or locker order from the order page is paid on the page (card switched on),
+  // so it gets no unpaid invoice: the paid invoice is emailed once the payment is confirmed.
+  const payOnPage = kiosk && cardAllowed_(order) && !!paystackKey_();
+  const emailed = order.email && order.status === STATUS.AWAITING && !payOnPage ? emailInvoice_(order, settings) : undefined;
   return orderResponse_(order, settings, emailed);
 }
 
@@ -1385,6 +1388,7 @@ function emailInvoice_(order, s, extra) {
       to: order.email,
       subject: s.brand + ' invoice ' + order.invoice + (isPaid_(order) ? ' (paid)' : ''),
       body: 'Hi ' + order.name + ',\n\nYour invoice is attached.' +
+        (payLine_(order) ? '\n\n' + payLine_(order) + '\nOr pay by bank transfer with the details below.' : '') +
         (invite ? ' So is a calendar invite for your collection on ' + formatSlot_(order.collectAt) + '.\n' +
           'Using Google Calendar? Add it here: ' + googleCalendarLink_(order, s) : '') +
         '\n\n' + invoiceText_(order, s),
@@ -1504,6 +1508,9 @@ function invoiceHtml_(o, s) {
       '</table>'
     );
     if (s.paymentNote) parts.push('<p class="note">' + esc_(s.paymentNote) + '</p>');
+    if (payLine_(o)) {
+      parts.push('<h2>Or pay by card</h2><p>Card, Apple Pay or instant EFT: <a href="' + esc_(payLink_(o)) + '">' + esc_(ORDER_PAGE.replace(/^https:\/\//, '')) + '</a></p>');
+    }
   }
   parts.push('</body></html>');
   return parts.join('');
@@ -1718,6 +1725,7 @@ function reminderText_(o, s) {
   if (o.status === STATUS.AWAITING) {
     lines.push('', 'We have not received payment for this order yet (' + money_(o.total, s.currency) + '). ' +
       'Please pay before you collect, using ' + o.invoice + ' as the reference. If you have already paid, thank you, and please ignore this.');
+    if (payLine_(o)) lines.push(payLine_(o));
   }
   lines.push('',
     'Can\'t make it, or has something come up? Just reply to this email and we\'ll find another time that works.',
@@ -2004,7 +2012,7 @@ function publicConfig_(s, slots) {
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
     collectSlots: slots, // [{ date, label, times }], the free collection times
     collectAhead: COLLECT_WINDOW_DAYS,
-    cardPay: !!paystackKey_(), // collection orders can be paid by card
+    cardPay: !!paystackKey_(), // collection and Pudo locker orders can be paid by card
     codesOn: s.codes.some(function (c) { return c.live; }), // shows the discount code box. The codes stay private.
     ready: s.ready
   };
@@ -2606,6 +2614,7 @@ function packLine_(order, s) {
 
 const PAYSTACK_API = 'https://api.paystack.co';
 const PAYSTACK_CURRENCY = 'ZAR';
+const ORDER_PAGE = 'https://supajuice.co.za/';
 const REFERENCE_PATTERN = /^[A-Za-z0-9.=-]{6,100}$/;
 
 function paystackKey_() {
@@ -2636,8 +2645,26 @@ function paystack_(method, path, payload) {
   return { code: res.getResponseCode(), json: json && typeof json === 'object' ? json : {} };
 }
 
-// The customer taps "Pay by card" on the confirmation screen. Only a collection order that
-// is waiting for payment can be paid, and only with the email it was placed with.
+// Card payment is for collection and Pudo locker orders. Door delivery stays bank transfer.
+function cardAllowed_(order) {
+  return order.collect || /^Pudo locker/.test(order.address);
+}
+
+// The link in an unpaid invoice email that opens Paystack for that order. The email is
+// after # so it never reaches a server; startPayment_ checks it matches the order.
+function payLink_(order) {
+  return ORDER_PAGE + '?pay=' + encodeURIComponent(order.invoice) + '#' + encodeURIComponent(order.email);
+}
+
+// The pay-by-card line for an unpaid collection or locker order, or '' when there is none.
+function payLine_(order) {
+  if (order.status !== STATUS.AWAITING || !order.email || !cardAllowed_(order) || !paystackKey_()) return '';
+  return 'Pay by card, Apple Pay or instant EFT: ' + payLink_(order);
+}
+
+// The customer taps "Pay by card" on the confirmation screen, or the link in their invoice
+// email. Only a collection or Pudo locker order that is waiting for payment can be paid,
+// and only with the email it was placed with.
 function startPayment_(body) {
   const invoice = clean_(body.invoice, 32);
   const email = clean_(body.email, 120).toLowerCase();
@@ -2650,7 +2677,7 @@ function startPayment_(body) {
   if (!row || !email || str_(row[COL.EMAIL]).toLowerCase() !== email) throw fail_('not_found', 'We could not find that order.');
   const order = rowToOrder_(row);
   if (order.status === STATUS.PAID || order.status === STATUS.DELIVERED) return { ok: true, paid: true };
-  if (!order.collect) throw fail_('invalid', 'Card payment is for collection orders. Please pay by bank transfer.');
+  if (!cardAllowed_(order)) throw fail_('invalid', 'Card payment is for collection and Pudo locker orders. Please pay by bank transfer.');
   if (order.status !== STATUS.AWAITING) throw fail_('invalid', 'Order ' + order.invoice + ' is ' + order.status + ' and cannot be paid.');
 
   // Each try gets its own reference: Paystack never accepts the same one twice.
