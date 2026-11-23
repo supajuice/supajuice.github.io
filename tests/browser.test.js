@@ -2287,7 +2287,7 @@ test('admin: settings show the current values and the order page link', async (t
   assert.deepEqual(values, {
     price: '40', delivery_fee: '30', delivery_quote: 'on',
     locker_fees: '', min_quantity: '1', max_quantity: '20',
-    collection_note: 'Sea Point', collection_address: '', collection_slot_minutes: '30', collection_per_slot: '1',
+    collection_note: 'Sea Point', collection_address: '', collection_slot_minutes: '30', collection_per_slot: '1', collection_reminders: 'on',
     bank_name: 'Test Bank', account_holder: 'G Bolus', account_number: '0012345678', branch_code: '250655',
     account_type: 'Cheque', payment_note: 'We will confirm once your payment reflects in our account, then deliver.',
     brand_name: 'Supa Juice', product_name: 'Running gel sachet', currency_symbol: 'R', invoice_prefix: 'SJ',
