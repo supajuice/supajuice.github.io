@@ -188,10 +188,9 @@ The **Reviews** tab on Greg's page lists everyone with a paid or delivered order
 
 Customers who collect, or who have their order sent to a Pudo locker, can pay by card, Apple Pay or instant EFT on Paystack's secure page. When they come back, the order turns **Paid** by itself and they get the paid invoice (and, for a collection, the calendar invite). Bank transfer stays as the other option. Door-to-door delivery is still paid by bank transfer only.
 
-- **Collection, or a locker order with a fixed locker price:** the total is known straight away, so a **Pay by card** button shows on the confirmation screen.
-- **A locker order where Greg sets the fee:** nothing can be paid until the fee is set. When Greg accepts the request, the invoice email has a **Pay by card** link (also in the PDF). The link opens Paystack for exactly that order, for the full total including delivery. The customer's email sits after `#` in the link, so it never reaches a server, and the link only works with the email the order was placed with.
-- The collection reminder email the day before also has the link if the order is still unpaid.
-- Invoices sent again with **Email invoice** get the link too, as long as the order is still waiting for payment.
+- **Customers pay on the website.** Collection and locker orders show a **Pay by card** button straight after ordering. No unpaid invoice is emailed for them: once Paystack confirms the payment, the customer is emailed the **paid** invoice (PDF), plus the calendar invite for a collection. The bank details still show on the page for anyone who would rather transfer.
+- **Locker prices must be fixed** so the total is known when the customer orders. On the admin page, under **Settings**, set **Pudo locker prices** to `14 90, 29 120, 500 150` (under 15 gels R90, 15 to 29 R120, 30 or more R150) and make sure **Pudo shipping** is `no` (otherwise the box-size Pudo prices are used instead).
+- **Pay by card link:** invoices that are still emailed unpaid (orders Greg enters himself, or one sent again with **Email invoice**) have a **Pay by card** link for collection and locker orders, as does the day-before collection reminder. The link opens Paystack for exactly that order. The customer's email sits after `#` in the link, so it never reaches a server, and the link only works with the email the order was placed with.
 
 1. In Paystack, open **Settings > API Keys & Webhooks** and copy the **Test Secret Key** (it starts with `sk_test_`). Never put it in the website files.
 2. In Apps Script, click the gear (**Project Settings**). Under **Script properties**, click **Add script property**. Property: `PAYSTACK_SECRET_KEY`. Value: the key. **Save script properties**.

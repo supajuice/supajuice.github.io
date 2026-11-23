@@ -639,6 +639,7 @@ test('order page: a Pudo locker order can be paid by card, on the page or from t
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await page.locator('#card-section').isVisible(), true);
   assert.equal(await text(page, '#pay-card'), 'Pay R130 by card');
+  assert.match(await text(page, '#done-email'), /Once you have paid, we email your paid invoice to jane@example\.com/);
 
   // The link in the invoice email goes straight to Paystack, and the email leaves the address.
   await page.goto(dev.siteUrl + '/?pay=SJ-0001#jane%40example.com');

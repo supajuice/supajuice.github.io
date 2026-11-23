@@ -361,7 +361,10 @@ function createOrder_(body, source) {
 
   if (kiosk) sendAlert_(order, settings);
   // A request gets no email yet: the invoice goes out when Greg accepts it.
-  const emailed = order.email && order.status === STATUS.AWAITING ? emailInvoice_(order, settings) : undefined;
+  // A collection or locker order from the order page is paid on the page (card switched on),
+  // so it gets no unpaid invoice: the paid invoice is emailed once the payment is confirmed.
+  const payOnPage = kiosk && cardAllowed_(order) && !!paystackKey_();
+  const emailed = order.email && order.status === STATUS.AWAITING && !payOnPage ? emailInvoice_(order, settings) : undefined;
   return orderResponse_(order, settings, emailed);
 }
 

@@ -1779,6 +1779,33 @@ test('a Pudo locker order: Greg sets the fee, the invoice email has a card link,
   assert.match(gas.rows('Orders')[0].Notes, /Paid by card \(Paystack SJ-0001-/);
 });
 
+test('with card on, collection and locker customers pay on the page: no unpaid invoice, then a paid one', () => {
+  const { gas, key } = readyQuote();
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { locker_fees: '14 90, 29 120, 500 150', max_quantity: '100' } }).ok, true);
+  gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
+  // Under 15 gels R90, 15 to 29 R120, 30 or more R150.
+  [[14, 90], [15, 120], [29, 120], [30, 150], [100, 150]].forEach(([qty, fee]) => {
+    const r = gas.call(order({ ship: 'locker', address: '12 Main Rd', qty, expectedTotal: qty * 40 + fee, requestId: rid() }));
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.order.fee, fee, qty + ' gels');
+    assert.equal(r.order.status, 'Awaiting payment', 'paid straight away, not a request');
+  });
+  gas.call(order({ collect: true, address: '', qty: 3, expectedTotal: 120, collectAt: '2026-10-29 17:00', requestId: rid() }));
+  assert.equal(gas.mail.filter((m) => m.to === 'jane@example.com').length, 0, 'no unpaid invoices emailed');
+
+  const tx = (gas.call(startPay()), gas.paystack.last());
+  assert.equal(tx.amount, (14 * 40 + 90) * 100);
+  gas.paystack.pay(tx.reference);
+  assert.equal(gas.call({ action: 'confirmPayment', reference: tx.reference }).paid, true);
+  const sent = gas.mail.filter((m) => m.to === 'jane@example.com');
+  assert.equal(sent.length, 1, 'the paid invoice');
+  assert.match(sent[0].subject, /SJ-0001 \(paid\)/);
+  assert.ok(sent[0].attachments.some((a) => /\.pdf$/.test(a.getName())), 'invoice PDF attached');
+
+  // Door delivery is unchanged: a request, and its invoice is emailed once Greg sets the fee.
+  assert.equal(gas.call(order({ qty: 5, expectedTotal: 200, requestId: rid() })).order.status, 'New request');
+});
+
 test('door delivery invoices have no card link, and card links only appear once Paystack is switched on', () => {
   const { gas, key } = readyQuote();
   gas.call(order({ qty: 5, expectedTotal: 200 })); // to the door

@@ -680,7 +680,8 @@
 
     var emailNote = $('done-email');
     emailNote.hidden = restored || request || paid || !o.email;
-    if (o.emailedOn) emailNote.textContent = 'We have emailed your invoice to ' + o.email + '. Check your spam folder if it is not there.';
+    if (!o.emailedOn && cardOn(o)) emailNote.textContent = 'Once you have paid, we email your paid invoice to ' + o.email + '.';
+    else if (o.emailedOn) emailNote.textContent = 'We have emailed your invoice to ' + o.email + '. Check your spam folder if it is not there.';
     else emailNote.textContent = 'We could not email your invoice just now. Take a screenshot of this page instead.';
 
     var collectNote = $('done-collect');
@@ -688,6 +689,7 @@
     var place = res.collectNote ? ' from ' + res.collectNote : '';
     if (!o.collect) collectNote.textContent = '';
     else if (o.collectAt && paid) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. The address and calendar invite are in your email.';
+    else if (o.collectAt && !o.emailedOn && cardOn(o)) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. Once you have paid, the address and a calendar invite are emailed to you.';
     else if (o.collectAt) collectNote.textContent = 'Collect on ' + SJ.formatWhen(o.collectAt) + place + '. The address is in your email, and a calendar invite follows once your payment is confirmed.';
     else collectNote.textContent = 'You are collecting this order' + place + '. We will DM you to arrange a time.';
 
