@@ -1753,6 +1753,49 @@ test('starting a card payment needs the right email, a collection, and an unpaid
   assert.equal(paid.url, undefined);
 });
 
+test('a Pudo locker order: Greg sets the fee, the invoice email has a card link, and paying marks it paid', () => {
+  const { gas, key } = readyQuote();
+  gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
+  const placed = gas.call(order({ ship: 'locker', address: '12 Main Rd, Sea Point', qty: 5, expectedTotal: 200 }));
+  assert.equal(placed.order.status, 'New request');
+  // Nothing to pay until the fee is set.
+  assert.equal(gas.call(startPay()).error, 'invalid');
+
+  gas.mail.length = 0;
+  const accepted = gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0001', fee: 'R69' });
+  assert.equal(accepted.order.total, 269);
+  const invoice = gas.mail.find((m) => m.to === 'jane@example.com');
+  assert.ok(invoice, 'invoice emailed');
+  assert.match(invoice.body, /Pay by card, Apple Pay or instant EFT: https:\/\/supajuice\.co\.za\/\?pay=SJ-0001#jane%40example\.com/);
+  assert.match(invoice.body, /Account number/, 'bank transfer is still offered');
+
+  assert.equal(gas.call(startPay()).ok, true);
+  const tx = gas.paystack.last();
+  assert.equal(tx.amount, 26900, 'R269 in cents, delivery included');
+  gas.paystack.pay(tx.reference);
+  const done = gas.call({ action: 'confirmPayment', reference: tx.reference });
+  assert.equal(done.paid, true);
+  assert.equal(gas.rows('Orders')[0].Status, 'Paid');
+  assert.match(gas.rows('Orders')[0].Notes, /Paid by card \(Paystack SJ-0001-/);
+});
+
+test('door delivery invoices have no card link, and card links only appear once Paystack is switched on', () => {
+  const { gas, key } = readyQuote();
+  gas.call(order({ qty: 5, expectedTotal: 200 })); // to the door
+  gas.call(order({ ship: 'locker', address: '12 Main Rd', qty: 5, expectedTotal: 200, requestId: rid() }));
+  gas.mail.length = 0;
+  gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0001', fee: '99' });
+  gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0002', fee: '69' });
+  assert.ok(gas.mail.every((m) => !/Pay by card/.test(m.body)), 'no key, no link');
+  gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
+  assert.equal(gas.call(startPay({ invoice: 'SJ-0001' })).error, 'invalid', 'door orders pay by bank transfer');
+  gas.mail.length = 0;
+  gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0001' });
+  gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0002' });
+  assert.doesNotMatch(gas.mail[0].body, /Pay by card/);
+  assert.match(gas.mail[1].body, /\?pay=SJ-0002#/);
+});
+
 test('when Paystack cannot be reached the customer is told to try again or pay by transfer', () => {
   const { gas } = withCard();
   gas.paystack.down = true;

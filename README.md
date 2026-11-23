@@ -184,15 +184,20 @@ The **Reviews** tab on Greg's page lists everyone with a paid or delivered order
 3. In the editor choose **checkReviews** and **Run**. Allow the new permission (it now reads the Feedback Sheet). The log says how many people have reviewed.
 4. **Deploy > Manage deployments >** pencil **> Version: New version > Deploy.**
 
-## Card payments for collections (Paystack)
+## Card payments for collections and Pudo lockers (Paystack)
 
-Customers who collect can pay by card, Apple Pay or instant EFT on Paystack's secure page. When they come back, the order turns **Paid** by itself and they get the paid invoice and calendar invite. Bank transfer stays on the page as the other option. Delivery orders are still paid by bank transfer.
+Customers who collect, or who have their order sent to a Pudo locker, can pay by card, Apple Pay or instant EFT on Paystack's secure page. When they come back, the order turns **Paid** by itself and they get the paid invoice (and, for a collection, the calendar invite). Bank transfer stays as the other option. Door-to-door delivery is still paid by bank transfer only.
+
+- **Collection, or a locker order with a fixed locker price:** the total is known straight away, so a **Pay by card** button shows on the confirmation screen.
+- **A locker order where Greg sets the fee:** nothing can be paid until the fee is set. When Greg accepts the request, the invoice email has a **Pay by card** link (also in the PDF). The link opens Paystack for exactly that order, for the full total including delivery. The customer's email sits after `#` in the link, so it never reaches a server, and the link only works with the email the order was placed with.
+- The collection reminder email the day before also has the link if the order is still unpaid.
+- Invoices sent again with **Email invoice** get the link too, as long as the order is still waiting for payment.
 
 1. In Paystack, open **Settings > API Keys & Webhooks** and copy the **Test Secret Key** (it starts with `sk_test_`). Never put it in the website files.
 2. In Apps Script, click the gear (**Project Settings**). Under **Script properties**, click **Add script property**. Property: `PAYSTACK_SECRET_KEY`. Value: the key. **Save script properties**.
 3. Paste the new `Code.gs`, run `setup` once and allow the new permission ("Connect to an external service"). Then deploy a **New version** as in "Changing things later" below.
 4. Back in Paystack, on the same page, set **Test Webhook URL** to your web app address (the one ending in `/exec`). This marks the order paid even if the customer closes the page before coming back.
-5. Place a collection order and pay with Paystack's test card. The order should turn **Paid**.
+5. Place a collection order and pay with Paystack's test card. The order should turn **Paid**. Then place a Pudo locker order, accept it with a fee on the admin page, and use the **Pay by card** link in the invoice email.
 6. To take real money: once Paystack approves the business, swap the property for the **Live Secret Key** (`sk_live_`) and set the **Live Webhook URL** to the same address.
 
 To switch card payments off, delete the `PAYSTACK_SECRET_KEY` property. The page goes back to bank transfer only.
@@ -226,7 +231,7 @@ Nothing is tied to your accounts except where the pieces live, so moving is a fe
 
 ### Not included, on purpose
 
-One product only (in a choice of flavours). No stock counts. No card payments. No automatic bank matching. No refunds or partial payments. No email reminders for unpaid orders. Fake orders from the order page are possible; they sit under **Awaiting payment** and can be cancelled. Someone could type a stranger's email into the order page, who would then get one invoice email; the hourly cap limits this.
+One product only (in a choice of flavours). No stock counts. Card payments only for collection and Pudo locker orders. No automatic bank matching. No refunds or partial payments. No email reminders for unpaid orders. Fake orders from the order page are possible; they sit under **Awaiting payment** and can be cancelled. Someone could type a stranger's email into the order page, who would then get one invoice email; the hourly cap limits this.
 
 ### Privacy
 

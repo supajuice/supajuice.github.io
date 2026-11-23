@@ -726,9 +726,11 @@
     return o.status === 'Paid' || o.status === 'Delivered';
   }
 
-  // Collection orders waiting for payment can be paid by card, once Greg has switched it on.
+  // Collection and Pudo locker orders waiting for payment can be paid by card, once Greg has
+  // switched it on. Door delivery stays bank transfer.
   function cardOn(o) {
-    return !!(config && config.cardPay) && !!o.collect && o.status === 'Awaiting payment' && !!o.email;
+    var kind = !!o.collect || /^Pudo locker/.test(o.address || '');
+    return !!(config && config.cardPay) && kind && o.status === 'Awaiting payment' && !!o.email;
   }
 
   function syncCard() {
@@ -781,6 +783,35 @@
       paying = false;
       syncCard();
       showCardError(err.message);
+    }
+  }
+
+  // The "Pay by card" link in an invoice email: ?pay=SJ-0001#their@email. The email stays
+  // after # so it never reaches a server, and is taken out of the address straight away.
+  function payLinkRequest() {
+    var q = new URLSearchParams(location.search);
+    var invoice = q.get('pay') || '';
+    if (!invoice) return null;
+    var email = '';
+    try { email = decodeURIComponent(location.hash.slice(1)); } catch (err) { email = ''; }
+    try { history.replaceState(null, '', location.pathname); } catch (err) { /* old browser */ }
+    return { invoice: invoice, email: email };
+  }
+
+  async function payFromLink(req) {
+    showView('view-loading');
+    try {
+      var res = await SJ.api('startPayment', { invoice: req.invoice, email: req.email, returnUrl: location.origin + location.pathname });
+      if (res.paid) {
+        showClosed('This order is already paid', 'Thank you. Your paid invoice is in your email.', false);
+        return true;
+      }
+      if (typeof res.url !== 'string' || !/^https:\/\//.test(res.url)) throw new Error('Card payment is not working right now. Please pay by bank transfer, using the details in your invoice email.');
+      window.location.assign(res.url);
+      return true;
+    } catch (err) {
+      showClosed('We could not open the card payment', err.message + ' You can also pay by bank transfer, using the details in your invoice email.', false);
+      return true;
     }
   }
 
@@ -883,6 +914,8 @@
     var cached = SJ.store.get(CONFIG_KEY);
     if (cached && cached.ready) applyConfig(cached);
     var reference = returnedReference();
+    var payLink = reference ? null : payLinkRequest();
+    if (payLink && await payFromLink(payLink)) return;
 
     if (reference) await confirmReturn(reference, last);
     else if (last) showDone(last.data, true);

@@ -86,7 +86,7 @@ async function fillKiosk(page, over) {
   const d = Object.assign({
     name: 'Jane Doe', email: 'jane@example.com', contact: '082 123 4567', address: '12 Beach Rd, Sea Point', notes: '', more: 0
   }, over);
-  await choose(page, d.collect ? 'collect' : 'deliver');
+  await choose(page, d.collect ? 'collect' : d.locker ? 'locker' : 'deliver');
   if (d.collect) await pickTime(page, d.time);
   if (d.flavours) await setFlavours(page, d.flavours);
   else if (await flavourTotal(page) === 0) await setFlavours(page, { orange: 1 + d.more });
@@ -628,6 +628,30 @@ test('order page: a collection is paid by card, and coming back from Paystack sh
   await page.reload();
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await text(page, '#done-title'), 'Paid, thank you');
+  noErrors(errors);
+});
+
+test('order page: a Pudo locker order can be paid by card, on the page or from the invoice email link', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true, cardPay: true, lockerFees: '15 90, 40 120' });
+  await fakePaystackPage(page);
+  await fillKiosk(page, { locker: true });
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await page.locator('#card-section').isVisible(), true);
+  assert.equal(await text(page, '#pay-card'), 'Pay R130 by card');
+
+  // The link in the invoice email goes straight to Paystack, and the email leaves the address.
+  await page.goto(dev.siteUrl + '/?pay=SJ-0001#jane%40example.com');
+  await page.waitForURL(/checkout\.paystack\.com/);
+  const tx = dev.gas.paystack.last();
+  assert.equal(tx.amount, 13000);
+  assert.equal(tx.metadata.invoice, 'SJ-0001');
+
+  // The wrong email does not open a payment.
+  await page.goto(dev.siteUrl + '/?pay=SJ-0001#someone%40else.com');
+  await page.waitForSelector('#view-closed:not([hidden])');
+  assert.match(await text(page, '#closed-text'), /could not find that order/);
+  assert.equal(new URL(page.url()).hash, '', 'the email is taken off the address');
   noErrors(errors);
 });
 
