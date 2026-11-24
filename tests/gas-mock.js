@@ -217,6 +217,41 @@ function createGas(opts) {
     return reply(404, { status: false, message: 'Not found' });
   }
 
+  // A stand-in for The Courier Guy's Ship Logic API. Cape Town postal codes (7000 to 8099) cost
+  // less than the rest of the country. Postal code 0000 is an address it cannot find.
+  const courier = {
+    requests: [], down: false,
+    // Rates for a request body: change it in a test to price differently.
+    rates(body) {
+      const code = Number(body.delivery_address.code);
+      if (body.delivery_address.code === '0000') return null;
+      const local = code >= 7000 && code <= 8099;
+      return [
+        { rate: local ? 142.1 : 210.5, rate_excluding_vat: 0, service_level: { code: 'OVN', name: 'Overnight', delivery_date_from: '2026-10-29T00:00:00+02:00', delivery_date_to: '2026-10-29T00:00:00+02:00' } },
+        { rate: local ? '89.5' : '145.2', rate_excluding_vat: 0, service_level: { code: 'ECO', name: 'Economy', delivery_date_from: '2026-10-30T00:00:00+02:00', delivery_date_to: '2026-11-02T00:00:00+02:00' } }
+      ];
+    },
+    last() { return this.requests[this.requests.length - 1]; }
+  };
+  function courierFetch(url, opts) {
+    opts = opts || {};
+    const body = opts.payload ? JSON.parse(opts.payload) : null;
+    courier.requests.push({ url, method: opts.method || 'get', headers: opts.headers || {}, body });
+    if (courier.down) throw new Error('Address unavailable: ' + url);
+    const reply = (code, obj) => ({ getResponseCode: () => code, getContentText: () => (typeof obj === 'string' ? obj : JSON.stringify(obj)) });
+    const auth = (opts.headers || {}).Authorization;
+    if (!auth || auth !== 'Bearer ' + store.get('COURIER_API_KEY')) return reply(401, 'Unauthorized');
+    if (new URL(url).pathname !== '/rates' || opts.method !== 'post') return reply(404, 'Not found');
+    const rates = courier.rates(body);
+    if (!rates) return reply(400, { message: 'Could not find the delivery address' });
+    return reply(200, { message: '', rates });
+  }
+
+  function fetchAny(url, opts) {
+    const host = new URL(url).host;
+    return host === 'api.paystack.co' ? paystackFetch(url, opts) : courierFetch(url, opts);
+  }
+
   const triggers = [];
 
   class FakeDate extends Date {
@@ -300,7 +335,7 @@ function createGas(opts) {
       }
     },
     Session: { getScriptTimeZone: () => 'Africa/Johannesburg' },
-    UrlFetchApp: { fetch: paystackFetch },
+    UrlFetchApp: { fetch: fetchAny },
     MailApp: {
       // Both forms Apps Script accepts: (to, subject, body) and ({ to, subject, body, attachments, ... }).
       sendEmail: (to, subject, body) => {
@@ -317,7 +352,7 @@ function createGas(opts) {
   vm.runInContext(code, ctx, { filename: 'Code.gs' });
 
   const gas = {
-    ctx, ss, clock, mail, mailQuota, triggers, paystack, logs, errors, sleeps, lock, store, cacheStore,
+    ctx, ss, clock, mail, mailQuota, triggers, paystack, courier, logs, errors, sleeps, lock, store, cacheStore,
     // Send one request through doPost, like the pages do.
     call(body) {
       const out = ctx.doPost({ postData: { contents: JSON.stringify(body), type: 'text/plain' } });

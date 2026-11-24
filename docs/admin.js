@@ -67,6 +67,15 @@
       ]
     },
     {
+      id: 'courier',
+      title: 'Door delivery with The Courier Guy',
+      about: 'Live door prices customers pay on the page',
+      fields: [
+        { key: 'courier_from', label: 'Address parcels leave from', hint: 'Street, suburb, city, postal code. For example 267 High Level Road, Sea Point, Cape Town, 8005. Leave blank to use your collection address. Prices only show once the Courier Guy API key is added (see the README).', wide: true, max: 200 },
+        { key: 'courier_extra', label: 'Add to every Courier Guy price', hint: 'In rand, for example the box and packing. 0 means customers pay exactly what The Courier Guy charges.', mode: 'decimal', max: 10 }
+      ]
+    },
+    {
       id: 'pudo',
       title: 'Delivery with Pudo',
       about: 'Boxes, sachet weight and Pudo prices',

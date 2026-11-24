@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <link rel="stylesheet" href="app.css?v=20261112a">
-  <link rel="stylesheet" href="shop.css?v=20261113b">
+  <link rel="stylesheet" href="shop.css?v=20261124door">
   <script src="pixel.js?v=20261112p" async></script>
 </head>
 <body class="shop">
@@ -265,6 +265,59 @@
               <p class="hint" id="contact-hint">So we can reach you about your order.</p>
             </div>
 
+            <fieldset class="door" id="door-fields" hidden>
+              <legend class="door-legend">Delivery address</legend>
+              <div class="field">
+                <label for="door-street">Street address</label>
+                <input id="door-street" type="text" autocomplete="address-line1" maxlength="120">
+              </div>
+              <div class="field">
+                <label for="door-unit">Flat, complex or building <span class="opt">(optional)</span></label>
+                <input id="door-unit" type="text" autocomplete="address-line2" maxlength="80">
+              </div>
+              <div class="field">
+                <label for="door-suburb">Suburb</label>
+                <input id="door-suburb" type="text" autocomplete="address-level3" maxlength="80">
+              </div>
+              <div class="door-pair">
+                <div class="field">
+                  <label for="door-city">City or town</label>
+                  <input id="door-city" type="text" autocomplete="address-level2" maxlength="80">
+                </div>
+                <div class="field">
+                  <label for="door-code">Postal code</label>
+                  <input id="door-code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="postal-code" maxlength="4">
+                </div>
+              </div>
+              <div class="field">
+                <label for="door-province">Province</label>
+                <select id="door-province" class="select" autocomplete="address-level1">
+                  <option>Eastern Cape</option>
+                  <option>Free State</option>
+                  <option>Gauteng</option>
+                  <option>KwaZulu-Natal</option>
+                  <option>Limpopo</option>
+                  <option>Mpumalanga</option>
+                  <option>North West</option>
+                  <option>Northern Cape</option>
+                  <option selected>Western Cape</option>
+                </select>
+              </div>
+            </fieldset>
+
+            <section class="ship" id="ship" hidden aria-labelledby="ship-title">
+              <h3 class="ship-title" id="ship-title">Delivery</h3>
+              <div class="ship-card" id="ship-card" aria-live="polite">
+                <svg class="ship-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 6.5h11v9h-11z"/><path d="M13.5 9.5h4l3 3v3h-7"/><circle cx="6.5" cy="17" r="1.8"/><circle cx="17" cy="17" r="1.8"/></svg>
+                <div class="ship-text">
+                  <p class="ship-name" id="ship-name">The Courier Guy</p>
+                  <p class="ship-sub" id="ship-sub">Enter your address to see the delivery price.</p>
+                </div>
+                <p class="ship-fee" id="ship-fee"></p>
+              </div>
+              <button type="button" class="link-btn ship-retry" id="ship-retry" hidden>Try again</button>
+            </section>
+
             <div class="field" id="address-field">
               <label for="address" id="address-label">Delivery address</label>
               <textarea id="address" autocomplete="street-address" rows="3" maxlength="300" aria-describedby="locker-hint"></textarea>
@@ -289,6 +342,23 @@
               <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
             </div>
 
+            <section class="paywith" id="pay-with" hidden aria-labelledby="pay-with-title">
+              <h3 class="paywith-title" id="pay-with-title">Payment</h3>
+              <p class="paywith-sub"><svg class="paywith-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>All payments are secure and encrypted.</p>
+              <div class="paywith-box">
+                <div class="paywith-row">
+                  <p class="paywith-name">Card, Apple Pay or instant EFT</p>
+                  <ul class="paymarks" aria-label="Ways to pay: Visa, Mastercard, Apple Pay and instant EFT">
+                  <li class="paymark paymark--visa" aria-hidden="true"><svg viewBox="0 0 48 16"><text x="24" y="13.2" text-anchor="middle">VISA</text></svg></li>
+                  <li class="paymark paymark--mc" aria-hidden="true"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="#eb001b"/><circle cx="25" cy="12" r="9" fill="#f79e1b"/><path d="M20 4.5a9 9 0 0 1 0 15 9 9 0 0 1 0-15z" fill="#ff5f00"/></svg></li>
+                  <li class="paymark paymark--apple" aria-hidden="true"><svg viewBox="0 0 16 19" class="paymark-apple"><path d="M13.2 10.1c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.9-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.8zM10.9 3.3c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg><span>Pay</span></li>
+                  <li class="paymark paymark--eft" aria-hidden="true"><span>Instant EFT</span></li>
+              </ul>
+                </div>
+                <p class="paywith-note">After you place your order you pay on Paystack's secure page, then come straight back here. Prefer a bank transfer? The details are on the next step.</p>
+              </div>
+            </section>
+
             <hr class="tear">
             <dl class="summary" id="summary"></dl>
 
@@ -307,16 +377,28 @@
             <p class="fine" id="done-collect" hidden></p>
           </div>
           <div class="bib" id="bib"></div>
-          <div class="stack" id="card-section" hidden>
-            <button type="button" class="btn btn-primary btn-block" id="pay-card">Pay by card</button>
-            <p class="fine">Card, Apple Pay or instant EFT, on Paystack's secure page. You come straight back here.</p>
+          <section class="checkout" id="card-section" hidden aria-labelledby="checkout-title">
+            <div class="checkout-head">
+              <h3 class="checkout-title" id="checkout-title">Amount due</h3>
+              <p class="checkout-amount" id="checkout-amount"></p>
+            </div>
+            <button type="button" class="btn btn-pay" id="pay-card"><svg class="btn-pay-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg><span id="pay-card-text">Pay now</span></button>
+            <ul class="paymarks" aria-label="Ways to pay: Visa, Mastercard, Apple Pay and instant EFT">
+            <li class="paymark paymark--visa" aria-hidden="true"><svg viewBox="0 0 48 16"><text x="24" y="13.2" text-anchor="middle">VISA</text></svg></li>
+            <li class="paymark paymark--mc" aria-hidden="true"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="#eb001b"/><circle cx="25" cy="12" r="9" fill="#f79e1b"/><path d="M20 4.5a9 9 0 0 1 0 15 9 9 0 0 1 0-15z" fill="#ff5f00"/></svg></li>
+            <li class="paymark paymark--apple" aria-hidden="true"><svg viewBox="0 0 16 19" class="paymark-apple"><path d="M13.2 10.1c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.9-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.8zM10.9 3.3c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg><span>Pay</span></li>
+            <li class="paymark paymark--eft" aria-hidden="true"><span>Instant EFT</span></li>
+            </ul>
+            <p class="checkout-secure"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l7.5 3v5.6c0 4.6-3.2 8.6-7.5 9.8-4.3-1.2-7.5-5.2-7.5-9.8V5.8z"/><path d="M8.7 12.2l2.3 2.3 4.4-4.6"/></svg><span>Secured by <strong>Paystack</strong>. Your payment is encrypted and your card details never reach us. You come straight back here after paying.</span></p>
             <div class="alert alert-bad" id="card-error" role="alert" hidden></div>
-          </div>
-          <div class="stack" id="pay-section">
-            <h3 class="section-title" id="pay-title">Pay by bank transfer</h3>
-            <div class="pay" id="pay"></div>
-            <p class="fine" id="pay-note"></p>
-          </div>
+          </section>
+          <details class="eft" id="pay-section" open>
+            <summary class="eft-summary"><span id="pay-title">Pay by bank transfer</span></summary>
+            <div class="stack eft-body">
+              <div class="pay" id="pay"></div>
+              <p class="fine" id="pay-note"></p>
+            </div>
+          </details>
           <div class="actions actions--pair">
             <button type="button" class="btn btn-quiet" id="copy-invoice">Copy invoice</button>
             <button type="button" class="btn btn-quiet" id="new-order">Place another order</button>
@@ -355,7 +437,7 @@
 
   <script src="config.js?v=20261112a"></script>
   <script src="shared.js?v=20261112a"></script>
-  <script src="order.js?v=20261123pay2"></script>
+  <script src="order.js?v=20261124door"></script>
   <script src="reviews.js?v=20261113r"></script>
   <script src="ig-colour.js?v=20261112a"></script>
 </body>

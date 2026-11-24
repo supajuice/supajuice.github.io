@@ -29,8 +29,11 @@
  * At about 17:00 the day before, each customer collecting tomorrow is emailed a reminder
  * (sendCollectionReminders, a daily trigger made by setup). Replies go to Greg.
  *
- * Collection and Pudo locker orders can be paid by card through Paystack when PAYSTACK_SECRET_KEY is
- * set in Script properties. The order is marked paid only after this script asks
+ * Orders can be paid by card through Paystack when PAYSTACK_SECRET_KEY is
+ * set in Script properties.
+ *
+ * Door delivery is priced live by The Courier Guy (its Ship Logic API) when COURIER_API_KEY is
+ * set in Script properties: the customer types their address, sees the price and pays on the page. The order is marked paid only after this script asks
  * Paystack itself that the payment went through, so a faked message changes nothing.
  *
  * Run setup() once after pasting this in. See README.md.
@@ -112,6 +115,8 @@ const SETTING_DEFS = [
   { key: 'collection_per_slot', value: '1', note: 'How many customers can book the same collection time.' },
   { key: 'collection_reminders', value: 'yes', note: 'yes: at about 17:00 the day before, everyone collecting tomorrow is emailed a reminder of when, where and what. Replies come to the alert email. no: no reminders.' },
   { key: 'pudo_shipping', value: 'yes', note: 'yes: the delivery fee is worked out from the box and Pudo price for the number of sachets, to the door or to a Pudo locker. no: use the delivery fee above.' },
+  { key: 'courier_from', value: '', note: 'Door delivery with The Courier Guy: the address parcels leave from, as street, suburb, city, postal code. For example "267 High Level Road, Sea Point, Cape Town, 8005". Blank: the collection address is used. Needs COURIER_API_KEY in Script properties.' },
+  { key: 'courier_extra', value: '0', note: 'Added to every Courier Guy price, in rand, for example the box and packing. 0 means the customer pays exactly what The Courier Guy charges.' },
   { key: 'pudo_collection_box', value: 'yes', note: 'yes: collection orders pay for their box too (shown as the collection fee). no: collection is free.' },
   { key: 'sachet_grams', value: '130', note: 'Weight of one full sachet in grams. A box is never filled past its Pudo weight limit.' },
   { key: 'pudo_xs_holds', value: '12', note: 'Sachets that fit an Extra Small box (60x17x8 cm, Pudo limit 2 kg). 0 means never use it.' },
@@ -142,7 +147,7 @@ const SETTING_DEFS = [
 
 // Longest allowed text per setting.
 const SETTING_MAX = {
-  brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, collection_address: 200, alert_email: 120,
+  brand_name: 60, product_name: 60, currency_symbol: 4, collection_note: 200, collection_address: 200, alert_email: 120, courier_from: 200,
   collection_dates: 8000, discount_codes: 4000, code_customers: 8000, collection_hours: 20, locker_fees: 200,
   bank_name: 60, account_holder: 80, account_number: 40, branch_code: 20, account_type: 30, payment_note: 300
 };
@@ -182,6 +187,7 @@ function handle_(body) {
     if (body.action === 'checkCode') return checkCode_(body);
     if (body.action === 'order') return placeKioskOrder_(body);
     if (body.action === 'photo') return { ok: true, photo: readPhoto_() };
+    if (body.action === 'deliveryQuote') return deliveryQuote_(body);
     if (body.action === 'startPayment') return startPayment_(body);
     if (body.action === 'confirmPayment') return confirmPayment_(body);
     // Paystack's webhook: a hint only. confirmPayment_ asks Paystack before anything changes.
@@ -253,7 +259,11 @@ function createOrder_(body, source) {
   const name = clean_(body.name, 80);
   const contact = clean_(body.contact, 80);
   const email = clean_(body.email, 120);
-  const address = clean_(body.address, 300);
+  // The order page sends a door address in parts (street, suburb, city, postal code), so
+  // The Courier Guy can price it. Greg's page and older pages send one line.
+  const door = kiosk && body.collect !== true && body.ship !== 'locker' && body.door && typeof body.door === 'object'
+    ? readDoor_(body.door) : null;
+  const address = door ? doorLine_(door) : clean_(body.address, 300);
   const notes = clean_(body.notes, 300);
   const qty = Number(body.qty);
   const collect = body.collect === true;
@@ -268,6 +278,10 @@ function createOrder_(body, source) {
   if (kiosk && !email) throw fail_('invalid', 'Please enter your email address so we can send your invoice.');
   if (email && !EMAIL_PATTERN.test(email)) throw fail_('invalid', 'That email address does not look right.');
   if (kiosk && toLocker && !locker) throw fail_('invalid', 'Please enter your address so we can pick the Pudo locker nearest to you.');
+  if (door) {
+    const missing = doorMissing_(door);
+    if (missing) throw fail_('invalid', missing);
+  }
   if (kiosk && !collect && !toLocker && !address) throw fail_('invalid', 'Please enter your delivery address.');
   if (kiosk && collect && !collectAt) throw fail_('invalid', 'Please pick a collection time.');
   if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1) throw fail_('invalid', 'Please choose a quantity of at least 1.');
@@ -277,6 +291,21 @@ function createOrder_(body, source) {
   const customFee = !kiosk && body.fee !== undefined && body.fee !== null && body.fee !== '' ? parseNumber_(body.fee, NaN) : null;
   if (customFee !== null && (!isFinite(customFee) || customFee < 0 || customFee > 100000)) {
     throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
+  }
+
+  // The Courier Guy's price for a door address, asked before taking the lock because it
+  // calls out to the courier. Usually it is the price the customer was just shown (cached).
+  // null: no courier pricing (no key, or no address in parts). { quote: null }: it failed.
+  let courier = null;
+  if (door && courierKey_()) {
+    const early = readTypedSettings_();
+    if (courierFrom_(early)) {
+      try {
+        courier = { quote: courierQuote_(early, door, qty) };
+      } catch (err) {
+        courier = { quote: null };
+      }
+    }
   }
 
   const lock = LockService.getScriptLock();
@@ -328,8 +357,13 @@ function createOrder_(body, source) {
     // Fixed Pudo locker prices: charged straight away, up to the last one. Bigger orders are a request.
     const lockerRates = kiosk && toLocker && !pudo && !freeDelivery && settings.lockerFees.length > 0;
     const lockerFee = lockerRates ? lockerFeeFor_(settings.lockerFees, qty) : null;
-    const request = kiosk && !collect && !pudo && !freeDelivery && (lockerRates ? lockerFee === null : settings.quote);
-    const fee = freeDelivery ? 0 : pudo ? (collect ? tier.collect : toLocker ? tier.locker : tier.door)
+    // Door delivery priced by The Courier Guy. If it could not be priced, Greg sets the fee.
+    const courierFee = courier && courier.quote && !freeDelivery ? courier.quote.fee : null;
+    const request = kiosk && !collect && !freeDelivery && (courier ? courierFee === null
+      : !pudo && (lockerRates ? lockerFee === null : settings.quote));
+    const fee = freeDelivery ? 0 : courierFee !== null ? courierFee
+      : courier ? 0
+      : pudo ? (collect ? tier.collect : toLocker ? tier.locker : tier.door)
       : lockerFee !== null ? lockerFee
       : collect || request ? 0 : (customFee !== null ? round2_(customFee) : settings.fee);
     const totalCents = totalCents_(settings.price, qty, fee, percent);
@@ -337,6 +371,12 @@ function createOrder_(body, source) {
 
     // The total the customer saw must still be the real total.
     if (kiosk && body.expectedTotal !== undefined && Math.round(Number(body.expectedTotal) * 100) !== totalCents) {
+      if (courier && !freeDelivery) {
+        throw fail_('quote_changed', courierFee === null
+          ? 'We could not get a delivery price for your address just now. You can still order: we will email you the delivery fee.'
+          : 'The delivery price for your address is now ' + money_(courierFee, settings.currency) + '. Check the new total, then place your order again.',
+        { quote: courier.quote ? publicQuote_(courier.quote) : null });
+      }
       throw fail_('price_changed', 'The price has just changed. Please check the new total.', { config: publicConfig_(settings, freeSlots_(settings, sheet)) });
     }
 
@@ -359,9 +399,9 @@ function createOrder_(body, source) {
     lock.releaseLock();
   }
 
-  if (kiosk) sendAlert_(order, settings);
+  if (kiosk) sendAlert_(order, settings, courier && courier.quote && order.status === STATUS.AWAITING && !order.freeDelivery ? courier.quote : null);
   // A request gets no email yet: the invoice goes out when Greg accepts it.
-  // A collection or locker order from the order page is paid on the page (card switched on),
+  // An order from the order page with a price is paid on the page (card switched on),
   // so it gets no unpaid invoice: the paid invoice is emailed once the payment is confirmed.
   const payOnPage = kiosk && cardAllowed_(order) && !!paystackKey_();
   const emailed = order.email && order.status === STATUS.AWAITING && !payOnPage ? emailInvoice_(order, settings) : undefined;
@@ -1325,7 +1365,8 @@ function takeKioskSlot_() {
   cache.put(key, String(count + 1), 7200);
 }
 
-function sendAlert_(order, s) {
+// quote: The Courier Guy's price for a door order, so Greg knows what to book.
+function sendAlert_(order, s, quote) {
   if (!EMAIL_PATTERN.test(s.alertEmail)) return;
   try {
     const request = order.status === STATUS.REQUESTED;
@@ -1359,7 +1400,8 @@ function sendAlert_(order, s) {
       order.code ? 'Code: ' + order.code + (order.freeDelivery ? ' (free delivery)' : ' (' + order.discountPct + '% off, -' + money_(discountOf_(order), s.currency) + ')') : '',
       order.collect ? 'Collection: ' + (order.fee > 0 ? money_(order.fee, s.currency) : 'free') : 'Delivery: ' + money_(order.fee, s.currency),
       'Total: ' + money_(order.total, s.currency),
-      packLine_(order, s),
+      quote ? 'Courier: The Courier Guy ' + quote.service + ', quoted ' + money_(quote.rate, s.currency) +
+        '. Book it in The Courier Guy portal once the order is paid.' : packLine_(order, s),
       '',
       'Check your bank statement for the reference ' + order.invoice + ', then mark the order paid on the admin page.'
     ];
@@ -2012,7 +2054,9 @@ function publicConfig_(s, slots) {
     photo: s.photo, // { version, alt } or null. The picture itself comes from the "photo" action.
     collectSlots: slots, // [{ date, label, times }], the free collection times
     collectAhead: COLLECT_WINDOW_DAYS,
-    cardPay: !!paystackKey_(), // collection and Pudo locker orders can be paid by card
+    cardPay: !!paystackKey_(), // orders can be paid by card on the page
+    // Door delivery priced live by The Courier Guy: the order page asks deliveryQuote for the address.
+    courier: courierKey_() && courierFrom_(s) ? { max: s.ship.max } : null,
     codesOn: s.codes.some(function (c) { return c.live; }), // shows the discount code box. The codes stay private.
     ready: s.ready
   };
@@ -2122,6 +2166,17 @@ function validateSetting_(key, value) {
       const n = parseNumber_(text, NaN);
       if (!isFinite(n) || n < 0 || n > 100000) throw fail_('invalid', 'Delivery fee must be a number. Use 0 for free delivery.');
       return String(round2_(n));
+    }
+    case 'courier_extra': {
+      if (text === '') return '0';
+      const n = parseNumber_(text, NaN);
+      if (!isFinite(n) || n < 0 || n > 10000) throw fail_('invalid', 'The amount added to Courier Guy prices must be a number. Use 0 to add nothing.');
+      return String(round2_(n));
+    }
+    case 'courier_from': {
+      if (text === '') return '';
+      if (!parseFrom_(text)) throw fail_('invalid', 'Write the address parcels leave from as street, suburb, city, postal code. For example: 267 High Level Road, Sea Point, Cape Town, 8005.');
+      return text;
     }
     case 'delivery_quote': {
       const t = text.toLowerCase();
@@ -2606,6 +2661,236 @@ function packLine_(order, s) {
 }
 
 // ---------------------------------------------------------------------------
+// Door delivery priced by The Courier Guy (Ship Logic API)
+// ---------------------------------------------------------------------------
+//
+// The API key is kept in Script properties as COURIER_API_KEY (from The Courier Guy portal).
+// Never put it in the website files. COURIER_API_HOST can point at a different Ship Logic
+// address (for example the sandbox); it defaults to COURIER_API.
+//
+// The parcel is the smallest box that holds the sachets (the same boxes as the Pudo
+// settings), weighing the sachets plus the box. The customer is charged the cheapest rate
+// The Courier Guy offers, plus courier_extra, rounded up to the next rand. A price is kept
+// for 30 minutes, so the order is charged the price the customer was shown.
+
+const COURIER_API = 'https://api.shiplogic.com';
+const COURIER_CACHE_SECONDS = 1800;
+const COURIER_QUOTES_PER_HOUR = 150; // a cap on new prices asked for from the order page
+const PROVINCES = [
+  'Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo',
+  'Mpumalanga', 'North West', 'Northern Cape', 'Western Cape'
+];
+
+function courierKey_() {
+  return str_(PropertiesService.getScriptProperties().getProperty('COURIER_API_KEY'));
+}
+
+function courierHost_() {
+  const h = str_(PropertiesService.getScriptProperties().getProperty('COURIER_API_HOST')).replace(/\/+$/, '');
+  return /^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._/-]*)?$/.test(h) ? h : COURIER_API;
+}
+
+// "western cape", "Western-Cape" -> "Western Cape". '' when it is not a province.
+function province_(text) {
+  const t = str_(text).toLowerCase().replace(/[^a-z]/g, '');
+  for (let i = 0; i < PROVINCES.length; i++) {
+    if (PROVINCES[i].toLowerCase().replace(/[^a-z]/g, '') === t) return PROVINCES[i];
+  }
+  return '';
+}
+
+// "267 High Level Road, Sea Point, Cape Town, 8005[, Western Cape]" -> address parts, or null.
+function parseFrom_(text) {
+  const parts = str_(text).split(',').map(function (p) { return p.trim(); }).filter(Boolean);
+  let code = '';
+  let prov = '';
+  const rest = [];
+  parts.forEach(function (p) {
+    if (!code && /^\d{4}$/.test(p)) code = p;
+    else if (!prov && province_(p)) prov = province_(p);
+    else if (!/^south africa$/i.test(p)) rest.push(p);
+  });
+  if (!code || rest.length < 2) return null;
+  return {
+    street: rest[0],
+    unit: '',
+    suburb: rest[1],
+    city: rest[2] || rest[1],
+    code: code,
+    province: prov || 'Western Cape'
+  };
+}
+
+// Where parcels leave from: the courier_from setting, else the collection address.
+function courierFrom_(s) {
+  return parseFrom_(readSettings_().courier_from) || parseFrom_(s.collectAddress);
+}
+
+// A door address in parts, cleaned. Missing parts are left blank for doorMissing_ to name.
+function readDoor_(d) {
+  return {
+    street: clean_(d.street, 120),
+    unit: clean_(d.unit, 80),
+    suburb: clean_(d.suburb, 80),
+    city: clean_(d.city, 80),
+    code: str_(d.code).replace(/\D/g, '').slice(0, 4),
+    province: province_(d.province)
+  };
+}
+
+function doorMissing_(d) {
+  if (!d.street) return 'Please enter your street address.';
+  if (!d.suburb) return 'Please enter your suburb.';
+  if (!d.city) return 'Please enter your city or town.';
+  if (!/^\d{4}$/.test(d.code)) return 'Please enter your 4-digit postal code.';
+  if (!d.province) return 'Please choose your province.';
+  return '';
+}
+
+// The address as one line, for the Orders sheet, the invoice and Greg.
+function doorLine_(d) {
+  return [d.unit, d.street, d.suburb, d.city, d.code].filter(Boolean).join(', ').slice(0, 300);
+}
+
+function shipAddress_(d, type) {
+  return {
+    type: type,
+    company: type === 'business' ? 'Supa Juice' : '',
+    street_address: d.street,
+    local_area: d.suburb,
+    city: d.city,
+    zone: d.province,
+    country: 'ZA',
+    code: d.code,
+    entered_address: [d.unit, d.street, d.suburb, d.city, d.code, 'South Africa'].filter(Boolean).join(', ')
+  };
+}
+
+// The box for this many sachets, in cm and kg, or null when they don't fit the biggest box.
+function courierParcel_(s, qty) {
+  const tier = shipTier_(s.ship, qty);
+  if (!tier) return null;
+  const dims = (tier.boxSize.match(/\d+(\.\d+)?/g) || []).map(Number);
+  if (dims.length < 3) return null;
+  return {
+    submitted_length_cm: dims[0],
+    submitted_width_cm: dims[1],
+    submitted_height_cm: dims[2],
+    submitted_weight_kg: Math.round((qty * s.ship.grams + BOX_ALLOWANCE_G) / 10) / 100
+  };
+}
+
+// A short fingerprint for a cache key. Not for security: the key is only ever ours.
+function hashText_(text) {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
+    h2 = Math.imul(h2 + c, 2246822519) >>> 0;
+  }
+  return h1.toString(36) + h2.toString(36);
+}
+
+// A delivery date from The Courier Guy -> "Thu 26 Nov" (Cape Town), or '' when it can't be read.
+function etaText_(text) {
+  const t = Date.parse(str_(text));
+  if (!isFinite(t)) return '';
+  const d = new Date(t + COLLECT_UTC_OFFSET * 3600000);
+  return DAY_NAMES[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()];
+}
+
+// The Courier Guy's cheapest price to this door: { fee, rate, service, eta }.
+// Throws no_quote when it cannot be priced (no key, too many gels, an address it can't find).
+function courierQuote_(s, d, qty) {
+  const key = courierKey_();
+  const from = courierFrom_(s);
+  if (!key || !from) throw fail_('no_quote', 'Delivery prices are not switched on.');
+  const missing = doorMissing_(d);
+  if (missing) throw fail_('invalid', missing);
+  const parcel = courierParcel_(s, qty);
+  if (!parcel) throw fail_('no_quote', 'For more than ' + s.ship.max + ' gels, please send us a DM and we will arrange delivery.');
+
+  const extra = Math.max(0, parseNumber_(readSettings_().courier_extra, 0));
+  const cacheKey = 'cq_' + hashText_(JSON.stringify([d.street, d.suburb, d.city, d.code, d.province,
+    from.street, from.code, parcel, extra]).toLowerCase());
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (err) { /* ask for a fresh one */ }
+  }
+
+  const today = Utilities.formatDate(new Date(), 'Africa/Johannesburg', 'yyyy-MM-dd HH:mm').slice(0, 10);
+  const payload = {
+    collection_address: shipAddress_(from, 'business'),
+    delivery_address: shipAddress_(d, 'residential'),
+    parcels: [parcel],
+    declared_value: round2_(s.price * qty),
+    collection_min_date: today,
+    delivery_min_date: today
+  };
+  let res;
+  try {
+    res = UrlFetchApp.fetch(courierHost_() + '/rates', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + key },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    console.error('Courier Guy rates failed: ' + err);
+    throw fail_('no_quote', 'We could not get a delivery price just now.');
+  }
+  let json = null;
+  try { json = JSON.parse(res.getContentText()); } catch (err) { json = null; }
+  const rates = json && Array.isArray(json.rates) ? json.rates : [];
+  let best = null;
+  rates.forEach(function (r) {
+    const rate = parseNumber_(r && r.rate, NaN);
+    if (!isFinite(rate) || rate <= 0) return;
+    if (!best || rate < best.rate) best = { rate: rate, level: (r && r.service_level) || {} };
+  });
+  if (res.getResponseCode() >= 300 || !best) {
+    console.error('Courier Guy rates: ' + res.getResponseCode() + ' ' + String(res.getContentText()).slice(0, 500));
+    throw fail_('no_quote', 'We could not get a delivery price for that address. Check the suburb and postal code.');
+  }
+  const quote = {
+    fee: Math.ceil(best.rate + extra - 0.000001),
+    rate: round2_(best.rate),
+    service: clean_(best.level.name, 40) || 'Courier',
+    eta: etaText_(best.level.delivery_date_to || best.level.delivery_date_from)
+  };
+  try { cache.put(cacheKey, JSON.stringify(quote), COURIER_CACHE_SECONDS); } catch (err) { /* fine without */ }
+  return quote;
+}
+
+// What the customer sees: the price, the service and when it should arrive.
+function publicQuote_(q) {
+  return { fee: q.fee, service: q.service, eta: q.eta };
+}
+
+// The order page asks for the door price once the address is filled in.
+function deliveryQuote_(body) {
+  const qty = Number(body.qty);
+  if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1 || qty > 500) throw fail_('invalid', 'Please choose your gels first.');
+  const d = readDoor_(body.door && typeof body.door === 'object' ? body.door : {});
+  const s = readTypedSettings_();
+  if (!courierKey_() || !courierFrom_(s)) throw fail_('no_quote', 'Delivery prices are not switched on.');
+  const missing = doorMissing_(d);
+  if (missing) throw fail_('invalid', missing);
+
+  // At most COURIER_QUOTES_PER_HOUR new prices an hour from the order page.
+  const cache = CacheService.getScriptCache();
+  const hourKey = 'cq_n_' + Utilities.formatDate(new Date(), 'Africa/Johannesburg', 'yyyy-MM-dd HH:mm').slice(0, 13);
+  const used = Number(cache.get(hourKey) || 0);
+  if (used >= COURIER_QUOTES_PER_HOUR) throw fail_('busy', 'We are busy right now. Please try again in a few minutes.');
+  try { cache.put(hourKey, String(used + 1), 3700); } catch (err) { /* fine without */ }
+
+  return { ok: true, quote: publicQuote_(courierQuote_(s, d, qty)) };
+}
+
+// ---------------------------------------------------------------------------
 // Card payments (Paystack)
 // ---------------------------------------------------------------------------
 //
@@ -2645,9 +2930,10 @@ function paystack_(method, path, payload) {
   return { code: res.getResponseCode(), json: json && typeof json === 'object' ? json : {} };
 }
 
-// Card payment is for collection and Pudo locker orders. Door delivery stays bank transfer.
+// Every order can be paid by card: collection, Pudo locker and door delivery. A door order
+// that waited for Greg's fee can be paid once he has accepted it, from the invoice email.
 function cardAllowed_(order) {
-  return order.collect || /^Pudo locker/.test(order.address);
+  return !!order;
 }
 
 // The link in an unpaid invoice email that opens Paystack for that order. The email is
@@ -2656,15 +2942,15 @@ function payLink_(order) {
   return ORDER_PAGE + '?pay=' + encodeURIComponent(order.invoice) + '#' + encodeURIComponent(order.email);
 }
 
-// The pay-by-card line for an unpaid collection or locker order, or '' when there is none.
+// The pay-by-card line for an unpaid order, or '' when there is none.
 function payLine_(order) {
   if (order.status !== STATUS.AWAITING || !order.email || !cardAllowed_(order) || !paystackKey_()) return '';
   return 'Pay by card, Apple Pay or instant EFT: ' + payLink_(order);
 }
 
-// The customer taps "Pay by card" on the confirmation screen, or the link in their invoice
-// email. Only a collection or Pudo locker order that is waiting for payment can be paid,
-// and only with the email it was placed with.
+// The customer taps "Pay now" on the confirmation screen, or the link in their invoice
+// email. Only an order that is waiting for payment can be paid, and only with the email it
+// was placed with.
 function startPayment_(body) {
   const invoice = clean_(body.invoice, 32);
   const email = clean_(body.email, 120).toLowerCase();
@@ -2677,7 +2963,6 @@ function startPayment_(body) {
   if (!row || !email || str_(row[COL.EMAIL]).toLowerCase() !== email) throw fail_('not_found', 'We could not find that order.');
   const order = rowToOrder_(row);
   if (order.status === STATUS.PAID || order.status === STATUS.DELIVERED) return { ok: true, paid: true };
-  if (!cardAllowed_(order)) throw fail_('invalid', 'Card payment is for collection and Pudo locker orders. Please pay by bank transfer.');
   if (order.status !== STATUS.AWAITING) throw fail_('invalid', 'Order ' + order.invoice + ' is ' + order.status + ' and cannot be paid.');
 
   // Each try gets its own reference: Paystack never accepts the same one twice.

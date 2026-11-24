@@ -184,13 +184,34 @@ The **Reviews** tab on Greg's page lists everyone with a paid or delivered order
 3. In the editor choose **checkReviews** and **Run**. Allow the new permission (it now reads the Feedback Sheet). The log says how many people have reviewed.
 4. **Deploy > Manage deployments >** pencil **> Version: New version > Deploy.**
 
-## Card payments for collections and Pudo lockers (Paystack)
+## Door delivery priced by The Courier Guy
 
-Customers who collect, or who have their order sent to a Pudo locker, can pay by card, Apple Pay or instant EFT on Paystack's secure page. When they come back, the order turns **Paid** by itself and they get the paid invoice (and, for a collection, the calendar invite). Bank transfer stays as the other option. Door-to-door delivery is still paid by bank transfer only.
+When it is switched on, a customer who picks **To your door** types their address in parts (street, flat or complex, suburb, city, postal code, province). As soon as it is filled in, the order page asks The Courier Guy for the price and shows it like a checkout's shipping method: **The Courier Guy · Economy, expected by Mon 2 Nov, R90**. The price is added to the total, the order goes straight to **Awaiting payment**, and the customer pays on the page by card, Apple Pay or instant EFT. No unpaid invoice is emailed and nobody has to wait for you to set a fee.
 
-- **Customers pay on the website.** Collection and locker orders show a **Pay by card** button straight after ordering. No unpaid invoice is emailed for them: once Paystack confirms the payment, the customer is emailed the **paid** invoice (PDF), plus the calendar invite for a collection. The bank details still show on the page for anyone who would rather transfer.
+- **The price** is The Courier Guy's cheapest rate for that address, plus **Settings > Door delivery with The Courier Guy > Add to every Courier Guy price** (for example the box and packing), rounded up to the next rand. The parcel is the smallest box from **Settings > Delivery with Pudo** that holds the gels, weighing the gels (sachet weight in Settings) plus 250 g for the box.
+- **The address parcels leave from** is **Address parcels leave from** in the same settings (street, suburb, city, postal code). Leave it blank to use your **Collection address (private)**.
+- **Your new-order email** says which Courier Guy service was quoted and what it costs you, so you can book it in The Courier Guy portal once the order is paid.
+- **If The Courier Guy can't price an address** (a typo, or their service is down), the customer is told and can still order. The order arrives under **New requests**, as before: set the fee and accept it, and the invoice email has a **Pay by card** link.
+- A price is kept for 30 minutes, so the customer is charged what they saw. If it changed in the meantime, they are shown the new price before anything is charged.
+- Pudo lockers and collection work as before.
+
+**Setting it up (once):**
+1. Log in to The Courier Guy portal (portal.thecourierguy.co.za) with your business account and create an **API key** (usually under **Settings** or **Integrations > API keys**). If you don't see it, ask The Courier Guy to switch on API access for your account. Never put the key in the website files.
+2. In Apps Script, click the gear (**Project Settings**). Under **Script properties**, **Add script property**: `COURIER_API_KEY`, value: the key. **Save script properties**.
+3. Only if The Courier Guy gives you a different API address than `https://api.shiplogic.com`: add `COURIER_API_HOST` with that address.
+4. Paste the new `Code.gs`, run `setup` once, and deploy a **New version** (see "Changing things later").
+5. On the admin page, open **Settings > Door delivery with The Courier Guy** and check **Address parcels leave from**. Save.
+6. Try it: on the order page choose **To your door**, enter a real address and check the price matches The Courier Guy portal for the same parcel.
+
+To switch it off, delete the `COURIER_API_KEY` property. Door orders go back to waiting for you to set the fee.
+
+## Card payments (Paystack)
+
+Every order can be paid by card, Apple Pay or instant EFT on Paystack's secure page: collection, Pudo locker and door delivery. When they come back, the order turns **Paid** by itself and they get the paid invoice (and, for a collection, the calendar invite). Bank transfer stays as the other option, folded away under **Prefer to pay by bank transfer?**.
+
+- **Customers pay on the website.** Before ordering, the form shows how they will pay (the card and wallet logos, "secure and encrypted"). Straight after ordering, a payment panel shows the amount due, a **Pay R... now** button, the cards and wallets accepted, and that the payment is secured by Paystack. The logos shown are Visa, Mastercard, Apple Pay and instant EFT: make sure these are switched on in your Paystack dashboard (Apple Pay and instant EFT each need switching on there). No unpaid invoice is emailed for them: once Paystack confirms the payment, the customer is emailed the **paid** invoice (PDF), plus the calendar invite for a collection. The bank details still show on the page for anyone who would rather transfer.
 - **Locker prices must be fixed** so the total is known when the customer orders. On the admin page, under **Settings**, set **Pudo locker prices** to `14 90, 29 120, 500 150` (under 15 gels R90, 15 to 29 R120, 30 or more R150) and make sure **Pudo shipping** is `no` (otherwise the box-size Pudo prices are used instead).
-- **Pay by card link:** invoices that are still emailed unpaid (orders Greg enters himself, or one sent again with **Email invoice**) have a **Pay by card** link for collection and locker orders, as does the day-before collection reminder. The link opens Paystack for exactly that order. The customer's email sits after `#` in the link, so it never reaches a server, and the link only works with the email the order was placed with.
+- **Pay by card link:** invoices that are still emailed unpaid (orders Greg enters himself, door requests he accepts with a fee, or one sent again with **Email invoice**) have a **Pay by card** link, as does the day-before collection reminder. The link opens Paystack for exactly that order. The customer's email sits after `#` in the link, so it never reaches a server, and the link only works with the email the order was placed with.
 
 1. In Paystack, open **Settings > API Keys & Webhooks** and copy the **Test Secret Key** (it starts with `sk_test_`). Never put it in the website files.
 2. In Apps Script, click the gear (**Project Settings**). Under **Script properties**, click **Add script property**. Property: `PAYSTACK_SECRET_KEY`. Value: the key. **Save script properties**.
@@ -230,7 +251,7 @@ Nothing is tied to your accounts except where the pieces live, so moving is a fe
 
 ### Not included, on purpose
 
-One product only (in a choice of flavours). No stock counts. Card payments only for collection and Pudo locker orders. No automatic bank matching. No refunds or partial payments. No email reminders for unpaid orders. Fake orders from the order page are possible; they sit under **Awaiting payment** and can be cancelled. Someone could type a stranger's email into the order page, who would then get one invoice email; the hourly cap limits this.
+One product only (in a choice of flavours). No stock counts. Courier bookings are made by hand in The Courier Guy portal. No automatic bank matching. No refunds or partial payments. No email reminders for unpaid orders. Fake orders from the order page are possible; they sit under **Awaiting payment** and can be cancelled. Someone could type a stranger's email into the order page, who would then get one invoice email; the hourly cap limits this.
 
 ### Privacy
 
