@@ -227,6 +227,7 @@ function createGas(opts) {
       if (body.delivery_address.code === '0000') return null;
       const local = code >= 7000 && code <= 8099;
       return [
+        { rate: 49, service_level: { code: 'LPF', name: 'Local Priority Flyer' } },
         { rate: local ? 142.1 : 210.5, rate_excluding_vat: 0, service_level: { code: 'OVN', name: 'Overnight', delivery_date_from: '2026-10-29T00:00:00+02:00', delivery_date_to: '2026-10-29T00:00:00+02:00' } },
         { rate: local ? '89.5' : '145.2', rate_excluding_vat: 0, service_level: { code: 'ECO', name: 'Economy', delivery_date_from: '2026-10-30T00:00:00+02:00', delivery_date_to: '2026-11-02T00:00:00+02:00' } }
       ];

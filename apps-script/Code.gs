@@ -2669,11 +2669,11 @@ function packLine_(order, s) {
 // address (for example the sandbox); it defaults to COURIER_API.
 //
 // The parcel is the smallest box that holds the sachets (the same boxes as the Pudo
-// settings), weighing the sachets plus the box. The customer is charged the cheapest rate
-// The Courier Guy offers, plus courier_extra, rounded up to the next rand. A price is kept
+// settings), weighing the sachets plus the box. The customer is charged the cheapest parcel
+// rate The Courier Guy offers (its "Flyer" services are for courier bags, not a box), plus courier_extra, rounded up to the next rand. A price is kept
 // for 30 minutes, so the order is charged the price the customer was shown.
 
-const COURIER_API = 'https://api.shiplogic.com';
+const COURIER_API = 'https://api.portal.thecourierguy.co.za';
 const COURIER_CACHE_SECONDS = 1800;
 const COURIER_QUOTES_PER_HOUR = 150; // a cap on new prices asked for from the order page
 const PROVINCES = [
@@ -2849,6 +2849,7 @@ function courierQuote_(s, d, qty) {
   rates.forEach(function (r) {
     const rate = parseNumber_(r && r.rate, NaN);
     if (!isFinite(rate) || rate <= 0) return;
+    if (/flyer/i.test(str_(r.service_level && r.service_level.name))) return;
     if (!best || rate < best.rate) best = { rate: rate, level: (r && r.service_level) || {} };
   });
   if (res.getResponseCode() >= 300 || !best) {

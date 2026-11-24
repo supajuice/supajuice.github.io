@@ -188,7 +188,7 @@ The **Reviews** tab on Greg's page lists everyone with a paid or delivered order
 
 When it is switched on, a customer who picks **To your door** types their address in parts (street, flat or complex, suburb, city, postal code, province). As soon as it is filled in, the order page asks The Courier Guy for the price and shows it like a checkout's shipping method: **The Courier Guy · Economy, expected by Mon 2 Nov, R90**. The price is added to the total, the order goes straight to **Awaiting payment**, and the customer pays on the page by card, Apple Pay or instant EFT. No unpaid invoice is emailed and nobody has to wait for you to set a fee.
 
-- **The price** is The Courier Guy's cheapest rate for that address, plus **Settings > Door delivery with The Courier Guy > Add to every Courier Guy price** (for example the box and packing), rounded up to the next rand. The parcel is the smallest box from **Settings > Delivery with Pudo** that holds the gels, weighing the gels (sachet weight in Settings) plus 250 g for the box.
+- **The price** is The Courier Guy's cheapest parcel rate for that address (its "Flyer" courier-bag services are skipped, because the price is worked out for a box), plus **Settings > Door delivery with The Courier Guy > Add to every Courier Guy price** (for example the box and packing), rounded up to the next rand. The parcel is the smallest box from **Settings > Delivery with Pudo** that holds the gels, weighing the gels (sachet weight in Settings) plus 250 g for the box.
 - **The address parcels leave from** is **Address parcels leave from** in the same settings (street, suburb, city, postal code). Leave it blank to use your **Collection address (private)**.
 - **Your new-order email** says which Courier Guy service was quoted and what it costs you, so you can book it in The Courier Guy portal once the order is paid.
 - **If The Courier Guy can't price an address** (a typo, or their service is down), the customer is told and can still order. The order arrives under **New requests**, as before: set the fee and accept it, and the invoice email has a **Pay by card** link.
@@ -196,9 +196,9 @@ When it is switched on, a customer who picks **To your door** types their addres
 - Pudo lockers and collection work as before.
 
 **Setting it up (once):**
-1. Log in to The Courier Guy portal (portal.thecourierguy.co.za) with your business account and create an **API key** (usually under **Settings** or **Integrations > API keys**). If you don't see it, ask The Courier Guy to switch on API access for your account. Never put the key in the website files.
+1. Log in to The Courier Guy portal (portal.thecourierguy.co.za) and open **Integrations > API keys > Create API key**. Copy the key straight away: it is shown once. Never put it in the website files.
 2. In Apps Script, click the gear (**Project Settings**). Under **Script properties**, **Add script property**: `COURIER_API_KEY`, value: the key. **Save script properties**.
-3. Only if The Courier Guy gives you a different API address than `https://api.shiplogic.com`: add `COURIER_API_HOST` with that address.
+3. The API address is `https://api.portal.thecourierguy.co.za` (keys from the portal only work there). Only if The Courier Guy gives you a different one: add `COURIER_API_HOST` with that address.
 4. Paste the new `Code.gs`, run `setup` once, and deploy a **New version** (see "Changing things later").
 5. On the admin page, open **Settings > Door delivery with The Courier Guy** and check **Address parcels leave from**. Save.
 6. Try it: on the order page choose **To your door**, enter a real address and check the price matches The Courier Guy portal for the same parcel.

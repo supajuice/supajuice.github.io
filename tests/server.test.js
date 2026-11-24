@@ -2539,9 +2539,9 @@ test('a door price is the cheapest Courier Guy rate plus the extra, rounded up, 
   const { gas, key } = withCourier({ courier_extra: '6' });
   const r = gas.call(quoteFor());
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.deepEqual(r.quote, { fee: 96, service: 'Economy', eta: 'Mon 2 Nov' }, 'R89.50 + R6 = R95.50, rounded up');
+  assert.deepEqual(r.quote, { fee: 96, service: 'Economy', eta: 'Mon 2 Nov' }, 'R89.50 + R6 = R95.50, rounded up; a cheaper Flyer (courier bag) rate is skipped');
   const sent = gas.courier.last();
-  assert.equal(sent.url, 'https://api.shiplogic.com/rates');
+  assert.equal(sent.url, 'https://api.portal.thecourierguy.co.za/rates');
   assert.equal(sent.headers.Authorization, 'Bearer tcg_live_key');
   assert.deepEqual(sent.body.parcels, [{ submitted_length_cm: 60, submitted_width_cm: 17, submitted_height_cm: 8, submitted_weight_kg: 0.64 }],
     '3 sachets go in the Extra Small box: 3 x 130 g + 250 g');
