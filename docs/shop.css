@@ -1113,6 +1113,8 @@ html:has(body.shop) {
 .shop .paymark--apple { background: #000; border-color: #000; color: #fff; }
 .shop .paymark--apple svg { height: 13px; fill: #fff; margin-top: -2px; }
 .shop .paymark--apple span { font: 600 13px/1 -apple-system, 'Helvetica Neue', Arial, sans-serif; letter-spacing: -0.2px; }
+.shop .paymark--gpay span { color: #3c4043; font: 600 13px/1 Arial, sans-serif; }
+.shop .paymark--gpay .paymark-g { font-weight: 800; font-size: 14px; background: conic-gradient(from -45deg, #ea4335 0 25%, #4285f4 0 50%, #34a853 0 75%, #fbbc04 0); -webkit-background-clip: text; background-clip: text; color: transparent; margin-right: 1px; }
 .shop .paymark--eft span { color: #0b7a53; font: 800 11px/1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; }
 
 /* After ordering: the payment panel. Navy, so it stands apart from the yellow invoice
