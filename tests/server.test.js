@@ -83,7 +83,7 @@ test('public config shows the price but no bank details', () => {
   assert.deepEqual(flavours, [{ key: 'orange', name: 'Orange' }, { key: 'cranberry', name: 'Cranberry' }]);
   assert.deepEqual(rest, {
     brand: 'Supa Juice', product: 'Running gel sachet', price: 40, fee: 30, currency: 'R',
-    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, lockerFees: [], ship: null, cardPay: false, codesOn: false, ready: true
+    collectNote: 'Sea Point', collectAhead: 30, quote: false, minQty: 1, maxQty: 20, photo: null, lockerFees: [], ship: null, cardPay: false, courier: null, codesOn: false, ready: true
   });
   assert.ok(collectSlots.length > 0, 'collection times are always offered');
   assert.ok(!JSON.stringify(cfg).includes('0012345678'));
@@ -1734,16 +1734,16 @@ test('a card payment for the wrong amount is not marked paid, and Greg is told o
   assert.match(sent[0].subject, /Check card payment for SJ-0001/);
 });
 
-test('starting a card payment needs the right email, a collection, and an unpaid order', () => {
+test('starting a card payment needs the right email and an unpaid order', () => {
   const { gas, key } = withCard();
   assert.equal(gas.call(startPay({ email: 'someone@else.com' })).error, 'not_found');
   assert.equal(gas.call(startPay({ invoice: 'SJ-9999' })).error, 'not_found');
   assert.equal(gas.call(startPay({ returnUrl: 'javascript:alert(1)' })).error, 'bad_request');
   assert.equal(gas.call(startPay({ email: 'JANE@example.com' })).ok, true, 'email case does not matter');
 
-  // A delivery order is paid by bank transfer.
+  // A door delivery order with its fee set can be paid by card too.
   gas.call(order({ requestId: rid() }));
-  assert.equal(gas.call(startPay({ invoice: 'SJ-0002' })).error, 'invalid');
+  assert.equal(gas.call(startPay({ invoice: 'SJ-0002' })).ok, true);
 
   // Already paid: nothing to start.
   gas.call({ action: 'setStatus', key, invoice: 'SJ-0001', status: 'Paid' });
@@ -1806,7 +1806,7 @@ test('with card on, collection and locker customers pay on the page: no unpaid i
   assert.equal(gas.call(order({ qty: 5, expectedTotal: 200, requestId: rid() })).order.status, 'New request');
 });
 
-test('door delivery invoices have no card link, and card links only appear once Paystack is switched on', () => {
+test('door and locker invoices get a card link once Paystack is switched on', () => {
   const { gas, key } = readyQuote();
   gas.call(order({ qty: 5, expectedTotal: 200 })); // to the door
   gas.call(order({ ship: 'locker', address: '12 Main Rd', qty: 5, expectedTotal: 200, requestId: rid() }));
@@ -1815,11 +1815,11 @@ test('door delivery invoices have no card link, and card links only appear once 
   gas.call({ action: 'acceptOrder', key, invoice: 'SJ-0002', fee: '69' });
   assert.ok(gas.mail.every((m) => !/Pay by card/.test(m.body)), 'no key, no link');
   gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
-  assert.equal(gas.call(startPay({ invoice: 'SJ-0001' })).error, 'invalid', 'door orders pay by bank transfer');
+  assert.equal(gas.call(startPay({ invoice: 'SJ-0001' })).ok, true, 'door orders can be paid by card once accepted');
   gas.mail.length = 0;
   gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0001' });
   gas.call({ action: 'sendInvoice', key, invoice: 'SJ-0002' });
-  assert.doesNotMatch(gas.mail[0].body, /Pay by card/);
+  assert.match(gas.mail[0].body, /\?pay=SJ-0001#/);
   assert.match(gas.mail[1].body, /\?pay=SJ-0002#/);
 });
 
@@ -2506,4 +2506,133 @@ test('a moved collection gets a fresh reminder, and switching reminders off stop
   gas.call(pickup({ name: 'Sat', email: 'sat@example.com', collectAt: '2026-10-31 17:00' }));
   assert.equal(remind(gas).sent, 0);
   assert.equal(gas.call({ action: 'saveSettings', key, values: { collection_reminders: 'maybe' } }).error, 'invalid');
+});
+
+// ---------------------------------------------------------------------------
+// Door delivery priced by The Courier Guy
+// ---------------------------------------------------------------------------
+
+function withCourier(values) {
+  const env = ready();
+  const r = env.gas.call({ action: 'saveSettings', key: env.key, values: Object.assign({ collection_address: '267 High Level Road, Sea Point, Cape Town, 8005' }, values || {}) });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  env.gas.store.set('COURIER_API_KEY', 'tcg_live_key');
+  return env;
+}
+const DOOR = { street: '12 Beach Rd', unit: 'Flat 4, Ocean View', suburb: 'Sea Point', city: 'Cape Town', code: '8005', province: 'Western Cape' };
+const doorOrder = (over) => order(Object.assign({ door: DOOR, address: '', qty: 3, expectedTotal: 120 + 90, requestId: rid() }, over));
+const quoteFor = (over) => Object.assign({ action: 'deliveryQuote', qty: 3, door: DOOR }, over);
+
+test('door prices from The Courier Guy are offered only with a key and an address to send from', () => {
+  const { gas, key } = ready();
+  gas.store.set('COURIER_API_KEY', 'tcg_live_key');
+  assert.equal(gas.call({ action: 'config' }).config.courier, null, 'no address to send from yet');
+  assert.equal(gas.call(quoteFor()).error, 'no_quote');
+  gas.call({ action: 'saveSettings', key, values: { courier_from: '267 High Level Road, Sea Point, Cape Town, 8005' } });
+  assert.deepEqual(gas.call({ action: 'config' }).config.courier, { max: 72 });
+  gas.store.delete('COURIER_API_KEY');
+  assert.equal(gas.call({ action: 'config' }).config.courier, null, 'no key, no courier prices');
+  assert.equal(gas.courier.requests.length, 0);
+});
+
+test('a door price is the cheapest Courier Guy rate plus the extra, rounded up, and is kept for a while', () => {
+  const { gas, key } = withCourier({ courier_extra: '6' });
+  const r = gas.call(quoteFor());
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.quote, { fee: 96, service: 'Economy', eta: 'Mon 2 Nov' }, 'R89.50 + R6 = R95.50, rounded up; a cheaper Flyer (courier bag) rate is skipped');
+  const sent = gas.courier.last();
+  assert.equal(sent.url, 'https://api.portal.thecourierguy.co.za/rates');
+  assert.equal(sent.headers.Authorization, 'Bearer tcg_live_key');
+  assert.deepEqual(sent.body.parcels, [{ submitted_length_cm: 60, submitted_width_cm: 17, submitted_height_cm: 8, submitted_weight_kg: 0.64 }],
+    '3 sachets go in the Extra Small box: 3 x 130 g + 250 g');
+  assert.equal(sent.body.collection_address.street_address, '267 High Level Road');
+  assert.equal(sent.body.collection_address.zone, 'Western Cape');
+  assert.equal(sent.body.delivery_address.local_area, 'Sea Point');
+  assert.equal(sent.body.delivery_address.code, '8005');
+  assert.equal(sent.body.declared_value, 120);
+
+  // The same address again is not asked twice.
+  gas.call(quoteFor());
+  assert.equal(gas.courier.requests.length, 1);
+  // Further away costs more, and more gels go in a bigger box.
+  assert.equal(gas.call(quoteFor({ door: Object.assign({}, DOOR, { suburb: 'Sandton', city: 'Johannesburg', code: '2196', province: 'Gauteng' }) })).quote.fee, 152);
+  gas.call(quoteFor({ qty: 20 }));
+  assert.equal(gas.courier.last().body.parcels[0].submitted_width_cm, 41);
+  // A different address to send from is used once saved.
+  gas.call({ action: 'saveSettings', key, values: { courier_from: '1 Main Rd, Green Point, Cape Town, 8051' } });
+  gas.call(quoteFor());
+  assert.equal(gas.courier.last().body.collection_address.local_area, 'Green Point');
+});
+
+test('a door price needs the whole address, and says so when The Courier Guy cannot price it', () => {
+  const { gas } = withCourier();
+  assert.match(gas.call(quoteFor({ door: Object.assign({}, DOOR, { code: '80' }) })).message, /4-digit postal code/);
+  assert.match(gas.call(quoteFor({ door: Object.assign({}, DOOR, { suburb: '' }) })).message, /suburb/);
+  assert.match(gas.call(quoteFor({ door: Object.assign({}, DOOR, { province: 'Atlantis' }) })).message, /province/);
+  const lost = gas.call(quoteFor({ door: Object.assign({}, DOOR, { code: '0000' }) }));
+  assert.equal(lost.error, 'no_quote');
+  assert.match(lost.message, /suburb and postal code/);
+  gas.courier.down = true;
+  assert.equal(gas.call(quoteFor({ qty: 4 })).error, 'no_quote');
+  assert.equal(gas.call(quoteFor({ qty: 0 })).error, 'invalid');
+});
+
+test('a door order is charged the Courier Guy price straight away and can be paid by card on the page', () => {
+  const { gas } = withCourier();
+  gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
+  assert.equal(gas.call(quoteFor()).quote.fee, 90);
+  const r = gas.call(doorOrder());
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'Awaiting payment', 'no waiting for Greg to set a fee');
+  assert.equal(r.order.fee, 90);
+  assert.equal(r.order.total, 210);
+  assert.equal(r.order.address, 'Flat 4, Ocean View, 12 Beach Rd, Sea Point, Cape Town, 8005');
+  assert.equal(gas.courier.requests.length, 1, 'the price the customer saw is reused');
+  // Paid on the page, so no unpaid invoice. Greg is told what to book.
+  assert.ok(!gas.mail.some((m) => m.to === 'jane@example.com'));
+  const alert = gas.mail.find((m) => m.to === 'greg@example.com');
+  assert.match(alert.body, /Courier: The Courier Guy Economy, quoted R89\.50/);
+  assert.match(alert.body, /Delivery: R90/);
+  // Paying by card works for a door order.
+  assert.equal(gas.call(startPay()).ok, true);
+  assert.equal(gas.paystack.last().amount, 21000);
+});
+
+test('a door total that no longer matches the Courier Guy price is refused with the new price', () => {
+  const { gas } = withCourier();
+  const r = gas.call(doorOrder({ expectedTotal: 200 }));
+  assert.equal(r.error, 'quote_changed');
+  assert.deepEqual(r.quote, { fee: 90, service: 'Economy', eta: 'Mon 2 Nov' });
+  assert.match(r.message, /now R90/);
+  assert.equal(gas.rows('Orders').length, 0);
+});
+
+test('when The Courier Guy cannot price a door order, it waits for Greg to set the fee', () => {
+  const { gas } = withCourier();
+  gas.courier.down = true;
+  const r = gas.call(doorOrder({ expectedTotal: 120 }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'New request');
+  assert.equal(r.order.total, 120);
+  assert.match(gas.mail.find((m) => m.to === 'greg@example.com').subject, /set the delivery fee/);
+  // A missing part of the address is never sent as an order.
+  assert.match(gas.call(doorOrder({ door: Object.assign({}, DOOR, { city: '' }) })).message, /city/);
+});
+
+test('free delivery from a code leaves the Courier Guy price off', () => {
+  const { gas, key } = withCourier();
+  gas.call({ action: 'saveSettings', key, values: { discount_codes: 'FREESHIP delivery on' } });
+  const r = gas.call(doorOrder({ code: 'FREESHIP', expectedTotal: 120 }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.order.status, 'Awaiting payment');
+  assert.equal(r.order.fee, 0);
+});
+
+test('the address parcels leave from must be street, suburb, city and postal code', () => {
+  const { gas, key } = ready();
+  const bad = gas.call({ action: 'saveSettings', key, values: { courier_from: 'Sea Point' } });
+  assert.equal(bad.error, 'invalid');
+  assert.match(bad.message, /street, suburb, city, postal code/);
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { courier_extra: 'lots' } }).error, 'invalid');
+  assert.equal(gas.call({ action: 'saveSettings', key, values: { courier_from: '9 Crinum Rd, Mandalay, Cape Town, 7785, Western Cape', courier_extra: '15' } }).ok, true);
 });

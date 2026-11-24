@@ -135,6 +135,11 @@ function build(mode, opts) {
   if (opts.pudo && mode !== 'empty') expectOk(gas.call({ action: 'saveSettings', key, values: { pudo_shipping: 'yes' } }));
   if (opts.lockerFees && mode !== 'empty') expectOk(gas.call({ action: 'saveSettings', key, values: { locker_fees: opts.lockerFees, max_quantity: '50' } }));
   if (opts.cardPay) gas.store.set('PAYSTACK_SECRET_KEY', 'sk_test_abc123');
+  // Door delivery priced live by a stand-in for The Courier Guy (see gas-mock.js).
+  if (opts.courier && mode !== 'empty') {
+    expectOk(gas.call({ action: 'saveSettings', key, values: { collection_address: '267 High Level Road, Sea Point, Cape Town, 8005' } }));
+    gas.store.set('COURIER_API_KEY', 'tcg_test_key');
+  }
   if (mode === 'seeded') seed(gas, key);
   if (mode === 'seeded' && opts.collections) seedCollections(gas, key);
   // Delivery fees confirmed per order, with one request waiting for a fee when there are sample orders.
@@ -298,6 +303,8 @@ if (require.main === module) {
     fee: args.fee === undefined ? undefined : Number(args.fee),
     quote: args.quote !== 'false', // --quote=false for a fixed delivery fee
     pudo: args.pudo === 'true', // --pudo=true for fees worked out from the box and Pudo size
+    cardPay: args.card === 'true', // --card=true for card payments with a stand-in for Paystack
+    courier: args.courier === 'true', // --courier=true for door prices from a stand-in for The Courier Guy
     collections: args.collections !== 'false', // sample collection orders, --collections=false for none
     sitePort: Number(args['site-port'] || 5173),
     apiPort: Number(args['api-port'] || 5174)

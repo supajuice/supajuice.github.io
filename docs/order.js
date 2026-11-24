@@ -22,6 +22,14 @@
   var paying = false;    // waiting for Paystack's payment page
   var discount = null;   // the applied discount code: { code, percent, delivery }, or null
   var checkingCode = false;
+  // The Courier Guy's price for the door address typed in, when the shop prices doors live.
+  // status: 'idle' (address not complete), 'loading', 'ok' (data is { fee, service, eta }) or
+  // 'error' (it could not be priced: the order is sent and Greg emails the fee).
+  var ship = { key: '', status: 'idle', data: null, message: '' };
+  var shipTimer = null;
+  var shipAsk = null;    // the price being asked for: a promise, so placing the order can wait for it
+  var shipAskKey = '';   // which address and number of gels it is for
+  var shipSeen = {};     // prices already asked for, by address and number of gels
 
   // ---------- Discount from an ad link ----------
   // An ad links to the page with ?code=... on the end, for example ?code=FBVK5WRNRG.
@@ -139,7 +147,21 @@
   function buildForm() {
     stepper = SJ.flavourPicker({ id: 'qty', list: SJ.flavoursFor(config), legend: 'Choose your flavours' });
     $('qty-slot').appendChild(stepper.node);
-    stepper.onChange(renderTotals);
+    stepper.onChange(function () {
+      renderTotals();
+      if (courierOn()) askShip(true);
+    });
+    DOOR_FIELDS.forEach(function (k) {
+      var box = $('door-' + k);
+      box.addEventListener(k === 'province' ? 'change' : 'input', function () { askShip(false); });
+      // Leaving a field asks straight away, without waiting.
+      box.addEventListener('blur', function () { askShip(true); });
+    });
+    $('ship-retry').addEventListener('click', function () {
+      delete shipSeen[shipKey()];
+      ship.key = '';
+      askShip(true);
+    });
     $('order-form').addEventListener('submit', onSubmit);
     $('choose-collect').addEventListener('click', function () { choose('collect'); });
     $('choose-deliver').addEventListener('click', function () { choose('deliver'); });
@@ -247,6 +269,7 @@
   // A delivery whose fee Greg confirms after the order: it is sent as a request.
   function quoting() {
     if (collecting() || freeDeliveryCode() || !config) return false;
+    if (courierOn()) return ship.status === 'error';
     if (choice === 'locker' && lockerRates()) return lockerFee() === null;
     return !!config.quote;
   }
@@ -268,6 +291,115 @@
 
   function lockerMax() {
     return config.lockerFees[config.lockerFees.length - 1].upTo;
+  }
+
+  // ---------- Door price from The Courier Guy ----------
+
+  var DOOR_FIELDS = ['street', 'unit', 'suburb', 'city', 'code', 'province'];
+
+  // Door delivery is priced live for the customer's address.
+  function courierOn() {
+    return !!(config && config.courier) && choice === 'deliver';
+  }
+
+  function readDoor() {
+    var d = {};
+    DOOR_FIELDS.forEach(function (k) { d[k] = $('door-' + k).value.trim(); });
+    d.code = d.code.replace(/\D/g, '');
+    return d;
+  }
+
+  function doorLine(d) {
+    return [d.unit, d.street, d.suburb, d.city, d.code].filter(Boolean).join(', ');
+  }
+
+  // The first part of the door address still to fill in: { id, message }, or null.
+  function doorProblem(d) {
+    if (!d.street) return { id: 'door-street', message: 'Enter your street address.' };
+    if (!d.suburb) return { id: 'door-suburb', message: 'Enter your suburb.' };
+    if (!d.city) return { id: 'door-city', message: 'Enter your city or town.' };
+    if (!/^\d{4}$/.test(d.code)) return { id: 'door-code', message: 'Enter your 4-digit postal code.' };
+    if (!d.province) return { id: 'door-province', message: 'Choose your province.' };
+    return null;
+  }
+
+  function shipKey() {
+    var d = readDoor();
+    return JSON.stringify([d.street, d.suburb, d.city, d.code, d.province].map(function (v) { return v.toLowerCase(); }).concat(stepper.total()));
+  }
+
+  function setShip(next) {
+    ship = next;
+    renderTotals();
+  }
+
+  // Asks for the price once the address is complete. now: without waiting for more typing.
+  function askShip(now) {
+    if (!courierOn()) return;
+    var d = readDoor();
+    var key = shipKey();
+    if (doorProblem(d) || stepper.total() < 1) {
+      clearTimeout(shipTimer);
+      if (ship.status !== 'idle') setShip({ key: '', status: 'idle', data: null, message: '' });
+      return;
+    }
+    if (key === ship.key && (ship.status === 'ok' || ship.status === 'error')) return;
+    if (shipSeen[key]) {
+      clearTimeout(shipTimer);
+      setShip({ key: key, status: 'ok', data: shipSeen[key], message: '' });
+      return;
+    }
+    if (key === ship.key && ship.status === 'loading' && (shipAskKey === key || !now)) return;
+    clearTimeout(shipTimer);
+    // While still typing, show it is coming but wait a moment before asking.
+    if (ship.key !== key || ship.status !== 'loading') setShip({ key: key, status: 'loading', data: null, message: '' });
+    if (now) fetchShip(key, d);
+    else shipTimer = setTimeout(function () { fetchShip(key, readDoor()); }, 700);
+  }
+
+  function fetchShip(key, d) {
+    shipAskKey = key;
+    var ask = SJ.api('deliveryQuote', { qty: stepper.total(), door: d }).then(function (res) {
+      shipSeen[key] = res.quote;
+      if (ship.key === key) setShip({ key: key, status: 'ok', data: res.quote, message: '' });
+    }, function (err) {
+      if (ship.key !== key) return;
+      var msg = err.code === 'network' ? 'We could not reach the delivery prices. Check your connection.' : err.message;
+      setShip({ key: key, status: 'error', data: null, message: msg, retry: err.code !== 'invalid' });
+    });
+    shipAsk = ask;
+    ask.then(function () {
+      if (shipAsk === ask) { shipAsk = null; shipAskKey = ''; }
+    });
+    return ask;
+  }
+
+  // The delivery card under the address, like a checkout's shipping method.
+  function renderShip() {
+    var on = courierOn();
+    $('ship').hidden = !on;
+    if (!on) return;
+    var card = $('ship-card');
+    var free = freeDeliveryCode();
+    card.className = 'ship-card ship-card--' + ship.status;
+    $('ship-name').textContent = ship.status === 'ok' ? 'The Courier Guy · ' + ship.data.service : 'The Courier Guy';
+    $('ship-sub').textContent = ship.status === 'ok' ? (ship.data.eta ? 'To your door, expected by ' + ship.data.eta : 'Straight to your door')
+      : ship.status === 'loading' ? 'Getting the price for your address…'
+      : ship.status === 'error' ? ship.message + ' You can still order: we will email you the delivery fee.'
+      : doorProblem(readDoor()) ? 'Enter your address to see the delivery price.'
+      : 'Choose your gels to see the delivery price.';
+    $('ship-fee').textContent = ship.status === 'ok' ? (free ? 'Free' : SJ.money(ship.data.fee, config.currency)) : '';
+    $('ship-retry').hidden = !(ship.status === 'error' && ship.retry);
+  }
+
+  // The door fee the customer sees and is charged, or null while it is not known.
+  function shipFee() {
+    return courierOn() && ship.status === 'ok' ? ship.data.fee : null;
+  }
+
+  // Card payments on the page for this order (not for one that waits for Greg's fee).
+  function payNow() {
+    return !!(config && config.cardPay) && !!choice && !quoting();
   }
 
   // ---------- Pudo fees ----------
@@ -354,7 +486,8 @@
       // The heading says it is free (only when it is), the small text says where.
       $('choose-collect-title').textContent = collectFree ? 'Free collection' : 'Collect';
       $('choose-collect-sub').textContent = place ? 'From ' + place : '';
-      $('choose-deliver-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
+      $('choose-deliver-sub').textContent = config.courier ? 'Priced for your address'
+        : pudo ? 'From ' + SJ.money(pudoFrom('door'), config.currency) : quoteFromText('door') || deliveryText(config);
       $('choose-locker-sub').textContent = pudo ? 'From ' + SJ.money(pudoFrom('locker'), config.currency)
         : lockerRates() ? 'From ' + SJ.money(config.lockerFees[0].fee, config.currency)
         : quoteFromText('locker') || deliveryText(config);
@@ -363,7 +496,10 @@
       : choice === 'locker' ? 'Send to a Pudo locker'
       : 'Deliver to your door';
     // The locker uses the address too: Greg picks the Pudo locker nearest to it.
-    $('address-field').hidden = collect;
+    $('address-field').hidden = collect || courierOn();
+    $('door-fields').hidden = !courierOn();
+    renderShip();
+    if (courierOn()) askShip(true);
     $('address-label').textContent = choice === 'locker' ? 'Your address' : 'Delivery address';
     $('locker-hint').hidden = choice !== 'locker';
     $('collect-time').hidden = !collect || !slotsOn();
@@ -397,7 +533,7 @@
     document.title = c.brand;
     // Each sentence on its own line (the lede keeps line breaks, see shop.css).
     $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you.\n' : 'We send them to you, or you can collect.\n') +
-      'Pay by bank transfer.';
+      (c.cardPay ? 'Pay by card, Apple Pay, instant EFT or bank transfer.' : 'Pay by bank transfer.');
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
     stepper.setItem(SJ.itemLine(c));
@@ -416,24 +552,40 @@
       opts.collectFee = opts.fee;
       if (fee === null) opts.feeText = 'DM us for over ' + pudoMax();
     }
+    if (courierOn()) {
+      opts.label = 'Delivery to your door';
+      var sf = shipFee();
+      if (sf !== null) opts.fee = sf;
+      else {
+        opts.quote = true;
+        opts.feeText = ship.status === 'loading' ? 'Working it out…' : ship.status === 'error' ? 'We email you the fee' : 'Enter your address';
+      }
+    }
     if (choice === 'locker') opts.label = 'Delivery to a Pudo locker';
     if (choice === 'locker' && lockerRates()) {
       var lf = lockerFee();
       if (lf === null) opts.feeText = 'We send you the price (over ' + lockerMax() + ')';
       else opts.fee = lf;
-    } else if (choice && !collecting() && quoteFromText(choice === 'locker' ? 'locker' : 'door')) {
+    } else if (choice && !collecting() && !courierOn() && quoteFromText(choice === 'locker' ? 'locker' : 'door')) {
       opts.feeText = quoteFromText(choice === 'locker' ? 'locker' : 'door');
     }
     opts.discount = discount;
     opts.flavours = SJ.flavourText(stepper.get(), stepper.list);
     var qty = stepper.total();
     var total = SJ.renderSummary($('summary'), config, qty, opts);
+    renderShip();
+    var waiting = courierOn() && !quote && shipFee() === null && !freeDeliveryCode();
     if (!busy) {
       $('submit').textContent = qty < stepper.min() ? 'Choose at least ' + (stepper.min() === 1 ? '1 gel' : stepper.min() + ' gels')
-        : (quote ? 'Send order for ' : 'Place order for ') + SJ.money(total, config.currency) + (quote ? ' + delivery' : '');
+        : waiting ? 'Place order for ' + SJ.money(total, config.currency) + ' + delivery'
+        : quote ? 'Send order for ' + SJ.money(total, config.currency) + ' + delivery'
+        : payNow() ? 'Continue to pay ' + SJ.money(total, config.currency)
+        : 'Place order for ' + SJ.money(total, config.currency);
     }
+    $('pay-with').hidden = !payNow();
     $('next-note').textContent = quote
-      ? 'Next we work out the delivery fee for your address and email your invoice with the bank details. There is nothing to pay yet.'
+      ? 'Next we work out the delivery fee for your address and email your invoice' + (config.cardPay ? ' with a link to pay.' : ' with the bank details.') + ' There is nothing to pay yet.'
+      : payNow() ? 'Next you get your invoice number and pay securely by card, Apple Pay or instant EFT, or by bank transfer.'
       : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
   }
 
@@ -442,7 +594,8 @@
       name: $('name').value.trim(),
       email: $('email').value.trim(),
       contact: $('contact').value.trim(),
-      address: $('address').value.trim(),
+      address: courierOn() ? doorLine(readDoor()) : $('address').value.trim(),
+      door: courierOn() ? readDoor() : null,
       ship: choice === 'locker' ? 'locker' : 'door',
       locker: '',
       notes: $('notes').value.trim(),
@@ -484,6 +637,7 @@
       return { id: first, message: 'For more than ' + pudoMax() + ' sachets, please send us a DM and we will arrange delivery.' };
     }
     if (d.collect) return null;
+    if (d.door) return doorProblem(d.door);
     if (d.ship === 'locker') return d.address ? null : { id: 'address', message: 'Enter your address so we can pick the Pudo locker nearest to you.' };
     if (!d.address) return { id: 'address', message: 'Enter your delivery address.' };
     return null;
@@ -543,8 +697,23 @@
       return;
     }
 
+    // A door order waits for its delivery price, so the customer is charged what they see.
+    if (courierOn() && !freeDeliveryCode() && ship.status !== 'ok' && ship.status !== 'error') {
+      setSubmitting(true);
+      askShip(true);
+      try { if (shipAsk) await shipAsk; } catch (err) { /* shown on the delivery card */ }
+      setSubmitting(false);
+      if (ship.status === 'ok') {
+        showError('Your delivery price is ' + SJ.money(ship.data.fee, config.currency) + '. Check the total, then place your order.');
+        $('ship-card').scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+      if (ship.status !== 'error') return;
+    }
+
     // A collection order does not send the address that is hidden on the form.
     if (data.collect) data.address = '';
+    if (!data.door) delete data.door;
     // Sent as the locker too, for an order service from before lockers used the address.
     data.locker = data.ship === 'locker' ? data.address : '';
     // An order service from before flavours does not store them, so they go in the notes.
@@ -552,7 +721,7 @@
       var picked = 'Flavours: ' + SJ.flavourText(data.flavours, stepper.list);
       data.notes = (picked + (data.notes ? '. ' + data.notes : '')).slice(0, 300);
     }
-    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.locker, data.ship, data.notes, data.qty, data.flavours, data.collect, data.collectAt, data.code]);
+    var sig = JSON.stringify([data.name, data.email, data.contact, data.address, data.locker, data.ship, data.notes, data.qty, data.flavours, data.collect, data.collectAt, data.code, ship.status === 'ok' ? ship.data.fee : null]);
     if (!pending || pending.sig !== sig) pending = { sig: sig, id: SJ.newRequestId() };
 
     setSubmitting(true);
@@ -561,7 +730,8 @@
         requestId: pending.id,
         // The total the customer was shown: without a fee for collection, or for a request.
         expectedTotal: SJ.totalFor(data.qty, config.price,
-          freeDeliveryCode() && !data.collect ? 0 : pudoOn() ? pudoFee()
+          freeDeliveryCode() && !data.collect ? 0 : courierOn() ? (shipFee() === null ? 0 : shipFee())
+            : pudoOn() ? pudoFee()
             : data.ship === 'locker' && !data.collect && lockerRates() ? (lockerFee() === null ? 0 : lockerFee())
             : data.collect || config.quote ? 0 : config.fee,
           discount && !discount.delivery ? discount.percent : 0),
@@ -590,6 +760,16 @@
       renderTotals();
       showError(err.message);
       $('code').focus();
+    } else if (err.code === 'quote_changed') {
+      // The Courier Guy's price moved (or could not be had) since it was shown.
+      pending = null;
+      var q = err.data && err.data.quote;
+      var key = shipKey();
+      if (q) shipSeen[key] = q;
+      else delete shipSeen[key];
+      setShip(q ? { key: key, status: 'ok', data: q, message: '' }
+        : { key: key, status: 'error', data: null, message: 'We could not get a delivery price just now.', retry: true });
+      showError(err.message);
     } else if (err.code === 'price_changed' && err.data && err.data.config) {
       pending = null;
       SJ.store.set(CONFIG_KEY, err.data.config);
@@ -728,20 +908,24 @@
     return o.status === 'Paid' || o.status === 'Delivered';
   }
 
-  // Collection and Pudo locker orders waiting for payment can be paid by card, once Greg has
-  // switched it on. Door delivery stays bank transfer.
+  // Orders waiting for payment can be paid by card, once Greg has switched it on.
   function cardOn(o) {
-    var kind = !!o.collect || /^Pudo locker/.test(o.address || '');
-    return !!(config && config.cardPay) && kind && o.status === 'Awaiting payment' && !!o.email;
+    return !!(config && config.cardPay) && o.status === 'Awaiting payment' && !!o.email;
   }
 
   function syncCard() {
     var on = !!current && cardOn(current.order);
     $('card-section').hidden = !on;
-    $('pay-title').textContent = on ? 'Or pay by bank transfer' : 'Pay by bank transfer';
+    // With card payments the bank details fold away under "Prefer to pay by bank transfer?".
+    var eft = $('pay-section');
+    eft.classList.toggle('eft--only', !on);
+    if (!on) eft.open = true;
+    else if (!eft.dataset.touched) eft.open = false;
+    $('pay-title').textContent = on ? 'Prefer to pay by bank transfer?' : 'Pay by bank transfer';
+    if (on) $('checkout-amount').textContent = SJ.money(current.order.total, current.currency);
     if (on && !paying) {
       $('pay-card').disabled = false;
-      $('pay-card').textContent = 'Pay ' + SJ.money(current.order.total, current.currency) + ' by card';
+      $('pay-card-text').textContent = 'Pay ' + SJ.money(current.order.total, current.currency) + ' now';
     }
   }
 
@@ -767,7 +951,7 @@
     var btn = $('pay-card');
     paying = true;
     btn.disabled = true;
-    btn.textContent = 'Opening secure payment…';
+    $('pay-card-text').textContent = 'Opening secure payment…';
     hideCardError();
     try {
       var res = await SJ.api('startPayment', {
@@ -949,6 +1133,10 @@
   });
   $('new-order').addEventListener('click', newOrder);
   $('pay-card').addEventListener('click', startCard);
+  // Once the customer opens or closes the bank details themselves, leave them as they are.
+  $('pay-section').addEventListener('toggle', function () {
+    if (!$('pay-section').classList.contains('eft--only')) $('pay-section').dataset.touched = '1';
+  });
   $('closed-retry').addEventListener('click', function () {
     showView('view-loading');
     init();

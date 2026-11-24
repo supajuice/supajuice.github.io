@@ -997,6 +997,235 @@ html:has(body.shop) {
 }
 .shop .pay { border: 2px solid var(--line); border-radius: 14px; background: var(--cream); }
 
+/* ---------- Door address, delivery price and payment ---------- */
+
+/* The door address: one field per line, like a shop's checkout, so The Courier Guy can price it. */
+.shop .door { display: grid; gap: 14px; border: 0; padding: 0; margin-inline: 0; min-width: 0; }
+.shop .door-legend,
+.shop .ship-title,
+.shop .paywith-title {
+  margin-bottom: 2px;
+  padding: 0;
+  color: var(--blue);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.0625rem;
+  letter-spacing: 0.06em;
+}
+.shop .door-pair { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 12px; }
+.shop .door .opt { color: var(--muted); font-weight: 500; }
+.shop .door input::placeholder { color: #8a90a8; }
+
+/* The delivery price, like a checkout's shipping method: a card with the courier and the price. */
+.shop .ship { display: grid; gap: 8px; }
+.shop .ship-card {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: 14px 16px;
+  border: 2px dashed var(--line-strong);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ink);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.shop .ship-card--ok { border: 3px solid var(--blue); background: var(--cream); }
+.shop .ship-card--error { border-style: solid; border-color: #b3123c; }
+.shop .ship-icon {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.shop .ship-card--idle .ship-icon { stroke: var(--line-strong); }
+.shop .ship-name { font-weight: 800; color: var(--navy); line-height: 1.3; }
+.shop .ship-sub { margin-top: 2px; color: var(--muted); font-size: 0.875rem; line-height: 1.35; }
+.shop .ship-fee {
+  color: var(--blue);
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 1.5rem;
+  white-space: nowrap;
+}
+.shop .ship-card--loading .ship-icon { animation: ship-roll 1.1s ease-in-out infinite; }
+@keyframes ship-roll {
+  0%, 100% { transform: translateX(-2px); }
+  50% { transform: translateX(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shop .ship-card--loading .ship-icon { animation: none; }
+}
+.shop .ship-retry { justify-self: start; color: var(--blue); font-weight: 700; }
+
+/* How to pay, shown before the order is placed, so nobody is surprised on the next step. */
+.shop .paywith { display: grid; gap: 6px; }
+.shop .paywith-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.shop .paywith-lock { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.shop .paywith-box { margin-top: 4px; border: 3px solid var(--blue); border-radius: 14px; overflow: hidden; }
+.shop .paywith-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  padding: 14px 16px;
+  background: var(--cream);
+}
+.shop .paywith-name { font-weight: 800; color: var(--navy); }
+.shop .paywith-note {
+  padding: 12px 16px 14px;
+  border-top: 2px solid var(--line);
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+/* Card brand marks: small white tiles, the way checkouts show what they take. */
+.shop .paymarks { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.shop .paymark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 26px;
+  min-width: 42px;
+  padding: 0 7px;
+  border: 1px solid #d4d7e1;
+  border-radius: 5px;
+  background: #fff;
+}
+.shop .paymark svg { display: block; height: 15px; width: auto; }
+.shop .paymark--visa text { fill: #1a1f71; font: italic 900 14px/1 'Arial Black', Arial, sans-serif; letter-spacing: 0.5px; }
+.shop .paymark--visa svg { height: 13px; }
+.shop .paymark--mc svg { height: 20px; }
+.shop .paymark--apple { background: #000; border-color: #000; color: #fff; }
+.shop .paymark--apple svg { height: 13px; fill: #fff; margin-top: -2px; }
+.shop .paymark--apple span { font: 600 13px/1 -apple-system, 'Helvetica Neue', Arial, sans-serif; letter-spacing: -0.2px; }
+.shop .paymark--gpay span { color: #3c4043; font: 600 13px/1 Arial, sans-serif; }
+.shop .paymark--gpay .paymark-g { font-weight: 800; font-size: 14px; background: conic-gradient(from -45deg, #ea4335 0 25%, #4285f4 0 50%, #34a853 0 75%, #fbbc04 0); -webkit-background-clip: text; background-clip: text; color: transparent; margin-right: 1px; }
+.shop .paymark--eft span { color: #0b7a53; font: 800 11px/1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; }
+
+/* After ordering: the payment panel. Navy, so it stands apart from the yellow invoice
+   number above it, with one bright yellow button that is clearly the next thing to tap. */
+.shop .checkout {
+  display: grid;
+  gap: 14px;
+  padding: 20px 18px 18px;
+  border-radius: 16px;
+  background: var(--navy);
+  color: #fff;
+}
+.shop .checkout-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.shop .checkout-title {
+  color: #c9cfe6;
+  font-family: var(--font-display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.shop .checkout-amount {
+  color: var(--sun);
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 2.25rem;
+  line-height: 1;
+}
+.shop .btn-pay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 60px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--sun);
+  color: var(--navy);
+  box-shadow: 0 4px 0 #c9a200;
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 1.625rem;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background-color 0.15s ease;
+}
+.shop .btn-pay:hover:not(:disabled) { background: #ffdc4d; }
+.shop .btn-pay:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 #c9a200; }
+.shop .btn-pay:disabled { opacity: 0.75; cursor: progress; }
+.shop .btn-pay:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.btn-pay-lock { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.shop .checkout .paymarks { justify-content: center; }
+.shop .checkout .paymark { border-color: transparent; }
+.shop .checkout-secure {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  color: #c9cfe6;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.shop .checkout-secure strong { color: #fff; }
+.shop .checkout-secure svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-top: 1px;
+  fill: none;
+  stroke: #6fe0a8;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.shop .checkout .alert-bad { background: #fff; }
+
+/* Bank transfer: folded away under the card payment, open on its own when there is no card. */
+.shop .eft { border: 2px solid var(--line); border-radius: 14px; background: #fff; }
+.shop .eft-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 12px 16px;
+  color: var(--blue);
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+.shop .eft-summary::-webkit-details-marker { display: none; }
+.shop .eft-summary::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-right: 2.5px solid currentColor;
+  border-bottom: 2.5px solid currentColor;
+  transform: translateY(-3px) rotate(45deg);
+  transition: transform 0.2s ease;
+}
+.shop .eft[open] > .eft-summary::after { transform: translateY(2px) rotate(-135deg); }
+.shop .eft-body { padding: 0 16px 16px; }
+/* Without card payments it is simply the way to pay: always open, with a plain heading. */
+.shop .eft.eft--only { border: 0; background: transparent; }
+.shop .eft.eft--only > .eft-summary { padding: 0; min-height: 44px; margin-bottom: 4px; cursor: default; pointer-events: none; color: var(--ink); font-size: 1.0625rem; }
+.shop .eft.eft--only > .eft-summary::after { display: none; }
+.shop .eft.eft--only .eft-body { padding: 0; }
+
 /* ---------- Floating Instagram button ---------- */
 
 .ig-float {
