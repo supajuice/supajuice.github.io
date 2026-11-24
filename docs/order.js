@@ -151,6 +151,12 @@
       renderTotals();
       if (courierOn()) askShip(true);
     });
+    DOOR_KINDS.forEach(function (k) {
+      $('door-kind-' + k).addEventListener('change', function () {
+        syncDoorKind();
+        askShip(true);
+      });
+    });
     DOOR_FIELDS.forEach(function (k) {
       var box = $('door-' + k);
       box.addEventListener(k === 'province' ? 'change' : 'input', function () { askShip(false); });
@@ -296,17 +302,35 @@
   // ---------- Door price from The Courier Guy ----------
 
   var DOOR_FIELDS = ['street', 'unit', 'suburb', 'city', 'code', 'province'];
+  var DOOR_KINDS = ['house', 'flat', 'business'];
 
   // Door delivery is priced live for the customer's address.
   function courierOn() {
     return !!(config && config.courier) && choice === 'deliver';
   }
 
+  // House, flat or complex, or business. '' until the customer picks one.
+  function doorKind() {
+    var picked = document.querySelector('input[name="door-kind"]:checked');
+    return picked ? picked.value : '';
+  }
+
   function readDoor() {
     var d = {};
     DOOR_FIELDS.forEach(function (k) { d[k] = $('door-' + k).value.trim(); });
     d.code = d.code.replace(/\D/g, '');
+    d.kind = doorKind();
+    // A house has no unit: anything typed there before switching to House is left out.
+    if (d.kind === 'house') d.unit = '';
     return d;
+  }
+
+  // The unit or business name field shows for a flat or a business, worded for each.
+  function syncDoorKind() {
+    var kind = doorKind();
+    $('door-unit-field').hidden = kind !== 'flat' && kind !== 'business';
+    $('door-unit-label').textContent = kind === 'business' ? 'Business name, floor or unit' : 'Unit number and complex name';
+    $('door-unit-hint').textContent = kind === 'business' ? 'For example Acme Ltd, 3rd floor' : 'For example Unit 4, Ocean View';
   }
 
   function doorLine(d) {
@@ -315,9 +339,13 @@
 
   // The first part of the door address still to fill in: { id, message }, or null.
   function doorProblem(d) {
-    if (!d.street) return { id: 'door-street', message: 'Enter your street address.' };
-    if (!d.suburb) return { id: 'door-suburb', message: 'Enter your suburb.' };
-    if (!d.city) return { id: 'door-city', message: 'Enter your city or town.' };
+    if (!d.kind) return { id: 'door-kind-house', message: 'Choose the type of address: house, flat or complex, or business.' };
+    if (!d.street) return { id: 'door-street', message: 'Enter your street number and street name.' };
+    if (!/\d/.test(d.street) || !/[A-Za-z]{2}/.test(d.street)) return { id: 'door-street', message: 'Enter your street number and street name, for example 12 Beach Road.' };
+    if (d.kind === 'flat' && d.unit.length < 2) return { id: 'door-unit', message: 'Enter your unit number and the name of your complex or building.' };
+    if (d.kind === 'business' && d.unit.length < 2) return { id: 'door-unit', message: 'Enter the business name, and the floor or unit if there is one.' };
+    if (d.suburb.length < 2) return { id: 'door-suburb', message: 'Enter your suburb.' };
+    if (d.city.length < 2) return { id: 'door-city', message: 'Enter your city or town.' };
     if (!/^\d{4}$/.test(d.code)) return { id: 'door-code', message: 'Enter your 4-digit postal code.' };
     if (!d.province) return { id: 'door-province', message: 'Choose your province.' };
     return null;
@@ -1135,8 +1163,17 @@
   $('pay-card').addEventListener('click', startCard);
   // Once the customer opens or closes the bank details themselves, leave them as they are.
   $('pay-section').addEventListener('toggle', function () {
-    if (!$('pay-section').classList.contains('eft--only')) $('pay-section').dataset.touched = '1';
+    if ($('pay-section').classList.contains('eft--only')) return;
+    $('pay-section').dataset.touched = '1';
+    // Opening the bank details means they may pay by transfer: Greg is told about the order
+    // (he otherwise hears only once it is paid by card), and they get the invoice by email.
+    var o = current && current.order;
+    if ($('pay-section').open && o && o.status === 'Awaiting payment' && o.email && eftTold !== o.invoice) {
+      eftTold = o.invoice;
+      SJ.api('payByEft', { invoice: o.invoice, email: o.email }).catch(function () { eftTold = ''; });
+    }
   });
+  var eftTold = ''; // the order already reported as paying by bank transfer
   $('closed-retry').addEventListener('click', function () {
     showView('view-loading');
     init();

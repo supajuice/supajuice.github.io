@@ -1692,16 +1692,18 @@ test('a collection order is paid by card: Paystack is asked, then the order is m
   const row = gas.rows('Orders')[0];
   assert.equal(row.Status, 'Paid');
   assert.match(row.Notes, /Paid by card \(Paystack SJ-0001-/);
-  // The paid invoice with the calendar invite went to the customer.
+  // The paid invoice with the calendar invite went to the customer, and Greg is told to pack it.
   const sent = gas.mail.slice(mailBefore);
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
   assert.equal(sent[0].to, 'jane@example.com');
   assert.ok(sent[0].attachments.some((a) => /\.ics$/.test(a.getName())), 'calendar invite attached');
+  assert.equal(sent[1].to, 'greg@example.com');
+  assert.match(sent[1].subject, /^Paid order SJ-0001: .*ready to pack/);
 
-  // The webhook and the customer's return can both arrive: one email only, notes not doubled.
+  // The webhook and the customer's return can both arrive: emails once only, notes not doubled.
   const again = gas.call({ event: 'charge.success', data: { reference: tx.reference } });
   assert.equal(again.ok, true);
-  assert.equal(gas.mail.length, mailBefore + 1);
+  assert.equal(gas.mail.length, mailBefore + 2);
   assert.equal((gas.rows('Orders')[0].Notes.match(/Paid by card/g) || []).length, 1);
 });
 
@@ -2588,14 +2590,18 @@ test('a door order is charged the Courier Guy price straight away and can be pai
   assert.equal(r.order.total, 210);
   assert.equal(r.order.address, 'Flat 4, Ocean View, 12 Beach Rd, Sea Point, Cape Town, 8005');
   assert.equal(gas.courier.requests.length, 1, 'the price the customer saw is reused');
-  // Paid on the page, so no unpaid invoice. Greg is told what to book.
-  assert.ok(!gas.mail.some((m) => m.to === 'jane@example.com'));
-  const alert = gas.mail.find((m) => m.to === 'greg@example.com');
-  assert.match(alert.body, /Courier: The Courier Guy Economy, quoted R89\.50/);
-  assert.match(alert.body, /Delivery: R90/);
-  // Paying by card works for a door order.
+  // Paid on the page, so no unpaid invoice, and nothing to Greg until it is paid.
+  assert.equal(gas.mail.length, 0);
+  // Paying by card works for a door order. Then Greg is told what to book.
   assert.equal(gas.call(startPay()).ok, true);
-  assert.equal(gas.paystack.last().amount, 21000);
+  const tx = gas.paystack.last();
+  assert.equal(tx.amount, 21000);
+  gas.paystack.pay(tx.reference);
+  gas.call({ action: 'confirmPayment', reference: tx.reference });
+  const alert = gas.mail.find((m) => m.to === 'greg@example.com');
+  assert.match(alert.subject, /^Paid order SJ-0001/);
+  assert.match(alert.body, /Courier: The Courier Guy Economy, quoted R89\.50\. Book it in The Courier Guy portal\./);
+  assert.match(alert.body, /Delivery: R90/);
 });
 
 test('a door total that no longer matches the Courier Guy price is refused with the new price', () => {
@@ -2635,4 +2641,41 @@ test('the address parcels leave from must be street, suburb, city and postal cod
   assert.match(bad.message, /street, suburb, city, postal code/);
   assert.equal(gas.call({ action: 'saveSettings', key, values: { courier_extra: 'lots' } }).error, 'invalid');
   assert.equal(gas.call({ action: 'saveSettings', key, values: { courier_from: '9 Crinum Rd, Mandalay, Cape Town, 7785, Western Cape', courier_extra: '15' } }).ok, true);
+});
+
+
+test('with card payments on, Greg hears about an order only once it is paid or the customer picks bank transfer', () => {
+  const { gas } = withCard();
+  // withCard places SJ-0001 (a collection). Nothing has gone to Greg or the customer yet.
+  assert.ok(!gas.mail.some((m) => m.to === 'greg@example.com'), 'an unpaid card order is not sent to Greg');
+
+  // The customer opens the bank transfer details: Greg is told, the customer gets the invoice.
+  const eft = (over) => gas.call(Object.assign({ action: 'payByEft', invoice: 'SJ-0001', email: 'jane@example.com' }, over));
+  assert.equal(eft({ email: 'someone@else.com' }).error, 'not_found');
+  assert.equal(eft().ok, true);
+  const toGreg = gas.mail.filter((m) => m.to === 'greg@example.com');
+  assert.equal(toGreg.length, 1);
+  assert.match(toGreg[0].subject, /^New order SJ-0001: .*paying by bank transfer/);
+  assert.match(toGreg[0].body, /Don't pack it until the money is in/);
+  assert.equal(gas.mail.filter((m) => m.to === 'jane@example.com').length, 1, 'the invoice with bank details');
+  // Only once, however often they open it.
+  eft();
+  assert.equal(gas.mail.length, 2);
+
+  // Paying by card afterwards still tells Greg it is paid.
+  gas.call(startPay());
+  const tx = gas.paystack.last();
+  gas.paystack.pay(tx.reference);
+  gas.call({ action: 'confirmPayment', reference: tx.reference });
+  assert.match(gas.mail.filter((m) => m.to === 'greg@example.com').pop().subject, /^Paid order SJ-0001/);
+  // A paid order asks nothing more.
+  const before = gas.mail.length;
+  assert.equal(eft().ok, true);
+  assert.equal(gas.mail.length, before);
+});
+
+test('without card payments, Greg is still told straight away', () => {
+  const { gas } = ready();
+  gas.call(order({ requestId: rid() }));
+  assert.match(gas.mail.find((m) => m.to === 'greg@example.com').subject, /^New order SJ-0001/);
 });

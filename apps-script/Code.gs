@@ -190,6 +190,7 @@ function handle_(body) {
     if (body.action === 'deliveryQuote') return deliveryQuote_(body);
     if (body.action === 'startPayment') return startPayment_(body);
     if (body.action === 'confirmPayment') return confirmPayment_(body);
+    if (body.action === 'payByEft') return payByEft_(body);
     // Paystack's webhook: a hint only. confirmPayment_ asks Paystack before anything changes.
     if (body.event === 'charge.success' && body.data && typeof body.data === 'object') {
       return confirmPayment_({ reference: body.data.reference });
@@ -399,11 +400,19 @@ function createOrder_(body, source) {
     lock.releaseLock();
   }
 
-  if (kiosk) sendAlert_(order, settings, courier && courier.quote && order.status === STATUS.AWAITING && !order.freeDelivery ? courier.quote : null);
-  // A request gets no email yet: the invoice goes out when Greg accepts it.
-  // An order from the order page with a price is paid on the page (card switched on),
-  // so it gets no unpaid invoice: the paid invoice is emailed once the payment is confirmed.
+  // An order from the order page with a price is paid on the page (card switched on).
+  // Greg is only told about it once it is paid (or the customer picks bank transfer), so an
+  // order someone never pays for doesn't get packed. The courier price is kept for that email.
   const payOnPage = kiosk && cardAllowed_(order) && !!paystackKey_();
+  const quote = courier && courier.quote && order.status === STATUS.AWAITING && !order.freeDelivery ? courier.quote : null;
+  if (kiosk && payOnPage && order.status === STATUS.AWAITING) {
+    if (quote) PropertiesService.getScriptProperties().setProperty('ALERT_' + order.invoice, JSON.stringify({ quote: quote }));
+  } else if (kiosk) {
+    sendAlert_(order, settings, quote);
+  }
+  // A request gets no email yet: the invoice goes out when Greg accepts it.
+  // An order paid on the page gets no unpaid invoice: the paid invoice is emailed once the
+  // payment is confirmed.
   const emailed = order.email && order.status === STATUS.AWAITING && !payOnPage ? emailInvoice_(order, settings) : undefined;
   return orderResponse_(order, settings, emailed);
 }
@@ -1366,7 +1375,9 @@ function takeKioskSlot_() {
 }
 
 // quote: The Courier Guy's price for a door order, so Greg knows what to book.
-function sendAlert_(order, s, quote) {
+// how: 'paid' when the customer has just paid by card (ready to pack), 'eft' when they chose
+// bank transfer on the page, left out for an order that waits for payment as before.
+function sendAlert_(order, s, quote, how) {
   if (!EMAIL_PATTERN.test(s.alertEmail)) return;
   try {
     const request = order.status === STATUS.REQUESTED;
@@ -1387,9 +1398,14 @@ function sendAlert_(order, s, quote) {
       ].join('\n'));
       return;
     }
-    const subject = 'New order ' + order.invoice + ': ' + (flavourText_(order) || order.qty + ' x ' + s.product) + ' (' + money_(order.total, s.currency) + ')';
+    const what = (flavourText_(order) || order.qty + ' x ' + s.product) + ' (' + money_(order.total, s.currency) + ')';
+    const subject = how === 'paid' ? 'Paid order ' + order.invoice + ': ' + what + ', ready to pack'
+      : how === 'eft' ? 'New order ' + order.invoice + ': ' + what + ', paying by bank transfer'
+      : 'New order ' + order.invoice + ': ' + what;
     const lines = [
-      order.invoice + ' is waiting for payment.',
+      how === 'paid' ? order.invoice + ' is paid by card. It is marked paid already, so you can pack it.'
+        : how === 'eft' ? order.invoice + ' will be paid by bank transfer. Don\'t pack it until the money is in.'
+        : order.invoice + ' is waiting for payment.',
       '',
       'Name: ' + order.name,
       'Contact: ' + order.contact,
@@ -1401,9 +1417,10 @@ function sendAlert_(order, s, quote) {
       order.collect ? 'Collection: ' + (order.fee > 0 ? money_(order.fee, s.currency) : 'free') : 'Delivery: ' + money_(order.fee, s.currency),
       'Total: ' + money_(order.total, s.currency),
       quote ? 'Courier: The Courier Guy ' + quote.service + ', quoted ' + money_(quote.rate, s.currency) +
-        '. Book it in The Courier Guy portal once the order is paid.' : packLine_(order, s),
+        (how === 'paid' ? '. Book it in The Courier Guy portal.' : '. Book it in The Courier Guy portal once the order is paid.') : packLine_(order, s),
       '',
-      'Check your bank statement for the reference ' + order.invoice + ', then mark the order paid on the admin page.'
+      how === 'paid' ? 'The customer has been emailed the paid invoice.'
+        : 'Check your bank statement for the reference ' + order.invoice + ', then mark the order paid on the admin page.'
     ];
     MailApp.sendEmail(s.alertEmail, subject, lines.join('\n'));
   } catch (err) {
@@ -3047,9 +3064,76 @@ function confirmPayment_(body) {
     }
     const out = setStatus_({ invoice: order.invoice, status: STATUS.PAID });
     order = out.order;
+    alertPaid_(order, s);
     return Object.assign(orderResponse_(order, s, out.emailed), { paid: true });
   }
   return Object.assign(orderResponse_(order, s), { paid: order.status === STATUS.PAID || order.status === STATUS.DELIVERED });
+}
+
+// Tells Greg once that an order is paid by card and ready to pack. The return from Paystack
+// and its webhook can both get here, so a note in Script properties makes it only once.
+function alertPaid_(order, s) {
+  const props = PropertiesService.getScriptProperties();
+  const key = 'ALERT_' + order.invoice;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    return;
+  }
+  let note;
+  try {
+    note = readAlertNote_(props, key);
+    if (note.paid) return;
+    note.paid = true;
+    props.setProperty(key, JSON.stringify({ paid: true }));
+  } finally {
+    lock.releaseLock();
+  }
+  sendAlert_(order, s, note.quote || null, 'paid');
+}
+
+function readAlertNote_(props, key) {
+  try {
+    const v = JSON.parse(props.getProperty(key) || '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+// The customer chose to pay by bank transfer on the confirmation screen. Greg is told
+// (once), and the customer is emailed the invoice with the bank details.
+function payByEft_(body) {
+  const invoice = clean_(body.invoice, 32);
+  const email = clean_(body.email, 120).toLowerCase();
+  const sheet = ordersSheet_();
+  const rowNum = findRow_(sheet, invoice);
+  const row = rowNum ? sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0] : null;
+  if (!row || !email || str_(row[COL.EMAIL]).toLowerCase() !== email) throw fail_('not_found', 'We could not find that order.');
+  const order = rowToOrder_(row);
+  if (order.status !== STATUS.AWAITING) return { ok: true };
+
+  const props = PropertiesService.getScriptProperties();
+  const key = 'ALERT_' + order.invoice;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    throw fail_('busy', 'We are busy right now. Please try again in a moment.');
+  }
+  let note;
+  try {
+    note = readAlertNote_(props, key);
+    if (note.eft || note.paid) return { ok: true };
+    note.eft = true;
+    props.setProperty(key, JSON.stringify(note));
+  } finally {
+    lock.releaseLock();
+  }
+  const s = readTypedSettings_();
+  sendAlert_(order, s, note.quote || null, 'eft');
+  return { ok: true, emailed: emailInvoice_(order, s) };
 }
 
 // ---------------------------------------------------------------------------
