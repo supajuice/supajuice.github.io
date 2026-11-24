@@ -1163,8 +1163,17 @@
   $('pay-card').addEventListener('click', startCard);
   // Once the customer opens or closes the bank details themselves, leave them as they are.
   $('pay-section').addEventListener('toggle', function () {
-    if (!$('pay-section').classList.contains('eft--only')) $('pay-section').dataset.touched = '1';
+    if ($('pay-section').classList.contains('eft--only')) return;
+    $('pay-section').dataset.touched = '1';
+    // Opening the bank details means they may pay by transfer: Greg is told about the order
+    // (he otherwise hears only once it is paid by card), and they get the invoice by email.
+    var o = current && current.order;
+    if ($('pay-section').open && o && o.status === 'Awaiting payment' && o.email && eftTold !== o.invoice) {
+      eftTold = o.invoice;
+      SJ.api('payByEft', { invoice: o.invoice, email: o.email }).catch(function () { eftTold = ''; });
+    }
   });
+  var eftTold = ''; // the order already reported as paying by bank transfer
   $('closed-retry').addEventListener('click', function () {
     showView('view-loading');
     init();

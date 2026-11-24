@@ -3120,3 +3120,23 @@ test('order page: a Courier Guy price that changed before ordering is shown befo
   assert.equal(orderRows(dev)[0].Total, 140);
   noErrors(errors);
 });
+
+test('order page: with card payments, Greg is emailed only once it is paid or bank transfer is chosen', async (t) => {
+  const { dev, page, errors } = await openKiosk(t, { mode: 'ready', cardPay: true });
+  await fillKiosk(page, {});
+  await page.click('#submit');
+  await page.waitForSelector('#view-done:not([hidden])');
+  const toGreg = () => dev.gas.mail.filter((m) => m.to === 'greg@example.com');
+  assert.equal(toGreg().length, 0, 'not paid yet: nothing to pack');
+  await page.click('#pay-section > summary');
+  await page.waitForFunction(() => true);
+  for (let i = 0; i < 20 && toGreg().length === 0; i++) await page.waitForTimeout(50);
+  assert.equal(toGreg().length, 1);
+  assert.match(toGreg()[0].subject, /paying by bank transfer/);
+  // Closing and opening again sends nothing more.
+  await page.click('#pay-section > summary');
+  await page.click('#pay-section > summary');
+  await page.waitForTimeout(200);
+  assert.equal(toGreg().length, 1);
+  noErrors(errors);
+});
