@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <link rel="stylesheet" href="app.css?v=20261112a">
-  <link rel="stylesheet" href="shop.css?v=20261124door">
+  <link rel="stylesheet" href="shop.css?v=20261124req">
   <script src="pixel.js?v=20261112p" async></script>
 </head>
 <body class="shop">
@@ -267,13 +267,24 @@
 
             <fieldset class="door" id="door-fields" hidden>
               <legend class="door-legend">Delivery address</legend>
+              <p class="hint door-note">All fields are needed so The Courier Guy can find you.</p>
+              <fieldset class="door-kind" id="door-kind">
+                <legend class="door-kind-legend">Type of address</legend>
+                <div class="door-kinds">
+                  <label class="door-kind-opt"><input type="radio" name="door-kind" id="door-kind-house" value="house"><span>House</span></label>
+                  <label class="door-kind-opt"><input type="radio" name="door-kind" id="door-kind-flat" value="flat"><span>Flat or complex</span></label>
+                  <label class="door-kind-opt"><input type="radio" name="door-kind" id="door-kind-business" value="business"><span>Business</span></label>
+                </div>
+              </fieldset>
               <div class="field">
-                <label for="door-street">Street address</label>
-                <input id="door-street" type="text" autocomplete="address-line1" maxlength="120">
+                <label for="door-street">Street number and name</label>
+                <input id="door-street" type="text" autocomplete="address-line1" maxlength="120" aria-describedby="door-street-hint">
+                <p class="hint" id="door-street-hint">For example 12 Beach Road</p>
               </div>
-              <div class="field">
-                <label for="door-unit">Flat, complex or building <span class="opt">(optional)</span></label>
-                <input id="door-unit" type="text" autocomplete="address-line2" maxlength="80">
+              <div class="field" id="door-unit-field" hidden>
+                <label for="door-unit" id="door-unit-label">Unit number and complex name</label>
+                <input id="door-unit" type="text" autocomplete="address-line2" maxlength="80" aria-describedby="door-unit-hint">
+                <p class="hint" id="door-unit-hint">For example Unit 4, Ocean View</p>
               </div>
               <div class="field">
                 <label for="door-suburb">Suburb</label>
@@ -292,6 +303,7 @@
               <div class="field">
                 <label for="door-province">Province</label>
                 <select id="door-province" class="select" autocomplete="address-level1">
+                  <option value="" selected>Choose your province</option>
                   <option>Eastern Cape</option>
                   <option>Free State</option>
                   <option>Gauteng</option>
@@ -300,7 +312,7 @@
                   <option>Mpumalanga</option>
                   <option>North West</option>
                   <option>Northern Cape</option>
-                  <option selected>Western Cape</option>
+                  <option>Western Cape</option>
                 </select>
               </div>
             </fieldset>
@@ -439,7 +451,7 @@
 
   <script src="config.js?v=20261112a"></script>
   <script src="shared.js?v=20261112a"></script>
-  <script src="order.js?v=20261124door"></script>
+  <script src="order.js?v=20261124req"></script>
   <script src="reviews.js?v=20261113r"></script>
   <script src="ig-colour.js?v=20261112a"></script>
 </body>

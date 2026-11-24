@@ -1013,7 +1013,29 @@ html:has(body.shop) {
   letter-spacing: 0.06em;
 }
 .shop .door-pair { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 12px; }
-.shop .door .opt { color: var(--muted); font-weight: 500; }
+.shop .door-note { margin-top: -6px; }
+.shop .door-kind { border: 0; padding: 0; margin: 0; min-width: 0; }
+.shop .door-kind-legend { margin-bottom: 6px; padding: 0; font-weight: 600; font-size: 0.9375rem; }
+.shop .door-kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.shop .door-kind-opt { position: relative; display: block; }
+.shop .door-kind-opt input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.shop .door-kind-opt span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 8px 6px;
+  border: 2px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  line-height: 1.2;
+  text-align: center;
+}
+.shop .door-kind-opt input:checked + span { border-color: var(--blue); background: var(--blue); color: #fff; }
+.shop .door-kind-opt input:focus-visible + span { outline: 3px solid var(--blue); outline-offset: 2px; }
 .shop .door input::placeholder { color: #8a90a8; }
 
 /* The delivery price, like a checkout's shipping method: a card with the courier and the price. */

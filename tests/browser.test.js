@@ -2977,8 +2977,10 @@ test('admin: the review email words can be changed, are remembered, and can be r
 
 async function fillDoor(page, over) {
   const d = Object.assign({ street: '12 Beach Rd', unit: '', suburb: 'Sea Point', city: 'Cape Town', code: '8005', province: 'Western Cape' }, over);
+  if (!d.kind) d.kind = d.unit ? 'flat' : 'house';
+  await page.check('#door-kind-' + d.kind);
   await page.fill('#door-street', d.street);
-  await page.fill('#door-unit', d.unit);
+  if (d.kind !== 'house') await page.fill('#door-unit', d.unit);
   await page.fill('#door-suburb', d.suburb);
   await page.fill('#door-city', d.city);
   await page.fill('#door-code', d.code);
@@ -3056,14 +3058,36 @@ test('order page: a door address The Courier Guy cannot price is sent for Greg t
 test('order page: the whole door address is needed, and an order placed while it is priced waits for the price', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', courier: true });
   await fillKiosk(page, { address: '' });
+  assert.equal(await page.inputValue('#door-province'), '', 'the province is chosen, not assumed');
+  const tries = async (message, focus) => {
+    await page.click('#submit');
+    assert.match(await text(page, '#form-error'), message);
+    assert.equal(await page.evaluate(() => document.activeElement.id), focus);
+  };
+  await tries(/type of address/, 'door-kind-house');
+  await page.check('#door-kind-flat');
+  assert.equal(await page.locator('#door-unit-field').isVisible(), true, 'a flat needs its unit and complex');
+  await tries(/street number and street name/, 'door-street');
+  await page.fill('#door-street', 'Beach Road');
+  await tries(/for example 12 Beach Road/, 'door-street');
   await page.fill('#door-street', '12 Beach Rd');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Enter your suburb/);
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'door-suburb');
-  await fillDoor(page, { code: '80' });
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /4-digit postal code/);
+  await tries(/unit number and the name of your complex/, 'door-unit');
+  await page.fill('#door-unit', 'Unit 4, Ocean View');
+  await tries(/Enter your suburb/, 'door-suburb');
+  await page.fill('#door-suburb', 'Sea Point');
+  await page.fill('#door-city', 'Cape Town');
+  await page.fill('#door-code', '80');
+  await tries(/4-digit postal code/, 'door-code');
+  await page.fill('#door-code', '8005');
+  await tries(/Choose your province/, 'door-province');
+  // A business asks for the business name instead; a house needs no unit.
+  await page.check('#door-kind-business');
+  assert.equal(await text(page, '#door-unit-label'), 'Business name, floor or unit');
+  await page.check('#door-kind-house');
+  assert.equal(await page.locator('#door-unit-field').isHidden(), true);
   assert.equal(dev.gas.rows('Orders').length, 0);
+  await page.fill('#door-code', '80');
+  await page.selectOption('#door-province', 'Western Cape');
 
   // Typed quickly and placed straight away: the price is shown first, then the order goes in.
   dev.setLatency(300);
