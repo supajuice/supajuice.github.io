@@ -1768,12 +1768,13 @@ test('a Pudo locker order: Greg sets the fee, the invoice email has a card link,
   assert.equal(accepted.order.total, 269);
   const invoice = gas.mail.find((m) => m.to === 'jane@example.com');
   assert.ok(invoice, 'invoice emailed');
-  assert.match(invoice.body, /Pay by card, Apple Pay or instant EFT: https:\/\/supajuice\.co\.za\/\?pay=SJ-0001#jane%40example\.com/);
-  assert.match(invoice.body, /Account number/, 'bank transfer is still offered');
+  assert.match(invoice.body, /Pay securely by card, Apple Pay or Google Pay: https:\/\/supajuice\.co\.za\/\?pay=SJ-0001#jane%40example\.com/);
+  assert.doesNotMatch(invoice.body, /Account number|bank transfer|EFT/i, 'customers pay on the website only');
 
   assert.equal(gas.call(startPay()).ok, true);
   const tx = gas.paystack.last();
   assert.equal(tx.amount, 26900, 'R269 in cents, delivery included');
+  assert.deepEqual(tx.channels, ['card', 'apple_pay'], 'Paystack offers card and Apple Pay only, no instant EFT');
   gas.paystack.pay(tx.reference);
   const done = gas.call({ action: 'confirmPayment', reference: tx.reference });
   assert.equal(done.paid, true);
@@ -1825,12 +1826,13 @@ test('door and locker invoices get a card link once Paystack is switched on', ()
   assert.match(gas.mail[1].body, /\?pay=SJ-0002#/);
 });
 
-test('when Paystack cannot be reached the customer is told to try again or pay by transfer', () => {
+test('when Paystack cannot be reached the customer is told to try again', () => {
   const { gas } = withCard();
   gas.paystack.down = true;
   const r = gas.call(startPay());
   assert.equal(r.error, 'pay_failed');
-  assert.match(r.message, /bank transfer/);
+  assert.match(r.message, /try again/);
+  assert.doesNotMatch(r.message, /bank transfer/);
   gas.store.delete('PAYSTACK_SECRET_KEY');
   assert.equal(gas.call(startPay()).error, 'not_ready');
 });
@@ -2541,7 +2543,7 @@ test('a door price is the cheapest Courier Guy rate plus the extra, rounded up, 
   const { gas, key } = withCourier({ courier_extra: '6' });
   const r = gas.call(quoteFor());
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.deepEqual(r.quote, { fee: 96, service: 'Economy', eta: 'Mon 2 Nov' }, 'R89.50 + R6 = R95.50, rounded up; a cheaper Flyer (courier bag) rate is skipped');
+  assert.deepEqual(r.quote, { fee: 96, service: 'Economy' }, 'R89.50 + R6 = R95.50, rounded up; a cheaper Flyer (courier bag) rate is skipped');
   const sent = gas.courier.last();
   assert.equal(sent.url, 'https://api.portal.thecourierguy.co.za/rates');
   assert.equal(sent.headers.Authorization, 'Bearer tcg_live_key');
@@ -2608,7 +2610,7 @@ test('a door total that no longer matches the Courier Guy price is refused with 
   const { gas } = withCourier();
   const r = gas.call(doorOrder({ expectedTotal: 200 }));
   assert.equal(r.error, 'quote_changed');
-  assert.deepEqual(r.quote, { fee: 90, service: 'Economy', eta: 'Mon 2 Nov' });
+  assert.deepEqual(r.quote, { fee: 90, service: 'Economy' });
   assert.match(r.message, /now R90/);
   assert.equal(gas.rows('Orders').length, 0);
 });

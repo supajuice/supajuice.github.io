@@ -1447,7 +1447,7 @@ function emailInvoice_(order, s, extra) {
       to: order.email,
       subject: s.brand + ' invoice ' + order.invoice + (isPaid_(order) ? ' (paid)' : ''),
       body: 'Hi ' + order.name + ',\n\nYour invoice is attached.' +
-        (payLine_(order) ? '\n\n' + payLine_(order) + '\nOr pay by bank transfer with the details below.' : '') +
+        (payLine_(order) ? '\n\n' + payLine_(order) : '') +
         (invite ? ' So is a calendar invite for your collection on ' + formatSlot_(order.collectAt) + '.\n' +
           'Using Google Calendar? Add it here: ' + googleCalendarLink_(order, s) : '') +
         '\n\n' + invoiceText_(order, s),
@@ -1495,6 +1495,9 @@ function invoiceText_(o, s) {
   if (o.collect) lines.push('', 'Collecting: ' + collectLine_(o, s));
   if (paid) {
     lines.push('', 'Thank you for your order.');
+  } else if (payLine_(o)) {
+    // Card payments are on: customers pay on the website only, so no bank details.
+    lines.push('', 'Amount due: ' + money_(o.total, s.currency), payLine_(o));
   } else {
     lines.push('', 'Pay by bank transfer');
     if (b.name) lines.push('Bank: ' + b.name);
@@ -1558,6 +1561,9 @@ function invoiceHtml_(o, s) {
   );
   if (paid) {
     parts.push('<h2>Thank you for your order.</h2>');
+  } else if (payLine_(o)) {
+    // Card payments are on: customers pay on the website only, so no bank details.
+    parts.push('<h2>Pay online</h2><p>Pay ' + m(o.total) + ' securely by card, Apple Pay or Google Pay: <a href="' + esc_(payLink_(o)) + '">' + esc_(ORDER_PAGE.replace(/^https:\/\//, '')) + '</a></p>');
   } else {
     parts.push(
       '<h2>Pay by bank transfer</h2><table>',
@@ -1567,9 +1573,6 @@ function invoiceHtml_(o, s) {
       '</table>'
     );
     if (s.paymentNote) parts.push('<p class="note">' + esc_(s.paymentNote) + '</p>');
-    if (payLine_(o)) {
-      parts.push('<h2>Or pay by card</h2><p>Card, Apple Pay or instant EFT: <a href="' + esc_(payLink_(o)) + '">' + esc_(ORDER_PAGE.replace(/^https:\/\//, '')) + '</a></p>');
-    }
   }
   parts.push('</body></html>');
   return parts.join('');
@@ -2883,9 +2886,10 @@ function courierQuote_(s, d, qty) {
   return quote;
 }
 
-// What the customer sees: the price, the service and when it should arrive.
+// What the customer sees: the price and the service. Not the courier's delivery date: the
+// order page shows a range of working days instead, which allows for making the batch.
 function publicQuote_(q) {
-  return { fee: q.fee, service: q.service, eta: q.eta };
+  return { fee: q.fee, service: q.service };
 }
 
 // The order page asks for the door price once the address is filled in.
@@ -2937,7 +2941,7 @@ function paystack_(method, path, payload) {
   try {
     res = UrlFetchApp.fetch(PAYSTACK_API + path, options);
   } catch (err) {
-    throw fail_('pay_failed', 'Could not reach the card payment service. Please try again, or pay by bank transfer.');
+    throw fail_('pay_failed', 'Could not reach the card payment service. Please try again in a moment.');
   }
   let json = null;
   try {
@@ -2963,7 +2967,7 @@ function payLink_(order) {
 // The pay-by-card line for an unpaid order, or '' when there is none.
 function payLine_(order) {
   if (order.status !== STATUS.AWAITING || !order.email || !cardAllowed_(order) || !paystackKey_()) return '';
-  return 'Pay by card, Apple Pay or instant EFT: ' + payLink_(order);
+  return 'Pay securely by card, Apple Pay or Google Pay: ' + payLink_(order);
 }
 
 // The customer taps "Pay now" on the confirmation screen, or the link in their invoice
@@ -2991,12 +2995,14 @@ function startPayment_(body) {
     currency: PAYSTACK_CURRENCY,
     reference: reference,
     callback_url: returnUrl,
+    // Card and Apple Pay only: no Instant EFT or bank transfer.
+    channels: ['card', 'apple_pay'],
     metadata: { invoice: order.invoice, cancel_action: returnUrl }
   });
   const url = r.json.data && r.json.data.authorization_url;
   if (!r.json.status || typeof url !== 'string' || !/^https:\/\//.test(url)) {
     console.error('Paystack initialize failed: ' + r.code + ' ' + JSON.stringify(r.json));
-    throw fail_('pay_failed', 'Card payment is not working right now. Please try again, or pay by bank transfer.');
+    throw fail_('pay_failed', 'Card payment is not working right now. Please try again in a moment.');
   }
   return { ok: true, url: url, reference: reference };
 }

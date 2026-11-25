@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <link rel="stylesheet" href="app.css?v=20261112a">
-  <link rel="stylesheet" href="shop.css?v=20261124req">
+  <link rel="stylesheet" href="shop.css?v=20261125b">
   <script src="pixel.js?v=20261112p" async></script>
 </head>
 <body class="shop">
@@ -104,6 +104,83 @@
           </li>
         </ul>
       </div>
+    </section>
+
+    <!-- One card per sport. The pictures come from the SUPA15 ads (img/sports/*.svg): each file holds
+         the scene and the gel separately, so the gel can pop in and pulse on its own. sports.js starts
+         the motion when a card scrolls into view; without it the cards simply show, still. -->
+    <section class="sports landing" id="sports" aria-labelledby="sports-title">
+      <div class="wrap sports-head">
+        <h2 class="h-display" id="sports-title">Whatever gets you out there</h2>
+        <p class="sports-sub">One pouch, any adventure.</p>
+      </div>
+      <ul class="sports-list wrap" aria-label="Sports">
+        <li class="sport sport--run">
+          <div class="sport-art">
+            <svg class="sport-svg" viewBox="0 100 1080 790" role="img" aria-label="A runner sipping an orange Supa Juice gel on the Sea Point promenade">
+              <g class="sport-move">
+                <use class="sport-scene" href="img/sports/run.svg#scene"/>
+                <circle class="sport-ring" cx="660" cy="288" r="36"/>
+                <use class="sport-gel" href="img/sports/run.svg#gel"/>
+              </g>
+            </svg>
+          </div>
+          <div class="sport-body">
+            <p class="sport-where">Sea Point Promenade</p>
+            <h3 class="tag tag--big">Run</h3>
+            <p class="sport-text">Twist, sip, keep your stride. Easy on the stomach, so the long ones stay fun.</p>
+          </div>
+        </li>
+        <li class="sport sport--hike">
+          <div class="sport-art">
+            <svg class="sport-svg" viewBox="0 100 1080 790" role="img" aria-label="A hiker holding up a Supa Juice gel on Table Mountain">
+              <g class="sport-move">
+                <use class="sport-scene" href="img/sports/hike.svg#scene"/>
+                <circle class="sport-ring" cx="633" cy="166" r="34"/>
+                <use class="sport-gel" href="img/sports/hike.svg#gel"/>
+              </g>
+            </svg>
+          </div>
+          <div class="sport-body">
+            <p class="sport-where">Table Mountain</p>
+            <h3 class="tag tag--big">Hike</h3>
+            <p class="sport-text">Pocket a few for the big climbs. Real juice and jam beats a squashed sandwich at the top.</p>
+          </div>
+        </li>
+        <li class="sport sport--paddle">
+          <div class="sport-art">
+            <svg class="sport-svg" viewBox="0 100 1080 790" role="img" aria-label="A paddler on False Bay with a Supa Juice gel on the deck">
+              <g class="sport-move">
+                <use class="sport-scene" href="img/sports/paddle.svg#scene"/>
+                <circle class="sport-ring" cx="846" cy="653" r="36"/>
+                <use class="sport-gel" href="img/sports/paddle.svg#gel"/>
+              </g>
+            </svg>
+          </div>
+          <div class="sport-body">
+            <p class="sport-where">False Bay</p>
+            <h3 class="tag tag--big">Paddle</h3>
+            <p class="sport-text">It reseals, so take a sip, tuck it under the bungee and keep paddling.</p>
+          </div>
+        </li>
+        <li class="sport sport--swim">
+          <div class="sport-art">
+            <svg class="sport-svg" viewBox="0 100 1080 790" role="img" aria-label="A swimmer at Muizenberg with a Supa Juice gel tucked under the cap">
+              <g class="sport-move">
+                <use class="sport-scene" href="img/sports/swim.svg#scene"/>
+                <circle class="sport-ring" cx="762" cy="557" r="42"/>
+                <use class="sport-gel" href="img/sports/swim.svg#gel"/>
+              </g>
+            </svg>
+          </div>
+          <div class="sport-body">
+            <p class="sport-where">Muizenberg</p>
+            <h3 class="tag tag--big">Swim</h3>
+            <p class="sport-text">Tuck one under your cap for long open-water swims, then take a quick sip at the turn buoy.</p>
+          </div>
+        </li>
+      </ul>
+      <p class="wrap sports-more">Riding, lifting, a long walk with the dog? <strong>Also yes.</strong></p>
     </section>
 
     <section class="trail landing" aria-labelledby="trail-title">
@@ -359,16 +436,15 @@
               <p class="paywith-sub"><svg class="paywith-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>All payments are secure and encrypted.</p>
               <div class="paywith-box">
                 <div class="paywith-row">
-                  <p class="paywith-name">Card, Apple Pay, Google Pay or instant EFT</p>
-                  <ul class="paymarks" aria-label="Ways to pay: Visa, Mastercard, Apple Pay, Google Pay and instant EFT">
+                  <p class="paywith-name">Card, Apple Pay or Google Pay</p>
+                  <ul class="paymarks" aria-label="Ways to pay: Visa, Mastercard, Apple Pay and Google Pay">
                   <li class="paymark paymark--visa" aria-hidden="true"><svg viewBox="0 0 48 16"><text x="24" y="13.2" text-anchor="middle">VISA</text></svg></li>
                   <li class="paymark paymark--mc" aria-hidden="true"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="#eb001b"/><circle cx="25" cy="12" r="9" fill="#f79e1b"/><path d="M20 4.5a9 9 0 0 1 0 15 9 9 0 0 1 0-15z" fill="#ff5f00"/></svg></li>
                   <li class="paymark paymark--apple" aria-hidden="true"><svg viewBox="0 0 16 19" class="paymark-apple"><path d="M13.2 10.1c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.9-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.8zM10.9 3.3c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg><span>Pay</span></li>
                   <li class="paymark paymark--gpay" aria-hidden="true"><span class="paymark-g">G</span><span>Pay</span></li>
-                  <li class="paymark paymark--eft" aria-hidden="true"><span>Instant EFT</span></li>
               </ul>
                 </div>
-                <p class="paywith-note">After you place your order you pay on Paystack's secure page, then come straight back here. Prefer a bank transfer? The details are on the next step.</p>
+                <p class="paywith-note">After you place your order you pay on Paystack's secure page, then come straight back here.</p>
               </div>
             </section>
 
@@ -396,12 +472,11 @@
               <p class="checkout-amount" id="checkout-amount"></p>
             </div>
             <button type="button" class="btn btn-pay" id="pay-card"><svg class="btn-pay-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg><span id="pay-card-text">Pay now</span></button>
-            <ul class="paymarks" aria-label="Ways to pay: Visa, Mastercard, Apple Pay, Google Pay and instant EFT">
+            <ul class="paymarks" aria-label="Ways to pay: Visa, Mastercard, Apple Pay and Google Pay">
             <li class="paymark paymark--visa" aria-hidden="true"><svg viewBox="0 0 48 16"><text x="24" y="13.2" text-anchor="middle">VISA</text></svg></li>
             <li class="paymark paymark--mc" aria-hidden="true"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="#eb001b"/><circle cx="25" cy="12" r="9" fill="#f79e1b"/><path d="M20 4.5a9 9 0 0 1 0 15 9 9 0 0 1 0-15z" fill="#ff5f00"/></svg></li>
             <li class="paymark paymark--apple" aria-hidden="true"><svg viewBox="0 0 16 19" class="paymark-apple"><path d="M13.2 10.1c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.9-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.8zM10.9 3.3c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg><span>Pay</span></li>
             <li class="paymark paymark--gpay" aria-hidden="true"><span class="paymark-g">G</span><span>Pay</span></li>
-                  <li class="paymark paymark--eft" aria-hidden="true"><span>Instant EFT</span></li>
             </ul>
             <p class="checkout-secure"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l7.5 3v5.6c0 4.6-3.2 8.6-7.5 9.8-4.3-1.2-7.5-5.2-7.5-9.8V5.8z"/><path d="M8.7 12.2l2.3 2.3 4.4-4.6"/></svg><span>Secured by <strong>Paystack</strong>. Your payment is encrypted and your card details never reach us. You come straight back here after paying.</span></p>
             <div class="alert alert-bad" id="card-error" role="alert" hidden></div>
@@ -451,8 +526,9 @@
 
   <script src="config.js?v=20261112a"></script>
   <script src="shared.js?v=20261112a"></script>
-  <script src="order.js?v=20261124req"></script>
+  <script src="order.js?v=20261125days"></script>
   <script src="reviews.js?v=20261113r"></script>
+  <script src="sports.js?v=20261125sport"></script>
   <script src="ig-colour.js?v=20261112a"></script>
 </body>
 </html>

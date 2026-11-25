@@ -555,6 +555,121 @@ html:has(body.shop) {
   .why-list { grid-template-columns: repeat(3, 1fr); gap: 20px; }
 }
 
+/* ---------- Sports: one card per sport, pictures from the SUPA15 ads ---------- */
+
+.sports { background: var(--blue); color: #fff; padding: 64px 0 56px; overflow: hidden; }
+.sports .h-display { color: var(--sun); }
+.sports-head { display: grid; gap: 12px; }
+.sports-sub { color: #fff; font-size: 1.125rem; }
+
+/* On a phone the cards sit in a row you swipe through; the next card peeks in so it is
+   clear there are more. From tablet width up they sit in a grid. */
+.sports-list {
+  list-style: none;
+  margin: 32px auto 0;
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: max(20px, env(safe-area-inset-left));
+  padding-top: 4px;
+  padding-bottom: 14px;   /* room for the card shadow */
+  scrollbar-width: none;
+}
+.sports-list::-webkit-scrollbar { display: none; }
+.sport {
+  flex: 0 0 min(78vw, 320px);
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  border: 3px solid #fff;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 6px 6px 0 var(--sun);
+}
+.sport-art { background: #fff; border-bottom: 3px solid var(--blue); }
+.sport-svg { display: block; width: 100%; height: auto; aspect-ratio: 1080 / 790; }
+.sport-body { display: grid; gap: 10px; padding: 16px 20px 22px; color: var(--ink); }
+.sport-where {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sport-body .tag { margin: 0; justify-self: start; }
+.sport-text { font-size: 1rem; line-height: 1.45; }
+.sports-more { margin-top: 22px; color: #fff; font-size: 1.0625rem; }
+.sports-more strong { color: var(--sun); }
+
+@media (min-width: 40rem) {
+  .sports-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 22px;
+    overflow: visible;
+  }
+}
+@media (min-width: 52rem) {
+  .sports { padding: 88px 0 80px; }
+}
+@media (min-width: 66rem) {
+  .sports-list { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* The moving parts. The scene, the gel and the ring each move around their own middle. */
+.sport-move, .sport-gel, .sport-ring { transform-box: fill-box; transform-origin: center; }
+.sport-ring { fill: none; stroke: var(--sun); stroke-width: 8; opacity: 0; }
+
+/* All motion only runs when the device has not asked for less, and only once sports.js
+   has marked the section ready (so with no script the cards just show, still).
+   1. Each card slides up as it scrolls into view (.is-in, set once).
+   2. The gel pops in a beat later.
+   3. While a card is on screen (.is-live) the gel pulses and the scene moves a little,
+      in a way that suits the sport. Off screen it all stops, to spare the battery. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Slides only, no fade: the text is always readable, even mid-way. */
+  .sports.is-ready .sport {
+    transform: translateY(36px) scale(0.97);
+    transition: transform 650ms cubic-bezier(.2, .8, .2, 1), box-shadow 200ms ease;
+  }
+  .sports.is-ready .sport.is-in { transform: none; }
+  .sports.is-ready .sport:nth-child(2) { transition-delay: 90ms; }
+  .sports.is-ready .sport:nth-child(3) { transition-delay: 180ms; }
+  .sports.is-ready .sport:nth-child(4) { transition-delay: 270ms; }
+
+  .sports.is-ready .sport-gel { transform: scale(0); transition: transform 650ms cubic-bezier(.3, 1.7, .5, 1) 500ms; }
+  .sports.is-ready .sport.is-in .sport-gel { transform: scale(1); }
+
+  .sport.is-live .sport-ring { animation: sport-ring 2.6s ease-out 1.2s infinite; }
+  .sport--run.is-live .sport-move { animation: sport-stride 0.8s ease-in-out infinite alternate; }
+  .sport--hike.is-live .sport-move { animation: sport-drift 7s ease-in-out infinite alternate; }
+  .sport--paddle.is-live .sport-move { animation: sport-rock 3.6s ease-in-out infinite alternate; }
+  .sport--swim.is-live .sport-move { animation: sport-float 3s ease-in-out infinite alternate; }
+
+  /* With a mouse: the card lifts and the gel gives a little shake. */
+  @media (hover: hover) {
+    .sports .sport:hover,
+    .sports.is-ready .sport.is-in:hover { transform: translate(-3px, -3px); box-shadow: 9px 9px 0 var(--sun); transition-delay: 0s; }
+    .sport:hover .sport-gel { animation: sport-wiggle 500ms ease-in-out; }
+  }
+
+  @keyframes sport-ring {
+    0% { transform: scale(0.7); opacity: 0.9; }
+    70%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+  @keyframes sport-stride { from { transform: translateY(0); } to { transform: translateY(-7px); } }
+  @keyframes sport-drift { from { transform: scale(1); } to { transform: scale(1.045); } }
+  @keyframes sport-rock { from { transform: rotate(-1deg); } to { transform: rotate(1deg) translateY(4px); } }
+  @keyframes sport-float { from { transform: translateY(-4px) rotate(-0.5deg); } to { transform: translateY(5px) rotate(0.5deg); } }
+  @keyframes sport-wiggle {
+    0%, 100% { transform: rotate(0); }
+    25% { transform: rotate(-12deg) scale(1.15); }
+    60% { transform: rotate(9deg) scale(1.1); }
+  }
+}
+
 /* ---------- Photos from the mountain ---------- */
 
 .trail { background: var(--sun); padding: 64px 0 72px; }

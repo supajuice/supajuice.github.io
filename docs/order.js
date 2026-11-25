@@ -22,8 +22,10 @@
   var paying = false;    // waiting for Paystack's payment page
   var discount = null;   // the applied discount code: { code, percent, delivery }, or null
   var checkingCode = false;
+  // How long door delivery usually takes, from paying to the door. Always shown as a range.
+  var DOOR_DAYS = '3 to 5 working days';
   // The Courier Guy's price for the door address typed in, when the shop prices doors live.
-  // status: 'idle' (address not complete), 'loading', 'ok' (data is { fee, service, eta }) or
+  // status: 'idle' (address not complete), 'loading', 'ok' (data is { fee, service }) or
   // 'error' (it could not be priced: the order is sent and Greg emails the fee).
   var ship = { key: '', status: 'idle', data: null, message: '' };
   var shipTimer = null;
@@ -411,7 +413,8 @@
     var free = freeDeliveryCode();
     card.className = 'ship-card ship-card--' + ship.status;
     $('ship-name').textContent = ship.status === 'ok' ? 'The Courier Guy · ' + ship.data.service : 'The Courier Guy';
-    $('ship-sub').textContent = ship.status === 'ok' ? (ship.data.eta ? 'To your door, expected by ' + ship.data.eta : 'Straight to your door')
+    // A range, never a date: the courier's own date leaves out the time to make the batch.
+    $('ship-sub').textContent = ship.status === 'ok' ? 'To your door in ' + DOOR_DAYS
       : ship.status === 'loading' ? 'Getting the price for your address…'
       : ship.status === 'error' ? ship.message + ' You can still order: we will email you the delivery fee.'
       : doorProblem(readDoor()) ? 'Enter your address to see the delivery price.'
@@ -561,7 +564,7 @@
     document.title = c.brand;
     // Each sentence on its own line (the lede keeps line breaks, see shop.css).
     $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you.\n' : 'We send them to you, or you can collect.\n') +
-      (c.cardPay ? 'Pay by card, Apple Pay, instant EFT or bank transfer.' : 'Pay by bank transfer.');
+      (c.cardPay ? 'Pay securely here by card, Apple Pay or Google Pay.' : 'Pay by bank transfer.');
     if (!stepper) buildForm();
     stepper.setRange(c.minQty, c.maxQty);
     stepper.setItem(SJ.itemLine(c));
@@ -613,7 +616,7 @@
     $('pay-with').hidden = !payNow();
     $('next-note').textContent = quote
       ? 'Next we work out the delivery fee for your address and email your invoice' + (config.cardPay ? ' with a link to pay.' : ' with the bank details.') + ' There is nothing to pay yet.'
-      : payNow() ? 'Next you get your invoice number and pay securely by card, Apple Pay or instant EFT, or by bank transfer.'
+      : payNow() ? 'Next you get your invoice number and pay securely by card, Apple Pay or Google Pay.'
       : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
   }
 
@@ -873,13 +876,11 @@
       sub.textContent = restored
         ? 'Sent ' + SJ.formatWhen(o.created) + '. We will email your invoice once the delivery fee is confirmed.'
         : 'We will work out the delivery fee for your address and email your invoice to ' + o.email +
-          ' with the bank details. There is nothing to pay yet.';
+          (config && config.cardPay ? ' with a link to pay on our website.' : ' with the bank details.') + ' There is nothing to pay yet.';
     } else if (restored) {
       sub.textContent = 'Placed ' + SJ.formatWhen(o.created) + '. If you have already paid, there is nothing more to do.';
     } else if (cardOn(o)) {
-      sub.appendChild(document.createTextNode('Pay ' + SJ.money(o.total, sym) + ' by card below, or by bank transfer with '));
-      sub.appendChild(el('span', { class: 'nowrap' }, o.invoice));
-      sub.appendChild(document.createTextNode(' as the reference.'));
+      sub.textContent = 'Pay ' + SJ.money(o.total, sym) + ' below to confirm your order.';
     } else {
       sub.appendChild(document.createTextNode('Pay ' + SJ.money(o.total, sym) + ' by bank transfer and use '));
       sub.appendChild(el('span', { class: 'nowrap' }, o.invoice));
@@ -944,12 +945,13 @@
   function syncCard() {
     var on = !!current && cardOn(current.order);
     $('card-section').hidden = !on;
-    // With card payments the bank details fold away under "Prefer to pay by bank transfer?".
+    // With card payments on, customers pay here and nowhere else: no bank details are shown.
+    // They only appear if card payments are switched off (no Paystack key), as a fallback.
     var eft = $('pay-section');
     eft.classList.toggle('eft--only', !on);
-    if (!on) eft.open = true;
-    else if (!eft.dataset.touched) eft.open = false;
-    $('pay-title').textContent = on ? 'Prefer to pay by bank transfer?' : 'Pay by bank transfer';
+    if (on) eft.hidden = true;
+    else eft.open = true;
+    $('pay-title').textContent = 'Pay by bank transfer';
     if (on) $('checkout-amount').textContent = SJ.money(current.order.total, current.currency);
     if (on && !paying) {
       $('pay-card').disabled = false;
@@ -991,7 +993,7 @@
         showDone(current, false);
         return;
       }
-      if (typeof res.url !== 'string' || !/^https:\/\//.test(res.url)) throw new Error('Card payment is not working right now. Please pay by bank transfer.');
+      if (typeof res.url !== 'string' || !/^https:\/\//.test(res.url)) throw new Error('Card payment is not working right now. Please try again in a moment.');
       window.location.assign(res.url);
     } catch (err) {
       paying = false;
@@ -1020,11 +1022,11 @@
         showClosed('This order is already paid', 'Thank you. Your paid invoice is in your email.', false);
         return true;
       }
-      if (typeof res.url !== 'string' || !/^https:\/\//.test(res.url)) throw new Error('Card payment is not working right now. Please pay by bank transfer, using the details in your invoice email.');
+      if (typeof res.url !== 'string' || !/^https:\/\//.test(res.url)) throw new Error('Card payment is not working right now. Please try again in a moment.');
       window.location.assign(res.url);
       return true;
     } catch (err) {
-      showClosed('We could not open the card payment', err.message + ' You can also pay by bank transfer, using the details in your invoice email.', false);
+      showClosed('We could not open the card payment', err.message + ' If it keeps happening, reply to your invoice email and we will help.', false);
       return true;
     }
   }
@@ -1047,7 +1049,7 @@
       clearReference();
       saveShown(res);
       showDone(res, !res.paid);
-      if (!res.paid) showCardError('Your card payment did not go through, so nothing was charged. You can try again, or pay by bank transfer.');
+      if (!res.paid) showCardError('Your payment did not go through, so nothing was charged. Please try again.');
     } catch (err) {
       if (err.code !== 'network' && err.code !== 'busy') clearReference();
       var msg = err.code === 'pay_mismatch' || err.code === 'not_found' ? err.message
