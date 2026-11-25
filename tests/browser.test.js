@@ -608,12 +608,10 @@ test('order page: a collection is paid by card, and coming back from Paystack sh
   assert.equal(await text(page, '#checkout-amount'), 'R40');
   assert.equal(await page.locator('#card-section .paymarks').isVisible(), true, 'the cards and wallets it takes are shown');
   assert.match(await text(page, '#card-section .checkout-secure'), /Secured by Paystack/);
-  assert.match(await text(page, '#done-sub'), /Pay R40 by card below, or by bank transfer with SJ-0001 as the reference/);
-  // The bank details fold away under the card payment, and open when asked for.
-  assert.equal(await text(page, '#pay-title'), 'Prefer to pay by bank transfer?');
-  assert.equal(await page.locator('#pay').isVisible(), false);
-  await page.click('#pay-section > summary');
-  assert.equal(await page.locator('#pay').isVisible(), true);
+  assert.equal(await text(page, '#done-sub'), 'Pay R40 below to confirm your order.');
+  // With card payments on, customers pay on the site only: no bank transfer, no instant EFT.
+  assert.equal(await page.locator('#pay-section').isVisible(), false, 'no bank details');
+  assert.doesNotMatch(await text(page, '#card-section'), /EFT/i);
 
   await page.click('#pay-card');
   await page.waitForURL(/checkout\.paystack\.com/);
@@ -677,7 +675,7 @@ test('order page: a card payment that did not go through can be tried again', as
   await page.waitForSelector('#card-error:not([hidden])');
   assert.match(await text(page, '#card-error'), /did not go through, so nothing was charged/);
   assert.equal(await page.locator('#pay-card').isEnabled(), true);
-  assert.equal(await page.locator('#pay-section').isVisible(), true, 'bank transfer is still there');
+  assert.equal(await page.locator('#pay-section').isVisible(), false, 'still no bank transfer: they try the card again');
   assert.equal(orderRows(dev)[0].Status, 'Awaiting payment');
   noErrors(errors);
 });
@@ -3007,7 +3005,7 @@ test('order page: the door price comes from The Courier Guy for the address, and
   await fillCourier(page, { unit: 'Flat 4' });
   await page.waitForSelector('.ship-card--ok');
   assert.equal(await text(page, '#ship-name'), 'The Courier Guy · Economy');
-  assert.match(await text(page, '#ship-sub'), /expected by Mon 2 Nov/);
+  assert.equal(await text(page, '#ship-sub'), 'To your door in 3 to 5 working days', 'a range, never an exact date');
   assert.equal(await text(page, '#ship-fee'), 'R90');
   assert.match(await text(page, '#summary'), /Delivery to your door\s+R90/);
   assert.equal(await text(page, '#submit'), 'Continue to pay R130');
@@ -3121,22 +3119,14 @@ test('order page: a Courier Guy price that changed before ordering is shown befo
   noErrors(errors);
 });
 
-test('order page: with card payments, Greg is emailed only once it is paid or bank transfer is chosen', async (t) => {
+test('order page: with card payments, Greg is not emailed until it is paid, and there is no bank transfer to pick', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', cardPay: true });
   await fillKiosk(page, {});
+  assert.doesNotMatch(await text(page, '#pay-with'), /EFT|bank transfer/i);
   await page.click('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
   const toGreg = () => dev.gas.mail.filter((m) => m.to === 'greg@example.com');
   assert.equal(toGreg().length, 0, 'not paid yet: nothing to pack');
-  await page.click('#pay-section > summary');
-  await page.waitForFunction(() => true);
-  for (let i = 0; i < 20 && toGreg().length === 0; i++) await page.waitForTimeout(50);
-  assert.equal(toGreg().length, 1);
-  assert.match(toGreg()[0].subject, /paying by bank transfer/);
-  // Closing and opening again sends nothing more.
-  await page.click('#pay-section > summary');
-  await page.click('#pay-section > summary');
-  await page.waitForTimeout(200);
-  assert.equal(toGreg().length, 1);
+  assert.equal(await page.locator('#pay-section').isVisible(), false, 'no bank transfer option');
   noErrors(errors);
 });

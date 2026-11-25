@@ -149,6 +149,10 @@ If step 2 shows "We could not load the order form", see the troubleshooting tabl
 - **The read-only key for the insights dashboard** (`READ_KEY`): made with `makeReadKey`, which logs it. It only opens the `insights` action: the orders without any customer names, emails, phone numbers, addresses or notes, and it can't change anything. It goes in the `supajuice/secretinsights` repo as the `ORDERS_READ_KEY` secret. If it leaks, run `rotateReadKey` and update that secret.
 - **Invoice prefix:** `SJ` by default, changeable in Settings. Numbers always continue; a number is never reused, even if you delete rows.
 
+## Paying: on the website only
+
+With card payments switched on (`PAYSTACK_SECRET_KEY`), customers pay on the website and nowhere else: by card, Apple Pay or Google Pay on Paystack's page. Paystack is asked for those channels only, so **Instant EFT is not offered**, and no bank details appear on the confirmation screen or on unpaid invoices (they carry a **Pay online** link instead). Bank transfer only comes back if the Paystack key is ever removed, so orders never get stuck.
+
 ## Fixed Pudo locker prices
 
 In **Settings > Price and delivery**, **Pudo locker prices** sets what a Pudo locker costs by the number of sachets, for example `15 90, 40 120`: up to 15 sachets R90, 16 to 40 R120. These orders are charged straight away and the customer gets the invoice with the bank details at once. The locker button on the order page shows the lowest price ("From R90"). Bigger orders arrive under **New requests** for you to set the fee, like door deliveries. Leave it blank to confirm every locker fee yourself.
@@ -186,7 +190,7 @@ The **Reviews** tab on Greg's page lists everyone with a paid or delivered order
 
 ## Door delivery priced by The Courier Guy
 
-When it is switched on, a customer who picks **To your door** types their address in parts (street, flat or complex, suburb, city, postal code, province). As soon as it is filled in, the order page asks The Courier Guy for the price and shows it like a checkout's shipping method: **The Courier Guy · Economy, expected by Mon 2 Nov, R90**. The price is added to the total, the order goes straight to **Awaiting payment**, and the customer pays on the page by card, Apple Pay or instant EFT. No unpaid invoice is emailed and nobody has to wait for you to set a fee.
+When it is switched on, a customer who picks **To your door** types their address in parts (street, flat or complex, suburb, city, postal code, province). As soon as it is filled in, the order page asks The Courier Guy for the price and shows it like a checkout's shipping method: **The Courier Guy · Economy, to your door in 3 to 5 working days, R90**. It always shows that range, never the courier's own date, because the courier's date leaves out the time to make the batch (change it in `DOOR_DAYS` at the top of `docs/order.js`). The price is added to the total, the order goes straight to **Awaiting payment**, and the customer pays on the page by card, Apple Pay or Google Pay. No unpaid invoice is emailed and nobody has to wait for you to set a fee.
 
 - **The price** is The Courier Guy's cheapest parcel rate for that address (its "Flyer" courier-bag services are skipped, because the price is worked out for a box), plus **Settings > Door delivery with The Courier Guy > Add to every Courier Guy price** (for example the box and packing), rounded up to the next rand. The parcel is the smallest box from **Settings > Delivery with Pudo** that holds the gels, weighing the gels (sachet weight in Settings) plus 250 g for the box.
 - **The address parcels leave from** is **Address parcels leave from** in the same settings (street, suburb, city, postal code). Leave it blank to use your **Collection address (private)**.
