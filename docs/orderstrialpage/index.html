@@ -2,13 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <!-- Trial copy of the order page (docs/index.html). Change freely: the real page is not affected.
        Demo mode (demo.js): it shows the live prices and times, but placing an order here creates
-       nothing, sends nothing and saves nothing.
-       After changing a file here, change the ?v= tag on the links to it (for example 20261106t to
-       20261107a), so browsers fetch the new copy instead of an old saved one. -->
+       nothing: no row in the Sheet, no invoice number, no email, no card payment. -->
   <meta name="robots" content="noindex, nofollow">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Supa Juice (trial)</title>
   <meta name="description" content="Energy gels made fresh every week in Cape Town with real juice and jam. For runs, rides, hikes, gym sessions and whatever else gets you moving. Tasty, easy on the stomach, simple.">
   <meta name="theme-color" content="#FFD21F" media="(prefers-color-scheme: light)">
@@ -19,8 +17,8 @@
   <link rel="icon" type="image/png" sizes="32x32" href="../img/icon-32.png">
   <link rel="icon" type="image/png" sizes="192x192" href="../img/icon-192.png">
   <link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
-  <link rel="stylesheet" href="app.css?v=20261111f">
-  <link rel="stylesheet" href="shop.css?v=20261113r">
+  <link rel="stylesheet" href="app.css?v=20261112a">
+  <link rel="stylesheet" href="shop.css?v=20261125b">
 </head>
 <body class="shop">
   <a class="skip" href="#order">Skip to the order form</a>
@@ -32,7 +30,8 @@
       <a class="bar-mark" href="#top" aria-label="Supa Juice, back to top"><span class="bar-name" id="brand">Supa Juice</span></a>
       <nav class="bar-nav" aria-label="Page">
         <a class="bar-link" href="#how">How to use</a>
-        <a class="bar-link bar-link--reviews" href="https://supajuice.co.za/feedback/">Reviews</a>
+        <a class="bar-link bar-link--keep" href="../about.html">Our story</a>
+        <a class="bar-link bar-link--keep bar-link--reviews" href="https://supajuice.co.za/feedback/">Reviews</a>
         <a class="bar-cta" href="#order">Order gels</a>
       </nav>
     </div>
@@ -109,6 +108,83 @@
           </li>
         </ul>
       </div>
+    </section>
+
+    <!-- One card per sport. The pictures come from the SUPA15 ads (img/sports/*.svg): each file holds
+         the scene and the gel separately, so the gel can pop in and pulse on its own. sports.js starts
+         the motion when a card scrolls into view; without it the cards simply show, still. -->
+    <section class="sports landing" id="sports" aria-labelledby="sports-title">
+      <div class="wrap sports-head">
+        <h2 class="h-display" id="sports-title">Whatever gets you out there</h2>
+        <p class="sports-sub">One pouch, any adventure.</p>
+      </div>
+      <ul class="sports-list wrap" aria-label="Sports">
+        <li class="sport sport--run">
+          <div class="sport-art">
+            <svg class="sport-svg" viewBox="0 100 1080 790" role="img" aria-label="A runner sipping an orange Supa Juice gel on the Sea Point promenade">
+              <g class="sport-move">
+                <use class="sport-scene" href="../img/sports/run.svg#scene"/>
+                <circle class="sport-ring" cx="660" cy="288" r="36"/>
+                <use class="sport-gel" href="../img/sports/run.svg#gel"/>
+              </g>
+            </svg>
+          </div>
+          <div class="sport-body">
+            <p class="sport-where">Sea Point Promenade</p>
+            <h3 class="tag tag--big">Run</h3>
+            <p class="sport-text">Twist, sip, keep your stride. Easy on the stomach, so the long ones stay fun.</p>
+          </div>
+        </li>
+        <li class="sport sport--hike">
+          <div class="sport-art">
+            <svg class="sport-svg" viewBox="0 100 1080 790" role="img" aria-label="A hiker holding up a Supa Juice gel on Table Mountain">
+              <g class="sport-move">
+                <use class="sport-scene" href="../img/sports/hike.svg#scene"/>
+                <circle class="sport-ring" cx="633" cy="166" r="34"/>
+                <use class="sport-gel" href="../img/sports/hike.svg#gel"/>
+              </g>
+            </svg>
+          </div>
+          <div class="sport-body">
+            <p class="sport-where">Table Mountain</p>
+            <h3 class="tag tag--big">Hike</h3>
+            <p class="sport-text">Pocket a few for the big climbs. Real juice and jam beats a squashed sandwich at the top.</p>
+          </div>
+        </li>
+        <li class="sport sport--paddle">
+          <div class="sport-art">
+            <svg class="sport-svg" viewBox="0 100 1080 790" role="img" aria-label="A paddler on False Bay with a Supa Juice gel on the deck">
+              <g class="sport-move">
+                <use class="sport-scene" href="../img/sports/paddle.svg#scene"/>
+                <circle class="sport-ring" cx="846" cy="653" r="36"/>
+                <use class="sport-gel" href="../img/sports/paddle.svg#gel"/>
+              </g>
+            </svg>
+          </div>
+          <div class="sport-body">
+            <p class="sport-where">False Bay</p>
+            <h3 class="tag tag--big">Paddle</h3>
+            <p class="sport-text">It reseals, so take a sip, tuck it under the bungee and keep paddling.</p>
+          </div>
+        </li>
+        <li class="sport sport--swim">
+          <div class="sport-art">
+            <svg class="sport-svg" viewBox="0 100 1080 790" role="img" aria-label="A swimmer at Muizenberg with a Supa Juice gel tucked under the cap">
+              <g class="sport-move">
+                <use class="sport-scene" href="../img/sports/swim.svg#scene"/>
+                <circle class="sport-ring" cx="762" cy="557" r="42"/>
+                <use class="sport-gel" href="../img/sports/swim.svg#gel"/>
+              </g>
+            </svg>
+          </div>
+          <div class="sport-body">
+            <p class="sport-where">Muizenberg</p>
+            <h3 class="tag tag--big">Swim</h3>
+            <p class="sport-text">Tuck one under your cap for long open-water swims, then take a quick sip at the turn buoy.</p>
+          </div>
+        </li>
+      </ul>
+      <p class="wrap sports-more">Riding, lifting, a long walk with the dog? <strong>Also yes.</strong></p>
     </section>
 
     <section class="trail landing" aria-labelledby="trail-title">
@@ -208,99 +284,241 @@
 
         <p id="view-loading" class="fine" role="status">Loading prices&hellip;</p>
 
-        <form id="order-form" class="stack-lg" novalidate hidden>
-          <fieldset class="choose" id="choose">
-            <legend class="choose-legend">How would you like your order?</legend>
-            <div class="choose-row choose-row--three">
-              <button type="button" class="choose-btn" id="choose-collect" aria-pressed="false">
-                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>
-                <span class="choose-title" id="choose-collect-title">Free collection</span>
-                <span class="choose-sub" id="choose-collect-sub"></span>
-              </button>
-              <button type="button" class="choose-btn" id="choose-deliver" aria-pressed="false">
-                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg>
-                <span class="choose-title" id="choose-deliver-title">To your door</span>
-                <span class="choose-sub" id="choose-deliver-sub"></span>
-              </button>
-              <button type="button" class="choose-btn" id="choose-locker" aria-pressed="false">
-                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M12 3.5v17M4 12h16"/><path d="M9 7.5v1.5M15 7.5v1.5"/></svg>
-                <span class="choose-title">To a Pudo locker</span>
-                <span class="choose-sub" id="choose-locker-sub"></span>
-              </button>
+        <form id="order-form" class="shopgrid" novalidate hidden>
+          <div class="shopgrid-main">
+            <!-- Step 1, the bag: choose the gels, see the total, go to checkout (checkout/ is its own page). -->
+            <div class="stack-lg" id="bag-step">
+              <div id="qty-slot"></div>
+              <div class="bag-bar">
+                <p class="bag-total" id="bag-total" aria-live="polite"></p>
+                <button type="button" class="btn btn-primary btn-block" id="to-checkout">Checkout</button>
+              </div>
             </div>
-          </fieldset>
 
-          <div class="chosen" id="chosen" hidden>
-            <p class="chosen-text" id="chosen-text" tabindex="-1"></p>
-            <button type="button" class="btn btn-quiet btn-small" id="choose-change">Change</button>
+            <!-- Step 2, checkout, in parts: delivery first (what is needed), then your details, then payment.
+                 Parts not reached yet are blurred; finished parts fold into one line with Change. -->
+            <div class="stack-lg" id="checkout-step" hidden>
+            <section class="cstep" id="step-delivery" data-state="locked" aria-labelledby="step-delivery-title">
+              <div class="cstep-head">
+                <span class="cstep-num" aria-hidden="true">1</span>
+                <h3 class="cstep-title" id="step-delivery-title" tabindex="-1">Delivery</h3>
+                <button type="button" class="link-btn cstep-change" id="step-delivery-change" hidden>Change</button>
+              </div>
+              <p class="cstep-done" id="step-delivery-done" hidden></p>
+              <div class="cstep-body stack-lg" id="step-delivery-body">
+                <fieldset class="choose" id="choose">
+                            <legend class="choose-legend">How would you like your order?</legend>
+                            <div class="choose-row choose-row--three">
+                              <button type="button" class="choose-btn" id="choose-collect" aria-pressed="false">
+                                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>
+                                <span class="choose-title" id="choose-collect-title">Free collection</span>
+                                <span class="choose-sub" id="choose-collect-sub"></span>
+                              </button>
+                              <button type="button" class="choose-btn" id="choose-deliver" aria-pressed="false">
+                                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg>
+                                <span class="choose-title" id="choose-deliver-title">To your door</span>
+                                <span class="choose-sub" id="choose-deliver-sub"></span>
+                              </button>
+                              <button type="button" class="choose-btn" id="choose-locker" aria-pressed="false">
+                                <svg class="choose-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M12 3.5v17M4 12h16"/><path d="M9 7.5v1.5M15 7.5v1.5"/></svg>
+                                <span class="choose-title">To a Pudo locker</span>
+                                <span class="choose-sub" id="choose-locker-sub"></span>
+                              </button>
+                            </div>
+                          </fieldset>
+                <div class="chosen" id="chosen" hidden>
+                            <p class="chosen-text" id="chosen-text" tabindex="-1"></p>
+                            <button type="button" class="btn btn-quiet btn-small" id="choose-change">Change</button>
+                          </div>
+                <div class="stack-lg" id="order-rest" hidden>
+                  <fieldset class="field choice" id="collect-time" hidden>
+                                <legend>Collection time</legend>
+                                <div class="slot-pickers">
+                                  <div class="field">
+                                    <label for="collect-day">Day</label>
+                                    <select id="collect-day" class="select"></select>
+                                  </div>
+                                  <div class="field">
+                                    <label for="collect-hour">Time</label>
+                                    <select id="collect-hour" class="select"></select>
+                                  </div>
+                                </div>
+                                <p class="hint" id="collect-hint"></p>
+                              </fieldset>
+                  <fieldset class="door" id="door-fields" hidden>
+                                <legend class="door-legend">Delivery address</legend>
+                                <p class="hint door-note">All fields are needed so The Courier Guy can find you.</p>
+                                <fieldset class="door-kind" id="door-kind">
+                                  <legend class="door-kind-legend">Type of address</legend>
+                                  <div class="door-kinds">
+                                    <label class="door-kind-opt"><input type="radio" name="door-kind" id="door-kind-house" value="house"><span>House</span></label>
+                                    <label class="door-kind-opt"><input type="radio" name="door-kind" id="door-kind-flat" value="flat"><span>Flat or complex</span></label>
+                                    <label class="door-kind-opt"><input type="radio" name="door-kind" id="door-kind-business" value="business"><span>Business</span></label>
+                                  </div>
+                                </fieldset>
+                                <div class="field">
+                                  <label for="door-street">Street number and name</label>
+                                  <input id="door-street" type="text" autocomplete="address-line1" maxlength="120" aria-describedby="door-street-hint">
+                                  <p class="hint" id="door-street-hint">For example 12 Beach Road</p>
+                                </div>
+                                <div class="field" id="door-unit-field" hidden>
+                                  <label for="door-unit" id="door-unit-label">Unit number and complex name</label>
+                                  <input id="door-unit" type="text" autocomplete="address-line2" maxlength="80" aria-describedby="door-unit-hint">
+                                  <p class="hint" id="door-unit-hint">For example Unit 4, Ocean View</p>
+                                </div>
+                                <div class="field">
+                                  <label for="door-suburb">Suburb</label>
+                                  <input id="door-suburb" type="text" autocomplete="address-level3" maxlength="80">
+                                </div>
+                                <div class="door-pair">
+                                  <div class="field">
+                                    <label for="door-city">City or town</label>
+                                    <input id="door-city" type="text" autocomplete="address-level2" maxlength="80">
+                                  </div>
+                                  <div class="field">
+                                    <label for="door-code">Postal code</label>
+                                    <input id="door-code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="postal-code" maxlength="4">
+                                  </div>
+                                </div>
+                                <div class="field">
+                                  <label for="door-province">Province</label>
+                                  <select id="door-province" class="select" autocomplete="address-level1">
+                                    <option value="" selected>Choose your province</option>
+                                    <option>Eastern Cape</option>
+                                    <option>Free State</option>
+                                    <option>Gauteng</option>
+                                    <option>KwaZulu-Natal</option>
+                                    <option>Limpopo</option>
+                                    <option>Mpumalanga</option>
+                                    <option>North West</option>
+                                    <option>Northern Cape</option>
+                                    <option>Western Cape</option>
+                                  </select>
+                                </div>
+                              </fieldset>
+                  <section class="ship" id="ship" hidden aria-labelledby="ship-title">
+                                <h3 class="ship-title" id="ship-title">Delivery</h3>
+                                <div class="ship-card" id="ship-card" aria-live="polite">
+                                  <svg class="ship-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 6.5h11v9h-11z"/><path d="M13.5 9.5h4l3 3v3h-7"/><circle cx="6.5" cy="17" r="1.8"/><circle cx="17" cy="17" r="1.8"/></svg>
+                                  <div class="ship-text">
+                                    <p class="ship-name" id="ship-name">The Courier Guy</p>
+                                    <p class="ship-sub" id="ship-sub">Enter your address to see the delivery price.</p>
+                                  </div>
+                                  <p class="ship-fee" id="ship-fee"></p>
+                                </div>
+                                <button type="button" class="link-btn ship-retry" id="ship-retry" hidden>Try again</button>
+                              </section>
+                  <div class="field" id="address-field">
+                                <label for="address" id="address-label">Delivery address</label>
+                                <textarea id="address" autocomplete="street-address" rows="3" maxlength="300" aria-describedby="locker-hint"></textarea>
+                                <p class="hint" id="locker-hint" hidden>We send it to the Pudo locker nearest to you. You get an SMS with a code to open it.</p>
+                              </div>
+                </div>
+                <p class="alert alert-bad cstep-error" id="step-delivery-error" role="alert" hidden></p>
+                <button type="button" class="btn btn-primary btn-block" id="step-delivery-next">Continue</button>
+              </div>
+            </section>
+            <section class="cstep" id="step-details" data-state="locked" aria-labelledby="step-details-title">
+              <div class="cstep-head">
+                <span class="cstep-num" aria-hidden="true">2</span>
+                <h3 class="cstep-title" id="step-details-title" tabindex="-1">Your details</h3>
+                <button type="button" class="link-btn cstep-change" id="step-details-change" hidden>Change</button>
+              </div>
+              <p class="cstep-done" id="step-details-done" hidden></p>
+              <div class="cstep-body stack-lg" id="step-details-body">
+                <div class="field">
+                              <label for="name">Your name</label>
+                              <input id="name" type="text" autocomplete="name" maxlength="80">
+                            </div>
+
+                            <div class="field">
+                              <label for="email">Email</label>
+                              <input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="email-hint">
+                              <p class="hint" id="email-hint">We email your invoice here as a PDF.</p>
+                            </div>
+
+                            <div class="field">
+                              <label for="contact">Phone number</label>
+                              <input id="contact" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" aria-describedby="contact-hint">
+                              <p class="hint" id="contact-hint">So we can reach you about your order.</p>
+                            </div>
+                <div class="field">
+                              <label for="notes">Notes (optional)</label>
+                              <input id="notes" type="text" maxlength="300">
+                            </div>
+                <div class="field" id="code-field" hidden>
+                              <label for="code">Discount code (optional)</label>
+                              <div class="code-row">
+                                <input id="code" type="text" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="code-msg">
+                                <button type="button" class="btn btn-quiet" id="code-apply">Apply</button>
+                              </div>
+                              <p class="hint" id="code-msg" role="status"></p>
+                            </div>
+                <div class="hp" aria-hidden="true">
+                              <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
+                            </div>
+                <p class="alert alert-bad cstep-error" id="step-details-error" role="alert" hidden></p>
+                <button type="button" class="btn btn-primary btn-block" id="step-details-next">Continue to payment</button>
+              </div>
+            </section>
+            <section class="cstep" id="step-pay" data-state="locked" aria-labelledby="step-pay-title">
+              <div class="cstep-head">
+                <span class="cstep-num" aria-hidden="true">3</span>
+                <h3 class="cstep-title" id="step-pay-title" tabindex="-1">Payment</h3>
+                <button type="button" class="link-btn cstep-change" id="step-pay-change" hidden>Change</button>
+              </div>
+              <p class="cstep-done" id="step-pay-done" hidden></p>
+              <div class="cstep-body stack-lg" id="step-pay-body">
+                <section class="paywith" id="pay-with" hidden aria-labelledby="pay-with-title">
+                              <h3 class="paywith-title" id="pay-with-title">Payment</h3>
+                              <p class="paywith-sub"><svg class="paywith-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>All payments are secure and encrypted.</p>
+                              <div class="paywith-box">
+                                <div class="paywith-row">
+                                  <p class="paywith-name">Card, Apple Pay or Google Pay</p>
+                                  <ul class="paymarks" aria-label="Ways to pay: Visa, Mastercard, Apple Pay and Google Pay">
+                                  <li class="paymark paymark--visa" aria-hidden="true"><svg viewBox="0 0 48 16"><text x="24" y="13.2" text-anchor="middle">VISA</text></svg></li>
+                                  <li class="paymark paymark--mc" aria-hidden="true"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="#eb001b"/><circle cx="25" cy="12" r="9" fill="#f79e1b"/><path d="M20 4.5a9 9 0 0 1 0 15 9 9 0 0 1 0-15z" fill="#ff5f00"/></svg></li>
+                                  <li class="paymark paymark--apple" aria-hidden="true"><svg viewBox="0 0 16 19" class="paymark-apple"><path d="M13.2 10.1c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.9-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.8zM10.9 3.3c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg><span>Pay</span></li>
+                                  <li class="paymark paymark--gpay" aria-hidden="true"><span class="paymark-g">G</span><span>Pay</span></li>
+                              </ul>
+                                </div>
+                                <p class="paywith-note">Tap Pay to open Paystack's secure page. You come straight back here afterwards.</p>
+                              </div>
+                            </section>
+                <div class="alert alert-bad" id="form-error" role="alert" hidden></div>
+                <p class="pay-window" id="pay-window" role="timer" aria-live="off" hidden></p>
+                <div class="pay-expired" id="pay-expired" role="status" hidden>
+                  <p class="pay-expired-title">Your payment window has closed</p>
+                  <p class="pay-expired-text" id="pay-expired-text">Nothing was charged. Tap Pay to start again.</p>
+                  <div class="pay-expired-trial" id="pay-expired-trial" hidden>
+                    <p class="pay-expired-trial-note">Trial page only: what happens if the old payment link is paid late anyway?</p>
+                    <button type="button" class="btn btn-quiet btn-small" id="late-same">Pay late, nothing changed</button>
+                    <button type="button" class="btn btn-quiet btn-small" id="late-changed">Pay late, collection time taken</button>
+                  </div>
+                </div>
+                            <button type="submit" class="btn btn-pay btn-block" id="submit">Pay securely</button>
+                            <p class="fine" id="next-note">You pay on Paystack's secure page. Your order number comes once the payment goes through.</p>
+                            <p class="fine">By ordering you agree to our <a href="../info.html#delivery">delivery</a> and <a href="../info.html#refunds">refund &amp; cancellation</a> policies.</p>
+              </div>
+            </section>
+            </div>
           </div>
 
-          <div class="stack-lg" id="order-rest" hidden>
-            <fieldset class="field choice" id="collect-time" hidden>
-              <legend>Collection time</legend>
-              <div class="slot-pickers">
-                <div class="field">
-                  <label for="collect-day">Day</label>
-                  <select id="collect-day" class="select"></select>
-                </div>
-                <div class="field">
-                  <label for="collect-hour">Time</label>
-                  <select id="collect-hour" class="select"></select>
-                </div>
+          <!-- Checkout only: the bag on the right on a computer; on a phone, a "Show order summary" bar at the top. -->
+          <aside class="bagpanel" id="bag-panel" aria-labelledby="bag-panel-title">
+            <button type="button" class="bagpanel-toggle" id="bag-toggle" aria-expanded="false" aria-controls="bag-panel-body">
+              <span class="bagpanel-toggle-text" id="bag-toggle-text">Show order summary</span>
+              <span class="bagpanel-toggle-total" id="bag-toggle-total"></span>
+            </button>
+            <div class="bagpanel-body" id="bag-panel-body">
+              <div class="bagpanel-head">
+                <h3 class="bagpanel-title" id="bag-panel-title" tabindex="-1">Your bag</h3>
+                <button type="button" class="btn btn-quiet btn-small" id="bag-edit" hidden>Edit</button>
               </div>
-              <p class="hint" id="collect-hint"></p>
-            </fieldset>
-
-            <div id="qty-slot"></div>
-
-            <div class="field">
-              <label for="name">Your name</label>
-              <input id="name" type="text" autocomplete="name" maxlength="80">
+              <ul class="bag-lines" id="bag-lines"></ul>
+              <dl class="summary" id="summary"></dl>
             </div>
-
-            <div class="field">
-              <label for="email">Email</label>
-              <input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" aria-describedby="email-hint">
-              <p class="hint" id="email-hint">We email your invoice here as a PDF.</p>
-            </div>
-
-            <div class="field">
-              <label for="contact">Phone number</label>
-              <input id="contact" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" aria-describedby="contact-hint">
-              <p class="hint" id="contact-hint">So we can reach you about your order.</p>
-            </div>
-
-            <div class="field" id="address-field">
-              <label for="address" id="address-label">Delivery address</label>
-              <textarea id="address" autocomplete="street-address" rows="3" maxlength="300" aria-describedby="locker-hint"></textarea>
-              <p class="hint" id="locker-hint" hidden>We send it to the Pudo locker nearest to you. You get an SMS with a code to open it.</p>
-            </div>
-
-            <div class="field">
-              <label for="notes">Notes (optional)</label>
-              <input id="notes" type="text" maxlength="300">
-            </div>
-
-            <div class="field" id="code-field" hidden>
-              <label for="code">Discount code (optional)</label>
-              <div class="code-row">
-                <input id="code" type="text" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="code-msg">
-                <button type="button" class="btn btn-quiet" id="code-apply">Apply</button>
-              </div>
-              <p class="hint" id="code-msg" role="status"></p>
-            </div>
-
-            <div class="hp" aria-hidden="true">
-              <label>Website <input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></label>
-            </div>
-
-            <hr class="tear">
-            <dl class="summary" id="summary"></dl>
-
-            <div class="alert alert-bad" id="form-error" role="alert" hidden></div>
-            <button type="submit" class="btn btn-primary btn-block" id="submit">Place order</button>
-            <p class="fine" id="next-note">Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.</p>
-          </div>
+          </aside>
         </form>
 
         <section id="view-done" class="stack-lg" hidden>
@@ -311,20 +529,33 @@
             <p class="fine" id="done-collect" hidden></p>
           </div>
           <div class="bib" id="bib"></div>
-          <div class="stack" id="card-section" hidden>
-            <button type="button" class="btn btn-primary btn-block" id="pay-card">Pay by card</button>
-            <p class="fine">Card, Apple Pay or instant EFT, on Paystack's secure page. You come straight back here.</p>
+          <section class="checkout" id="card-section" hidden aria-labelledby="checkout-title">
+            <div class="checkout-head">
+              <h3 class="checkout-title" id="checkout-title">Amount due</h3>
+              <p class="checkout-amount" id="checkout-amount"></p>
+            </div>
+            <button type="button" class="btn btn-pay" id="pay-card"><svg class="btn-pay-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg><span id="pay-card-text">Pay now</span></button>
+            <ul class="paymarks" aria-label="Ways to pay: Visa, Mastercard, Apple Pay and Google Pay">
+            <li class="paymark paymark--visa" aria-hidden="true"><svg viewBox="0 0 48 16"><text x="24" y="13.2" text-anchor="middle">VISA</text></svg></li>
+            <li class="paymark paymark--mc" aria-hidden="true"><svg viewBox="0 0 40 24"><circle cx="15" cy="12" r="9" fill="#eb001b"/><circle cx="25" cy="12" r="9" fill="#f79e1b"/><path d="M20 4.5a9 9 0 0 1 0 15 9 9 0 0 1 0-15z" fill="#ff5f00"/></svg></li>
+            <li class="paymark paymark--apple" aria-hidden="true"><svg viewBox="0 0 16 19" class="paymark-apple"><path d="M13.2 10.1c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.9-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.8zM10.9 3.3c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg><span>Pay</span></li>
+            <li class="paymark paymark--gpay" aria-hidden="true"><span class="paymark-g">G</span><span>Pay</span></li>
+            </ul>
+            <p class="checkout-secure"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l7.5 3v5.6c0 4.6-3.2 8.6-7.5 9.8-4.3-1.2-7.5-5.2-7.5-9.8V5.8z"/><path d="M8.7 12.2l2.3 2.3 4.4-4.6"/></svg><span>Secured by <strong>Paystack</strong>. Your payment is encrypted and your card details never reach us. You come straight back here after paying.</span></p>
             <div class="alert alert-bad" id="card-error" role="alert" hidden></div>
-          </div>
-          <div class="stack" id="pay-section">
-            <h3 class="section-title" id="pay-title">Pay by bank transfer</h3>
-            <div class="pay" id="pay"></div>
-            <p class="fine" id="pay-note"></p>
-          </div>
+          </section>
+          <details class="eft" id="pay-section" open>
+            <summary class="eft-summary"><span id="pay-title">Pay by bank transfer</span></summary>
+            <div class="stack eft-body">
+              <div class="pay" id="pay"></div>
+              <p class="fine" id="pay-note"></p>
+            </div>
+          </details>
           <div class="actions actions--pair">
             <button type="button" class="btn btn-quiet" id="copy-invoice">Copy invoice</button>
             <button type="button" class="btn btn-quiet" id="new-order">Place another order</button>
           </div>
+          <a class="btn btn-quiet btn-block" id="done-follow" href="https://www.instagram.com/supajuice.co/" target="_blank" rel="noopener">Follow @supajuice.co for new flavours and drops</a>
           <p class="fine" id="done-keep">Take a screenshot of this page to keep your invoice number.</p>
         </section>
 
@@ -345,7 +576,9 @@
       <div class="foot-brand">
         <p class="foot-mark">Supa<br>Juice</p>
         <p class="foot-text">Small-batch energy gels from Cape Town.<br>Collect in Sea Point, or we send them to you.</p>
+        <p class="foot-links"><a href="../about.html">Our story</a><a href="../info.html#delivery">Delivery</a><a href="../info.html#refunds">Refunds</a><a href="../info.html#contact">Contact</a></p>
         <p class="foot-feedback"><a href="https://supajuice.co.za/feedback/">Leave a review</a> &middot; <a href="https://supajuice.co.za/feedback/#suggest">Suggest an idea</a></p>
+        <p class="foot-text foot-contact">267 High Level Road, Sea Point, Cape Town<br><a href="mailto:supajuice02@gmail.com">supajuice02@gmail.com</a> &middot; <a href="tel:+27798511889">079 851 1889</a></p>
       </div>
       <p class="foot-ig" id="foot-ig" hidden></p>
     </div>
@@ -355,11 +588,12 @@
     <img src="../img/instagram.png" alt="" width="54" height="54">
   </a>
 
-  <script src="../config.js?v=20261111f"></script>
-  <script src="shared.js?v=20261111f"></script>
-  <script src="demo.js?v=20261111f"></script>
-  <script src="order.js?v=20261112t"></script>
+  <script src="../config.js?v=20261112a"></script>
+  <script src="shared.js?v=20261112a"></script>
+  <script src="demo.js?v=20261126window"></script>
+  <script src="order.js?v=20261126window"></script>
   <script src="reviews.js?v=20261113r"></script>
-  <script src="ig-colour.js?v=20261111f"></script>
+  <script src="sports.js?v=20261125sport"></script>
+  <script src="ig-colour.js?v=20261112a"></script>
 </body>
 </html>
