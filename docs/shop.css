@@ -591,13 +591,6 @@ html:has(body.shop) {
 .sport-art { background: #fff; border-bottom: 3px solid var(--blue); }
 .sport-svg { display: block; width: 100%; height: auto; aspect-ratio: 1080 / 790; }
 .sport-body { display: grid; gap: 10px; padding: 16px 20px 22px; color: var(--ink); }
-.sport-where {
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 .sport-body .tag { margin: 0; justify-self: start; }
 .sport-text { font-size: 1rem; line-height: 1.45; }
 .sports-more { margin-top: 22px; color: #fff; font-size: 1.0625rem; }
