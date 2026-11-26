@@ -51,13 +51,6 @@ async function openAdmin(t, opts) {
   return env;
 }
 
-// The order page opens on two buttons. Tapping one shows the rest of the form.
-async function choose(page, what) {
-  await page.waitForSelector('#order-form:not([hidden])');
-  if (await page.locator('#choose').isVisible()) await page.click(what === 'collect' ? '#choose-collect' : what === 'locker' ? '#choose-locker' : '#choose-deliver');
-  await page.waitForSelector('#order-rest:not([hidden])');
-}
-
 // A collection time: the first free day and the given (or first) time on it.
 async function pickTime(page, time) {
   const day = await page.locator('#collect-day option').nth(1).getAttribute('value');
@@ -82,21 +75,135 @@ async function flavourTotal(page, prefix) {
   return n;
 }
 
+// The order page is two pages: the bag (choose the gels, then Checkout) and checkout/, where the
+// customer goes through Delivery, Your details and Payment, each with Continue.
+const onCheckout = (page) => /\/checkout\//.test(page.url());
+
+// The gels for this order, on the bag page. Without counts: whatever is chosen, or the fewest allowed.
+async function setBag(page, counts) {
+  if (counts) await setFlavours(page, counts);
+  else if (await flavourTotal(page) === 0) await setFlavours(page, { orange: 1 });
+  // Below the minimum: one more Orange at a time until Checkout opens.
+  for (let i = 0; i < 80 && await page.locator('#to-checkout').isDisabled(); i++) {
+    await page.click('[aria-label="One more Orange"]');
+  }
+}
+
+// From the bag to the checkout page.
+async function toCheckout(page, counts) {
+  await page.waitForSelector('#order-form:not([hidden])');
+  if (onCheckout(page)) return;
+  await setBag(page, counts);
+  await page.click('#to-checkout');
+  await page.waitForURL(/\/checkout\//);
+  await page.waitForSelector('#checkout-step:not([hidden])');
+}
+
+// Back from checkout to the bag (Edit), to change the gels.
+async function editBag(page) {
+  if (!(await page.locator('#bag-edit').isVisible())) await page.click('#bag-toggle');
+  await page.click('#bag-edit');
+  await page.waitForURL((u) => !/\/checkout\//.test(String(u)));
+  await page.waitForSelector('#bag-step:not([hidden])');
+}
+
+// Changes the gels from checkout: back to the bag, set them, and checkout again with `what` chosen.
+async function rebag(page, counts, what) {
+  await editBag(page);
+  await setFlavours(page, counts);
+  await toCheckout(page);
+  if (what) await choose(page, what);
+}
+
+// Checkout opens on Delivery: Collect, their door or a Pudo locker. Tapping one shows what it needs.
+async function choose(page, what) {
+  await toCheckout(page);
+  if (await page.locator('#step-delivery').getAttribute('data-state') !== 'open') await page.click('#step-delivery-change');
+  if (await page.locator('#choose').isVisible()) await page.click(what === 'collect' ? '#choose-collect' : what === 'locker' ? '#choose-locker' : '#choose-deliver');
+  await page.waitForSelector('#order-rest:not([hidden])');
+}
+
+// A field in a part not reached yet is locked (inert), as for a customer. Tests fill it ahead.
+async function setField(page, id, value) {
+  await page.evaluate(([id, value]) => {
+    const box = document.getElementById(id);
+    box.value = value;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  }, [id, value]);
+}
+
+// Continue through the parts, then Pay (or Place order). Stops at the first part that says what is
+// missing: the message is in that part (see formError).
+async function submitKiosk(page, opts) {
+  for (const k of ['delivery', 'details']) {
+    const part = page.locator('#step-' + k);
+    if (await part.getAttribute('data-state') !== 'open') continue;
+    await page.click('#step-' + k + '-next');
+    await page.waitForFunction((id) => {
+      const box = document.getElementById('step-' + id);
+      const err = document.getElementById('step-' + id + '-error');
+      return box.dataset.state !== 'open' || (err && !err.hidden);
+    }, k, { timeout: 30000 });
+    if (await part.getAttribute('data-state') === 'open') return;
+  }
+  if (opts && opts.pay === false) return;
+  if (await page.locator('#step-pay').getAttribute('data-state') === 'open') await page.click('#submit');
+}
+
+// Finishes Delivery so Your details (name, email, phone, notes, discount code) can be filled in.
+async function toDetails(page) {
+  if (await page.locator('#step-delivery').getAttribute('data-state') === 'open') {
+    await page.click('#step-delivery-next');
+    await page.waitForSelector('#step-details[data-state="open"]');
+  }
+}
+
+// The order summary at checkout: on a phone it is folded into a bar until tapped.
+async function showBag(page) {
+  if (await page.locator('#bag-toggle').isVisible() && await page.locator('#bag-toggle').getAttribute('aria-expanded') !== 'true') {
+    await page.click('#bag-toggle');
+  }
+}
+
+// The message shown to the customer: in the part that needs attention, or by the Pay button.
+const ERROR_BOXES = '#form-error:not([hidden]), #step-delivery-error:not([hidden]), #step-details-error:not([hidden])';
+async function waitFormError(page) {
+  await page.waitForSelector(ERROR_BOXES);
+}
+async function formError(page) {
+  return page.locator(ERROR_BOXES).first().innerText();
+}
+
 async function fillKiosk(page, over) {
   const d = Object.assign({
     name: 'Jane Doe', email: 'jane@example.com', contact: '082 123 4567', address: '12 Beach Rd, Sea Point', notes: '', more: 0
   }, over);
+  // The gels: on the bag page, before checkout. A change at checkout goes back to the bag (Edit).
+  const counts = d.flavours || (d.more ? { orange: 1 + d.more } : null);
+  if (onCheckout(page) && counts) await editBag(page);
+  await toCheckout(page, counts);
   await choose(page, d.collect ? 'collect' : d.locker ? 'locker' : 'deliver');
   if (d.collect) await pickTime(page, d.time);
-  if (d.flavours) await setFlavours(page, d.flavours);
-  else if (await flavourTotal(page) === 0) await setFlavours(page, { orange: 1 + d.more });
-  else for (let i = 0; i < d.more; i++) await page.click('[aria-label="One more Orange"]');
-  await page.fill('#name', d.name);
-  await page.fill('#email', d.email);
-  await page.fill('#contact', d.contact);
   // With door prices from The Courier Guy, the door address is in parts (see fillDoor).
   if (!d.collect && await page.locator('#address').isVisible()) await page.fill('#address', d.address);
-  await page.fill('#notes', d.notes);
+  await setField(page, 'name', d.name);
+  await setField(page, 'email', d.email);
+  await setField(page, 'contact', d.contact);
+  await setField(page, 'notes', d.notes);
+}
+
+// The trial page's checkout, one part at a time: delivery (to the door), Continue, details, Continue.
+async function trialCheckout(page) {
+  await choose(page, 'deliver');
+  if (await page.locator('#address').isVisible()) await page.fill('#address', '12 Beach Rd, Sea Point');
+  await page.click('#step-delivery-next');
+  await page.waitForSelector('#step-details[data-state="open"]');
+  await page.fill('#name', 'Jane Doe');
+  await page.fill('#email', 'jane@example.com');
+  await page.fill('#contact', '082 123 4567');
+  await page.click('#step-details-next');
+  await page.waitForSelector('#step-pay[data-state="open"]');
 }
 
 const orderRows = (dev) => dev.gas.rows('Orders');
@@ -117,29 +224,38 @@ test('order page: shows the shop, the price and a total that follows the quantit
   assert.equal(await page.textContent('#brand'), 'Supa Juice');
   assert.equal(await text(page, '#lede'), 'Collect in Sea Point, or we send them to you.\nPay by bank transfer.');
   assert.doesNotMatch(await page.locator('#order-form').innerText(), /Cape Town/, 'no delivery area is shown to customers');
-  await choose(page, 'deliver');
   assert.match(await text(page, '.flavours-item'), /Running gel sachet, R40 each/);
-  // Nothing is chosen until the customer picks flavours.
+  // Nothing is chosen until the customer picks flavours, and Checkout waits for them.
   assert.equal(await page.inputValue('#qty-orange'), '0');
   assert.equal(await page.inputValue('#qty-cranberry'), '0');
-  assert.equal(await text(page, '#submit'), 'Choose at least 1 gel');
+  assert.equal(await text(page, '#bag-total'), 'Your bag is empty');
+  assert.equal(await text(page, '#to-checkout'), 'Choose your gels');
+  assert.equal(await page.locator('#to-checkout').isDisabled(), true);
   await page.click('[aria-label="One more Orange"]');
-  assert.equal(await text(page, '#submit'), 'Place order for R70');
+  assert.equal(await text(page, '#bag-total'), '1 gel · R40');
+  assert.equal(await text(page, '#to-checkout'), 'Checkout');
   await page.click('[aria-label="One more Orange"]');
   await page.click('[aria-label="One more Cranberry"]');
   assert.equal(await page.inputValue('#qty-orange'), '2');
   assert.equal(await page.inputValue('#qty-cranberry'), '1');
   assert.equal(await text(page, '#qty-count'), '3 gels: 2 Orange, 1 Cranberry.');
+  assert.equal(await text(page, '#bag-total'), '3 gels · R120');
+
+  // Checkout: the bag, then delivery adds its fee.
+  await toCheckout(page);
+  await choose(page, 'deliver');
   assert.equal(await text(page, '#submit'), 'Place order for R150');
-  assert.match(await text(page, '#summary'), /3 x Running gel sachet\s+2 Orange, 1 Cranberry\s+R120/);
+  await showBag(page);
+  assert.match(await text(page, '#bag-lines'), /2 × Orange\s+R80\s+1 × Cranberry\s+R40/);
   assert.match(await text(page, '#summary'), /Delivery\s+R30/);
+  assert.match(await text(page, '#summary'), /Total\s+R150/);
   noErrors(errors);
 });
 
 test('order page: the flavours are saved on the order and in the invoice', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(page, { flavours: { orange: 1, cranberry: 3 } });
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   const row = orderRows(dev)[0];
   assert.equal(row.Qty, 4);
@@ -154,30 +270,30 @@ test('order page: with a minimum order, the flavours must add up to at least the
   const { dev, page, errors } = await open(t, { mode: 'ready' });
   dev.gas.call({ action: 'saveSettings', key: dev.key, values: { min_quantity: '3' } });
   await page.goto(kioskUrl(dev));
-  await choose(page, 'deliver');
+  await page.waitForSelector('#order-form:not([hidden])');
   assert.match(await text(page, '.flavours-item'), /Running gel sachet, R40 each\. Minimum order 3\./);
-  assert.equal(await text(page, '#submit'), 'Choose at least 3 gels');
+  assert.equal(await text(page, '#to-checkout'), 'Choose your gels');
   await page.click('[aria-label="One more Orange"]');
   await page.click('[aria-label="One more Cranberry"]');
   assert.match(await text(page, '#qty-count'), /2 chosen\. Choose 1 more/);
 
-  // Too few is caught before anything is sent.
-  await fillKiosk(page);
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /minimum order is 3 gels\. Add 1 more/);
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'qty-orange');
+  // Too few: Checkout waits, and says how many more.
+  assert.equal(await text(page, '#to-checkout'), 'Add 1 more (at least 3)');
+  assert.equal(await page.locator('#to-checkout').isDisabled(), true);
   assert.equal(orderRows(dev).length, 0);
 
   await page.click('[aria-label="One more Cranberry"]');
+  assert.equal(await text(page, '#to-checkout'), 'Checkout');
+  await fillKiosk(page);
   assert.equal(await text(page, '#submit'), 'Place order for R150');
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(orderRows(dev)[0].Qty, 3);
   assert.equal(orderRows(dev)[0].Cranberry, 2);
 
-  // Another order starts with nothing chosen again.
+  // Another order starts on the bag with nothing chosen again.
   await page.click('#new-order');
-  await choose(page, 'deliver');
+  await page.waitForSelector('#bag-step:not([hidden])');
   assert.equal(await page.inputValue('#qty-orange'), '0');
   assert.equal(await page.inputValue('#qty-cranberry'), '0');
   noErrors(errors);
@@ -185,13 +301,16 @@ test('order page: with a minimum order, the flavours must add up to at least the
 
 test('order page: the customer first picks Collect, their door or a Pudo locker, and only then sees the form', async (t) => {
   const { page, errors } = await openKiosk(t, { mode: 'ready' });
-  await page.waitForSelector('#order-form:not([hidden])');
+  await toCheckout(page);
   assert.equal(await text(page, '#choose-collect'), 'Free collection\nFrom Sea Point');
   assert.equal(await text(page, '#choose-deliver'), 'To your door\nR30');
   assert.equal(await text(page, '#choose-locker'), 'To a Pudo locker\nR30', 'locker offered before Pudo prices are set');
-  for (const id of ['#order-rest', '#chosen', '#address-field', '#name', '#submit']) {
+  for (const id of ['#order-rest', '#chosen', '#address-field']) {
     assert.equal(await page.locator(id).isVisible(), false, id + ' waits for the choice');
   }
+  // Details and payment are locked until delivery is done.
+  assert.equal(await page.locator('#step-details').getAttribute('data-state'), 'locked');
+  assert.equal(await page.locator('#step-pay').getAttribute('data-state'), 'locked');
 
   await page.click('#choose-deliver');
   assert.equal(await page.locator('#choose').isHidden(), true);
@@ -199,9 +318,9 @@ test('order page: the customer first picks Collect, their door or a Pudo locker,
   assert.equal(await page.evaluate(() => document.activeElement.id), 'chosen-text', 'focus moves to the choice');
   assert.equal(await page.locator('#address-field').isVisible(), true);
   assert.equal(await page.locator('#collect-time').isHidden(), true);
-  await page.fill('#name', 'Typed Before');
+  await setField(page, 'name', 'Typed Before');
 
-  // Change brings the two buttons back, and what was typed stays.
+  // Change brings the buttons back, and what was typed stays.
   await page.click('#choose-change');
   assert.equal(await page.locator('#choose').isVisible(), true);
   assert.equal(await page.locator('#order-rest').isHidden(), true);
@@ -219,16 +338,18 @@ test('order page: the customer first picks Collect, their door or a Pudo locker,
   assert.equal(await page.locator('#address-field').isVisible(), true);
   assert.equal(await text(page, '#address-label'), 'Your address');
   assert.match(await text(page, '#locker-hint'), /Pudo locker nearest to you/);
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R30/);
   noErrors(errors);
 });
 
 test('order page: a customer can collect at a time they pick, and the delivery fee comes off', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
+  await toCheckout(page, { orange: 2 });
   await choose(page, 'collect');
-  await page.click('[aria-label="One more Orange"]');
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Collection\s+Free/);
-  assert.equal(await text(page, '#submit'), 'Place order for R40');
+  assert.equal(await text(page, '#submit'), 'Place order for R80');
 
   // Days come from Greg's settings, from tomorrow. Times appear once a day is picked.
   assert.equal(await page.locator('#collect-hour').isDisabled(), true);
@@ -239,11 +360,10 @@ test('order page: a customer can collect at a time they pick, and the delivery f
   assert.deepEqual(await page.locator('#collect-hour option').allInnerTexts(), ['Choose a time', '17:00', '17:30', '18:00', '18:30']);
   await page.selectOption('#collect-hour', '17:30');
 
-  await page.click('[aria-label="One more Orange"]');
-  await page.fill('#name', 'Sam Collect');
-  await page.fill('#email', 'sam@example.com');
-  await page.fill('#contact', '072 555 0101');
-  await page.click('#submit');
+  await setField(page, 'name', 'Sam Collect');
+  await setField(page, 'email', 'sam@example.com');
+  await setField(page, 'contact', '072 555 0101');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.match(await text(page, '#done-sub'), /Pay R80 by bank transfer/);
   assert.equal(await text(page, '#done-collect'), 'Collect on Thu 29 Oct, 17:30 from Sea Point. The address is in your email, and a calendar invite follows once your payment is confirmed.');
@@ -259,9 +379,10 @@ test('order page: a customer can collect at a time they pick, and the delivery f
   const invoice = await clipboard(page);
   assert.match(invoice, /Collection: free\nTotal due: R80\n\nCollecting: Thu 29 Oct, 17:30, Sea Point/);
 
-  // The next order starts with the choice again, and the booked time is gone.
+  // The next order starts on the bag, the choice comes again at checkout, and the booked time is gone.
   await page.click('#new-order');
-  await page.waitForSelector('#order-form:not([hidden])');
+  await page.waitForSelector('#bag-step:not([hidden])');
+  await toCheckout(page, { orange: 1 });
   assert.equal(await page.locator('#choose').isVisible(), true);
   await page.click('#choose-collect');
   await page.selectOption('#collect-day', '2026-10-29');
@@ -269,24 +390,23 @@ test('order page: a customer can collect at a time they pick, and the delivery f
   await page.click('#choose-change');
   await page.click('#choose-deliver');
   assert.equal(await page.locator('#address-field').isHidden(), false);
-  await page.click('[aria-label="One more Orange"]');
   assert.equal(await text(page, '#submit'), 'Place order for R70');
   noErrors(errors);
 });
 
 test('order page: a collection needs a day and a time before anything is sent', async (t) => {
   const { dev, page } = await openKiosk(t, { mode: 'ready' });
+  await toCheckout(page, { orange: 1 });
   await choose(page, 'collect');
-  await page.click('[aria-label="One more Orange"]');
-  await page.fill('#name', 'Sam');
-  await page.fill('#email', 'sam@example.com');
+  await setField(page, 'name', 'Sam');
+  await setField(page, 'email', 'sam@example.com');
   const before = dev.calls.length;
-  await page.click('#submit');
-  assert.equal(await text(page, '#form-error'), 'Pick a day to collect.');
+  await submitKiosk(page);
+  assert.equal(await formError(page), 'Pick a day to collect.');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'collect-day');
   await page.selectOption('#collect-day', { index: 1 });
-  await page.click('#submit');
-  assert.equal(await text(page, '#form-error'), 'Pick a time to collect.');
+  await submitKiosk(page);
+  assert.equal(await formError(page), 'Pick a time to collect.');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'collect-hour');
   assert.equal(dev.calls.length, before, 'nothing was sent');
 });
@@ -299,14 +419,14 @@ test('order page: a time someone else just booked is refused, and the fresh time
     action: 'order', name: 'Quick', email: 'q@example.com', qty: 1, collect: true, address: '', notes: '', website: '',
     collectAt: '2026-10-29 17:00', requestId: 'quick_000001', expectedTotal: 40
   });
-  await page.click('#submit');
-  await page.waitForSelector('#form-error:not([hidden])');
-  assert.match(await text(page, '#form-error'), /just been taken/);
+  await submitKiosk(page);
+  await waitFormError(page);
+  assert.match(await formError(page), /just been taken/);
   assert.equal(await page.inputValue('#collect-day'), '2026-10-29', 'the day stays picked');
   assert.equal(await page.inputValue('#collect-hour'), '');
   assert.ok(!(await page.locator('#collect-hour option').allInnerTexts()).includes('17:00'));
   await page.selectOption('#collect-hour', '17:30');
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(orderRows(dev)[1]['Collect at'], '2026-10-29 17:30');
   noErrors(errors);
@@ -320,33 +440,33 @@ test('order page: with every time booked, the customer is told to choose deliver
     collectAt: '2026-10-29 17:00', requestId: 'quick_000001', expectedTotal: 40
   });
   await page.goto(kioskUrl(dev));
+  await toCheckout(page, { orange: 1 });
   await choose(page, 'collect');
   assert.match(await text(page, '#collect-hint'), /No collection times are free in the next 30 days\. Choose delivery, or send us a DM\./);
   assert.equal(await page.locator('#collect-day').isDisabled(), true);
-  await page.click('[aria-label="One more Orange"]');
-  await page.fill('#name', 'Sam');
-  await page.fill('#email', 'sam@example.com');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /No collection times are free right now/);
+  await setField(page, 'name', 'Sam');
+  await setField(page, 'email', 'sam@example.com');
+  await submitKiosk(page);
+  assert.match(await formError(page), /No collection times are free right now/);
 });
 
 test('order page: with fees confirmed per order, a delivery is sent as a request with nothing to pay yet', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true });
-  await page.waitForSelector('#order-form:not([hidden])');
+  await toCheckout(page, { orange: 1 });
   // A starting price says, on its own line, that the final price follows.
   assert.equal(await text(page, '#choose-deliver-sub'), "From R30*\n*Location dependent");
   assert.equal(await text(page, '#choose-locker-sub'), "From R30*\n*Location dependent");
   assert.equal(await text(page, '#choose-deliver-title'), 'To your door');
   assert.equal(await text(page, '#choose-locker .choose-title'), 'To a Pudo locker');
   await choose(page, 'deliver');
-  await page.click('[aria-label="One more Orange"]');
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Delivery\s+From R30\* \*Location dependent/);
   assert.match(await text(page, '#summary'), /Total before delivery\s+R40/);
   assert.equal(await text(page, '#submit'), 'Send order for R40 + delivery');
   assert.match(await text(page, '#next-note'), /There is nothing to pay yet/);
 
   await fillKiosk(page, { more: 2 });
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await text(page, '#done-title'), 'Order request sent');
   assert.match(await text(page, '#done-sub'), /email your invoice to jane@example\.com with the bank details\. There is nothing to pay yet\./);
@@ -365,38 +485,40 @@ test('order page: with fees confirmed per order, a delivery is sent as a request
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await text(page, '#done-title'), 'Your last request');
 
-  // Collection is not a request: it is priced and paid straight away.
+  // Collection is not a request: it is priced and paid straight away. A new order starts with nothing chosen.
   await page.click('#new-order');
+  await page.waitForSelector('#bag-step:not([hidden])');
+  assert.equal(await text(page, '#bag-total'), 'Your bag is empty');
+  await toCheckout(page, { orange: 1 });
   await choose(page, 'collect');
-  assert.equal(await text(page, '#submit'), 'Choose at least 1 gel', 'a new order starts with nothing chosen');
-  await page.click('[aria-label="One more Orange"]');
   assert.equal(await text(page, '#submit'), 'Place order for R40', 'with no fee');
   noErrors(errors);
 });
 
 test('order page: Pudo locker prices are fixed and charged straight away; over 40 is a request', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true, lockerFees: '15 90, 40 120' });
-  await page.waitForSelector('#order-form:not([hidden])');
+  await toCheckout(page, { orange: 15 });
   assert.equal(await text(page, '#choose-locker-sub'), 'From R90', 'no location note on the locker');
   assert.equal(await text(page, '#choose-deliver-sub'), "From R30*\n*Location dependent", 'the door is unchanged');
   await choose(page, 'locker');
-  const more = async (n) => { for (let i = 0; i < n; i++) await page.click('[aria-label="One more Orange"]'); };
-  await more(15);
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R90/);
   assert.equal(await text(page, '#submit'), 'Place order for R690');
-  await more(1);
+  await rebag(page, { orange: 16 }, 'locker');
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R120/);
   assert.equal(await text(page, '#submit'), 'Place order for R760');
-  await more(25);
+  await rebag(page, { orange: 41 }, 'locker');
+  await showBag(page);
   assert.match(await text(page, '#summary'), /We send you the price \(over 40\)/);
   assert.equal(await text(page, '#submit'), 'Send order for R1640 + delivery');
-  for (let i = 0; i < 21; i++) await page.click('[aria-label="One fewer Orange"]');
+  await rebag(page, { orange: 20 }, 'locker');
 
-  await page.fill('#name', 'Jane Doe');
-  await page.fill('#email', 'jane@example.com');
-  await page.fill('#contact', '082 123 4567');
   await page.fill('#address', '12 Main Rd, Sea Point');
-  await page.click('#submit');
+  await setField(page, 'name', 'Jane Doe');
+  await setField(page, 'email', 'jane@example.com');
+  await setField(page, 'contact', '082 123 4567');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await page.locator('#pay-section').isHidden(), false, 'bank details shown straight away');
   const row = orderRows(dev)[0];
@@ -406,10 +528,10 @@ test('order page: Pudo locker prices are fixed and charged straight away; over 4
 
 test('order page: free delivery is shown as Free', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready', fee: 0 });
-  await page.waitForSelector('#order-form:not([hidden])');
+  await toCheckout(page, { orange: 1 });
   assert.equal(await text(page, '#choose-deliver-sub'), 'Free');
   await choose(page, 'deliver');
-  await page.click('[aria-label="One more Orange"]');
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Delivery\s+Free/);
   assert.equal(await text(page, '#submit'), 'Place order for R40');
 });
@@ -417,7 +539,7 @@ test('order page: free delivery is shown as Free', async (t) => {
 test('order page: placing an order shows the invoice number and bank details, and saves the order', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(page, { more: 2, notes: 'Ring twice' });
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
 
   assert.equal(await text(page, '#done-title'), 'Order received');
@@ -460,7 +582,7 @@ test('order page: placing an order shows the invoice number and bank details, an
 test('order page: copy buttons put the right text on the clipboard', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(page, { more: 1 });
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
 
   await page.locator('.pay-row', { hasText: 'Account number' }).getByRole('button', { name: 'Copy' }).click();
@@ -482,7 +604,7 @@ test('order page: copy buttons put the right text on the clipboard', async (t) =
 test('order page: the confirmation survives a reload, and Place another order starts fresh', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(page);
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
 
   await page.reload();
@@ -499,40 +621,42 @@ test('order page: the confirmation survives a reload, and Place another order st
 
 test('order page: missing details are caught before anything is sent', async (t) => {
   const { dev, page } = await openKiosk(t, { mode: 'ready' });
+  // Checkout only opens with gels in the bag.
+  await page.waitForSelector('#order-form:not([hidden])');
+  assert.equal(await page.locator('#to-checkout').isDisabled(), true);
+  await toCheckout(page, { cranberry: 1 });
   await choose(page, 'deliver');
   const before = dev.calls.length;
 
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Choose how many of each flavour/);
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'qty-orange');
-  await page.click('[aria-label="One more Cranberry"]');
+  // Delivery first: the address.
+  await submitKiosk(page);
+  assert.match(await formError(page), /delivery address/);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'address');
+  assert.equal(await page.locator('#area-ok').count(), 0, 'there is no delivery-area tick box');
+  await page.fill('#address', '12 Beach Rd, Sea Point');
 
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Enter your name/);
+  // Then the details, one at a time.
+  await submitKiosk(page);
+  assert.match(await formError(page), /Enter your name/);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'name');
 
   await page.fill('#name', 'Jane');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Enter your email address/);
+  await submitKiosk(page);
+  assert.match(await formError(page), /Enter your email address/);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'email');
 
   await page.fill('#email', 'jane@example');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Check your email address/);
+  await submitKiosk(page);
+  assert.match(await formError(page), /Check your email address/);
 
   await page.fill('#email', 'jane@example.com');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Enter your phone number/);
+  await submitKiosk(page);
+  assert.match(await formError(page), /Enter your phone number/);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'contact');
 
   await page.fill('#contact', '@jane.runs');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Check your phone number/);
-
-  await page.fill('#contact', '+27 82 123 4567');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /delivery address/);
-  assert.equal(await page.locator('#area-ok').count(), 0, 'there is no delivery-area tick box');
+  await submitKiosk(page);
+  assert.match(await formError(page), /Check your phone number/);
 
   assert.equal(dev.calls.length, before, 'nothing was sent');
   assert.equal(orderRows(dev).length, 0);
@@ -542,14 +666,14 @@ test('order page: a collection also needs a phone number', async (t) => {
   const { dev, page } = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(page, { collect: true, contact: '' });
   const before = dev.calls.length;
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Enter your phone number/);
+  await submitKiosk(page);
+  assert.match(await formError(page), /Enter your phone number/);
   assert.equal(dev.calls.length, before, 'nothing was sent');
 });
 
 test('order page: with Pudo on, door and locker fees follow the number of sachets', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', pudo: true });
-  await page.waitForSelector('#order-form:not([hidden])');
+  await toCheckout(page, { orange: 1 });
   assert.equal(await page.locator('#choose-locker').isVisible(), true);
   assert.equal(await text(page, '#choose-deliver-sub'), 'From R90');
   assert.equal(await text(page, '#choose-locker-sub'), 'From R55');
@@ -558,9 +682,10 @@ test('order page: with Pudo on, door and locker fees follow the number of sachet
 
   await page.click('#choose-deliver');
   assert.equal(await text(page, '#chosen-text'), 'Deliver to your door');
-  await page.click('[aria-label="One more Orange"]');
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Delivery\s+R90/);
-  for (let i = 0; i < 12; i++) await page.click('[aria-label="One more Orange"]');
+  await rebag(page, { orange: 13 }, 'deliver');
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Delivery\s+R99/, '13 sachets need the Small box');
 
   await page.click('#choose-change');
@@ -568,13 +693,13 @@ test('order page: with Pudo on, door and locker fees follow the number of sachet
   assert.equal(await page.locator('#address-field').isVisible(), true);
   assert.match(await text(page, '#summary'), /Delivery to a Pudo locker\s+R74/);
 
-  await page.fill('#name', 'Jane Doe');
-  await page.fill('#email', 'jane@example.com');
-  await page.fill('#contact', '082 123 4567');
-  await page.click('#submit');
-  assert.match(await text(page, '#form-error'), /Enter your address so we can pick the Pudo locker nearest to you/);
+  await setField(page, 'name', 'Jane Doe');
+  await setField(page, 'email', 'jane@example.com');
+  await setField(page, 'contact', '082 123 4567');
+  await submitKiosk(page);
+  assert.match(await formError(page), /Enter your address so we can pick the Pudo locker nearest to you/);
   await page.fill('#address', '12 Main Rd, Sea Point');
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   const row = orderRows(dev)[0];
   assert.equal(row.Address, 'Pudo locker near: 12 Main Rd, Sea Point');
@@ -586,8 +711,9 @@ test('order page: with Pudo on, door and locker fees follow the number of sachet
 test('order page: with Pudo on, a collection pays for its box', async (t) => {
   const { dev, page } = await openKiosk(t, { mode: 'ready', pudo: true });
   await fillKiosk(page, { collect: true });
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Collection\s+R6/);
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(orderRows(dev)[0]['Delivery fee'], 6);
 });
@@ -601,30 +727,28 @@ test('order page: a collection is paid by card, and coming back from Paystack sh
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', cardPay: true });
   await fakePaystackPage(page);
   await fillKiosk(page, { collect: true });
-  await page.click('#submit');
-  await page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(await page.locator('#card-section').isVisible(), true);
-  assert.equal(await text(page, '#pay-card'), 'Pay R40 now');
-  assert.equal(await text(page, '#checkout-amount'), 'R40');
-  assert.equal(await page.locator('#card-section .paymarks').isVisible(), true, 'the cards and wallets it takes are shown');
-  assert.match(await text(page, '#card-section .checkout-secure'), /Secured by Paystack/);
-  assert.equal(await text(page, '#done-sub'), 'Pay R40 below to confirm your order.');
-  // With card payments on, customers pay on the site only: no bank transfer, no instant EFT.
-  assert.equal(await page.locator('#pay-section').isVisible(), false, 'no bank details');
-  assert.doesNotMatch(await text(page, '#card-section'), /EFT/i);
+  await submitKiosk(page, { pay: false });
+  // Before paying: the ways to pay, one Pay button. With card payments on: no bank transfer, no instant EFT.
+  assert.equal(await page.locator('#pay-with').isVisible(), true);
+  assert.equal(await page.locator('#pay-with .paymarks').isVisible(), true, 'the cards and wallets it takes are shown');
+  assert.equal(await text(page, '#submit'), 'Pay R40 securely');
+  assert.match(await text(page, '#next-note'), /order number comes once the payment goes through/);
+  assert.doesNotMatch(await text(page, '#step-pay'), /EFT|bank transfer/i);
 
-  await page.click('#pay-card');
+  // Pay goes straight to Paystack: no invoice page in between.
+  await page.click('#submit');
   await page.waitForURL(/checkout\.paystack\.com/);
   const tx = dev.gas.paystack.last();
   assert.equal(tx.amount, 4000);
-  assert.equal(tx.callback_url, dev.siteUrl + '/');
+  assert.equal(tx.callback_url, dev.siteUrl + '/checkout/', 'Paystack sends them back to checkout');
 
   dev.gas.paystack.pay(tx.reference);
-  await page.goto(dev.siteUrl + '/?trxref=' + tx.reference + '&reference=' + tx.reference);
+  await page.goto(dev.siteUrl + '/checkout/?trxref=' + tx.reference + '&reference=' + tx.reference);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await text(page, '#done-title'), 'Paid, thank you');
   assert.match(await text(page, '#done-sub'), /We have received your payment of R40\. Your paid invoice is on its way to jane@example\.com/);
   assert.match(await text(page, '#done-collect'), /The address and calendar invite are in your email/);
+  assert.equal(await text(page, '#bib .bib-number'), 'SJ-0001', 'the order number shows once paid');
   assert.equal(await page.locator('#pay-section').isHidden(), true);
   assert.equal(await page.locator('#card-section').isHidden(), true);
   assert.equal(new URL(page.url()).search, '', 'the reference is taken off the address');
@@ -641,11 +765,11 @@ test('order page: a Pudo locker order can be paid by card, on the page or from t
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', quote: true, cardPay: true, lockerFees: '15 90, 40 120' });
   await fakePaystackPage(page);
   await fillKiosk(page, { locker: true });
+  await submitKiosk(page, { pay: false });
+  assert.equal(await text(page, '#submit'), 'Pay R130 securely');
   await page.click('#submit');
-  await page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(await page.locator('#card-section').isVisible(), true);
-  assert.equal(await text(page, '#pay-card'), 'Pay R130 now');
-  assert.match(await text(page, '#done-email'), /Once you have paid, we email your paid invoice to jane@example\.com/);
+  await page.waitForURL(/checkout\.paystack\.com/);
+  assert.equal(dev.gas.paystack.last().amount, 13000);
 
   // The link in the invoice email goes straight to Paystack, and the email leaves the address.
   await page.goto(dev.siteUrl + '/?pay=SJ-0001#jane%40example.com');
@@ -666,33 +790,44 @@ test('order page: a card payment that did not go through can be tried again', as
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', cardPay: true });
   await fakePaystackPage(page);
   await fillKiosk(page, { collect: true });
-  await page.click('#submit');
-  await page.waitForSelector('#view-done:not([hidden])');
-  await page.click('#pay-card');
+  await submitKiosk(page);
   await page.waitForURL(/checkout\.paystack\.com/);
   const tx = dev.gas.paystack.last();
-  await page.goto(dev.siteUrl + '/?reference=' + tx.reference);
+  // Back from Paystack without paying: no order number, only what is owed and Pay again.
+  await page.goto(dev.siteUrl + '/checkout/?reference=' + tx.reference);
   await page.waitForSelector('#card-error:not([hidden])');
+  assert.equal(await text(page, '#done-title'), 'Payment not completed');
+  assert.match(await text(page, '#done-sub'), /Nothing was charged\. Pay R40 below/);
   assert.match(await text(page, '#card-error'), /did not go through, so nothing was charged/);
+  assert.equal(await page.locator('#bib').isVisible(), false, 'no order number until it is paid');
   assert.equal(await page.locator('#pay-card').isEnabled(), true);
   assert.equal(await page.locator('#pay-section').isVisible(), false, 'still no bank transfer: they try the card again');
   assert.equal(orderRows(dev)[0].Status, 'Awaiting payment');
+
+  // Paying again works.
+  await page.click('#pay-card');
+  await page.waitForURL(/checkout\.paystack\.com/);
+  const again = dev.gas.paystack.last();
+  dev.gas.paystack.pay(again.reference);
+  await page.goto(dev.siteUrl + '/checkout/?reference=' + again.reference);
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await text(page, '#done-title'), 'Paid, thank you');
   noErrors(errors);
 });
 
 test('order page: card payment is offered for door delivery too, and only once it is switched on', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready', cardPay: true });
+  await fakePaystackPage(page);
   await fillKiosk(page, {});
+  await submitKiosk(page, { pay: false });
   assert.equal(await page.locator('#pay-with').isVisible(), true, 'the ways to pay show before ordering');
-  assert.equal(await text(page, '#submit'), 'Continue to pay R70');
+  assert.equal(await text(page, '#submit'), 'Pay R70 securely', 'a door delivery can be paid by card');
   await page.click('#submit');
-  await page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(await page.locator('#card-section').isVisible(), true, 'a door delivery can be paid by card');
-  assert.equal(await text(page, '#pay-card'), 'Pay R70 now');
+  await page.waitForURL(/checkout\.paystack\.com/);
 
   const off = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(off.page, { collect: true });
-  await off.page.click('#submit');
+  await submitKiosk(off.page);
   await off.page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await off.page.locator('#card-section').isHidden(), true, 'no Paystack key, no card button');
   assert.equal(await text(off.page, '#pay-title'), 'Pay by bank transfer');
@@ -702,6 +837,7 @@ test('order page: card payment is offered for door delivery too, and only once i
 test('order page: a double tap places one order', async (t) => {
   const { dev, page } = await openKiosk(t, { mode: 'ready', latency: 400 });
   await fillKiosk(page);
+  await submitKiosk(page, { pay: false });
   await page.dblclick('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(orderRows(dev).length, 1);
@@ -723,15 +859,15 @@ test('order page: a dropped connection after the order was saved does not create
     await route.continue();
   });
 
-  await page.click('#submit');
-  await page.waitForSelector('#form-error:not([hidden])');
-  assert.match(await text(page, '#form-error'), /Could not reach the order service/);
-  assert.match(await text(page, '#form-error'), /Your details are still here/);
+  await submitKiosk(page);
+  await waitFormError(page);
+  assert.match(await formError(page), /Could not reach the order service/);
+  assert.match(await formError(page), /Your details are still here/);
   assert.equal(await page.inputValue('#name'), 'Jane Doe');
   assert.equal(orderRows(dev).length, 1, 'the first attempt was saved');
 
   // Trying again sends the same request id, so the service hands back that order.
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await text(page, '#bib .bib-number'), 'SJ-0001');
   assert.equal(orderRows(dev).length, 1, 'still one order');
@@ -819,28 +955,86 @@ test('trial page: a demo copy of the order page that orders, sends and saves not
   await more.click();
   assert.equal(await more.getAttribute('aria-expanded'), 'false');
 
-  // A delivery order: the confirmation looks real, but nothing reaches the order service.
-  await fillKiosk(page, { more: 1 });
-  await page.click('#submit');
+  // The bag first: choose the gels, then Checkout. Checkout is closed until there are gels.
+  assert.equal(await page.isVisible('#checkout-step'), false);
+  assert.equal(await page.isDisabled('#to-checkout'), true);
+  await setFlavours(page, { orange: 2 });
+  assert.match(await text(page, '#bag-total'), /2 gels · R80/);
+  assert.equal(await page.isVisible('#bag-panel'), false, 'the landing looks like the live page: no bag panel yet');
+  await page.click('#to-checkout');
+  // Checkout is its own page, with its own address and a quiet header.
+  await page.waitForURL(/\/orderstrialpage\/checkout\/$/);
+  await page.waitForSelector('#checkout-step:not([hidden])');
+  assert.equal(await page.title(), 'Checkout · Supa Juice (trial)');
+  assert.equal(await page.isVisible('#bag-step'), false);
+  assert.equal(await page.locator('#co-back').getAttribute('href'), '../#order');
+  // On a phone the bag is a "Show order summary" bar at the top of checkout, which opens on tap.
+  assert.match(await text(page, '#bag-toggle'), /Show order summary\s+R/);
+  await page.click('#bag-toggle');
+  assert.match(await text(page, '#bag-panel'), /Your bag \(2\)[\s\S]*2 × Orange\s+R80/, 'the bag shows at checkout');
+  await page.click('#bag-toggle');
+
+  // Checkout in parts: delivery first. Details and payment are locked (blurred) until reached.
+  const states = () => page.$$eval('.cstep', (els) => els.map((e) => e.dataset.state).join(' '));
+  assert.equal(await states(), 'open locked locked');
+  assert.equal(await page.locator('#step-pay-body').getAttribute('inert'), '', 'the locked Pay button cannot be used');
+  await page.click('#step-delivery-next');
+  assert.match(await text(page, '#step-delivery-error'), /Choose how you would like your order/);
+  await choose(page, 'deliver');
+  await page.fill('#address', '12 Beach Rd, Sea Point');
+  await page.click('#step-delivery-next');
+  assert.equal(await states(), 'done open locked');
+  assert.match(await text(page, '#step-delivery-done'), /12 Beach Rd, Sea Point/);
+  await page.click('#step-details-next');
+  assert.match(await text(page, '#step-details-error'), /Enter your name/);
+  await page.fill('#name', 'Jane Doe');
+  assert.equal(await page.isVisible('#step-details-error'), false, 'the error goes once the customer fixes it');
+  await page.fill('#email', 'jane@example.com');
+  await page.fill('#contact', '082 123 4567');
+  await page.click('#step-details-next');
+  assert.equal(await states(), 'done done open');
+  assert.match(await text(page, '#step-details-done'), /Jane Doe · jane@example\.com · 082 123 4567/);
+  assert.equal(await text(page, '#submit'), 'Pay R110 securely', '2 x R40 + R30 delivery');
+  // Change reopens a part; payment waits until it is finished again.
+  await page.click('#step-details-change');
+  assert.equal(await states(), 'done open locked');
+  await page.click('#step-details-next');
+  assert.equal(await states(), 'done done open');
+  assert.match(await text(page, '#next-note'), /order number comes once the payment goes through/);
+
+  // Cancelling the payment goes back to checkout: no order number, everything still filled in.
+  await submitKiosk(page);
+  await page.waitForSelector('.demo-pay');
+  await page.click('#demo-pay-cancel');
+  await waitFormError(page);
+  assert.match(await formError(page), /Payment cancelled\. Nothing was charged/);
+  assert.equal(await page.isVisible('#view-done'), false, 'no order number shown');
+  assert.equal(await page.inputValue('#name'), 'Jane Doe');
+
+  // Paying shows the order number, for the first time, as paid.
+  await submitKiosk(page);
+  await page.waitForSelector('.demo-pay');
+  await page.click('#demo-pay-ok');
   await page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(await text(page, '#bib .bib-number'), 'DEMO-01');
-  assert.match(await text(page, '#view-done'), /R110/, 'the total the page showed: 2 x R40 + R30');
+  assert.equal(await text(page, '#done-title'), 'Paid, thank you');
+  assert.match(await text(page, '#bib .bib-number'), /^DEMO-\d+$/);
+  assert.equal(await page.isVisible('#card-section'), false, 'nothing left to pay');
   assert.equal(orderRows(dev).length, 0, 'no order in the Sheet');
   assert.equal(dev.gas.mail.length, mailBefore, 'no email');
-  assert.ok(!dev.calls.some((c) => c.action === 'order' || c.action === 'startPayment'), 'nothing was sent to place an order');
+  assert.ok(!dev.calls.some((c) => c.action === 'order' || c.action === 'startPayment'), 'nothing was sent to place or pay an order');
+  assert.equal(dev.gas.paystack.requests.length, 0, 'Paystack is never asked');
   assert.ok(dev.calls.some((c) => c.action === 'config'), 'the live prices and times are read');
 
-  // A collection, then card payment, which is switched off on the demo.
+  // Another order starts again on the landing, with an empty bag.
   await page.click('#new-order');
-  await fillKiosk(page, { collect: true });
-  await page.click('#submit');
-  await page.waitForSelector('#view-done:not([hidden])');
-  assert.equal(await text(page, '#bib .bib-number'), 'DEMO-02');
-  await page.click('#pay-card');
-  await page.waitForSelector('#card-error:not([hidden])');
-  assert.match(await text(page, '#card-error'), /trial page[\s\S]*Nothing was charged/);
-  assert.equal(dev.gas.paystack.requests.length, 0, 'Paystack is never asked');
-  assert.equal(orderRows(dev).length, 0);
+  await page.waitForURL(/\/orderstrialpage\/#order$/);
+  await page.waitForSelector('#bag-step:not([hidden])');
+  assert.equal(await page.isVisible('#checkout-step'), false);
+  assert.match(await text(page, '#bag-total'), /empty/);
+
+  // Checkout without a bag goes back to the landing to choose gels.
+  await page.goto(dev.siteUrl + '/orderstrialpage/checkout/');
+  await page.waitForURL(/\/orderstrialpage\/#order$/);
 
   // The shared images and fonts load from the main site.
   await page.waitForFunction(() => document.querySelector('#ig-float img') && document.querySelector('#ig-float img').naturalWidth > 0);
@@ -861,12 +1055,80 @@ test('trial page: a demo copy of the order page that orders, sends and saves not
   assert.deepEqual(errors, []);
 });
 
+test('trial page: a payment window, and what happens to a payment that comes in late', async (t) => {
+  const { dev, page } = await open(t, { mode: 'ready', cardPay: true });
+  const toPay = async (query) => {
+    await page.goto(dev.siteUrl + '/orderstrialpage/' + query);
+    await page.waitForSelector('#order-form:not([hidden])');
+    await setFlavours(page, { orange: 2 });
+    await page.click('#to-checkout');
+    await page.waitForURL(/\/checkout\//);
+    await trialCheckout(page);
+  };
+
+  // A normal window: 15 minutes, shown on the page and on the payment sheet.
+  await toPay('');
+  assert.match(await text(page, '#pay-with .paywith-note'), /You have 15 minutes to complete it/);
+  await submitKiosk(page);
+  await page.waitForSelector('.demo-pay');
+  assert.match(await text(page, '#pay-window'), /Complete your payment within 1[45]:\d\d/);
+  assert.match(await text(page, '#demo-pay-timer'), /Time left to pay: 1[45]:\d\d/);
+  await page.click('#demo-pay-ok');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.equal(await page.isVisible('#pay-window'), false, 'the countdown stops once paid');
+
+  // Time runs out: the payment closes and nothing is charged. A late payment that can still be honoured goes through.
+  await toPay('?window=5');
+  assert.equal(new URL(page.url()).search, '?window=5', 'the trial setting travels to checkout');
+  await submitKiosk(page);
+  await page.waitForSelector('.demo-pay');
+  await page.waitForSelector('#pay-expired:not([hidden])', { timeout: 15000 });
+  assert.equal(await page.locator('.demo-pay').count(), 0, 'the payment sheet closed');
+  assert.match(await text(page, '#pay-expired'), /payment window has closed[\s\S]*nothing was charged/i);
+  await page.click('#late-same');
+  await page.waitForSelector('#view-done:not([hidden])');
+  assert.match(await text(page, '#done-sub'), /came in after the payment window closed, but nothing had changed/);
+
+  // A late payment that can't be honoured is refunded.
+  await toPay('?window=5');
+  await submitKiosk(page);
+  await page.waitForSelector('#pay-expired:not([hidden])', { timeout: 15000 });
+  await page.click('#late-changed');
+  await page.waitForSelector('#view-closed:not([hidden])');
+  assert.equal(await text(page, '#closed-title'), 'Your payment was refunded');
+  assert.match(await text(page, '#closed-text'), /collection time had been taken/);
+
+  // The strict setting refunds every late payment.
+  await toPay('?window=5&late=refund');
+  await submitKiosk(page);
+  await page.waitForSelector('#pay-expired:not([hidden])', { timeout: 15000 });
+  await page.click('#late-same');
+  await page.waitForSelector('#view-closed:not([hidden])');
+  assert.equal(await text(page, '#closed-title'), 'Your payment was refunded');
+  assert.ok(!dev.calls.some((c) => c.action === 'order' || c.action === 'startPayment'), 'all in the demo: nothing sent');
+});
+
+test('trial page: without demo mode it refuses to place anything', async (t) => {
+  const { dev, page } = await open(t, { mode: 'ready', cardPay: true });
+  await page.route(/demo\.js/, (route) => route.fulfill({ status: 404, body: '' }));
+  await page.goto(dev.siteUrl + '/orderstrialpage/');
+  await page.waitForSelector('#order-form:not([hidden])');
+  await setFlavours(page, { orange: 2 });
+  await page.click('#to-checkout');
+  await trialCheckout(page);
+  await submitKiosk(page);
+  await waitFormError(page);
+  assert.match(await formError(page), /not in demo mode/);
+  assert.ok(!dev.calls.some((c) => c.action === 'order' || c.action === 'startPayment'));
+  assert.equal(orderRows(dev).length, 0);
+});
+
 test('order page: a failed connection keeps the details and offers a DM', async (t) => {
   const { page } = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(page);
   await page.route('**/exec', (route) => (route.request().method() === 'POST' ? route.abort('failed') : route.continue()));
-  await page.click('#submit');
-  await page.waitForSelector('#form-error:not([hidden])');
+  await submitKiosk(page);
+  await waitFormError(page);
   const link = page.locator('#form-error a');
   assert.equal(await link.getAttribute('href'), 'https://www.instagram.com/supajuice.co/');
   assert.equal(await page.inputValue('#address'), '12 Beach Rd, Sea Point');
@@ -879,9 +1141,9 @@ test('order page: an unexpected reply from the service is explained', async (t) 
   await page.route('**/exec', (route) => (route.request().method() === 'POST'
     ? route.fulfill({ status: 200, contentType: 'text/html', body: '<html>Please sign in</html>' })
     : route.continue()));
-  await page.click('#submit');
-  await page.waitForSelector('#form-error:not([hidden])');
-  assert.match(await text(page, '#form-error'), /sent back something unexpected/);
+  await submitKiosk(page);
+  await waitFormError(page);
+  assert.match(await formError(page), /sent back something unexpected/);
 });
 
 test('order page: if the price changed while the form was open, the customer sees the new total first', async (t) => {
@@ -891,13 +1153,13 @@ test('order page: if the price changed while the form was open, the customer see
 
   dev.gas.call({ action: 'saveSettings', key: dev.key, values: { price: '50' } });
 
-  await page.click('#submit');
-  await page.waitForSelector('#form-error:not([hidden])');
-  assert.match(await text(page, '#form-error'), /price has just changed/);
+  await submitKiosk(page);
+  await waitFormError(page);
+  assert.match(await formError(page), /price has just changed/);
   assert.equal(await text(page, '#submit'), 'Place order for R130');
   assert.equal(orderRows(dev).length, 0, 'nothing was ordered at the old price');
 
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.match(await text(page, '#done-sub'), /Pay R130/);
   assert.equal(orderRows(dev)[0].Total, 130);
@@ -934,8 +1196,8 @@ test('order page: when the service is down the page can be retried', async (t) =
   down = false;
   await page.click('#closed-retry');
   await page.waitForSelector('#order-form:not([hidden])');
+  await toCheckout(page, { orange: 1 });
   await choose(page, 'deliver');
-  await page.click('[aria-label="One more Orange"]');
   assert.equal(await text(page, '#submit'), 'Place order for R70');
 });
 
@@ -943,9 +1205,9 @@ test('order page: a bot that fills the hidden field is turned away', async (t) =
   const { dev, page } = await openKiosk(t, { mode: 'ready' });
   await fillKiosk(page);
   await page.evaluate(() => { document.getElementById('website').value = 'http://spam.example'; });
-  await page.click('#submit');
-  await page.waitForSelector('#form-error:not([hidden])');
-  assert.match(await text(page, '#form-error'), /Could not place the order/);
+  await submitKiosk(page);
+  await waitFormError(page);
+  assert.match(await formError(page), /Could not place the order/);
   assert.equal(orderRows(dev).length, 0);
 });
 
@@ -1560,7 +1822,7 @@ test('admin: Greg adds a photo, it is made smaller on the phone, and the order p
 
   // The photo belongs to the form: it is not shown with the order confirmation.
   await fillKiosk(customer);
-  await customer.click('#submit');
+  await submitKiosk(customer);
   await customer.waitForSelector('#view-done:not([hidden])');
   assert.equal(await customer.locator('#photo').isHidden(), true);
   noErrors(errors);
@@ -2232,10 +2494,9 @@ test('admin: unticking "Confirm the delivery fee" charges the fee straight away 
 
   const customer = await page.context().newPage();
   await customer.goto(kioskUrl(dev));
-  await customer.waitForSelector('#order-form:not([hidden])');
+  await toCheckout(customer, { orange: 1 });
   assert.equal(await customer.locator('#choose-deliver-sub').innerText(), 'R30');
   await choose(customer, 'deliver');
-  await customer.click('[aria-label="One more Orange"]');
   assert.equal(await customer.locator('#submit').innerText(), 'Place order for R70');
   noErrors(errors);
 });
@@ -2355,8 +2616,8 @@ test('admin: saving settings changes what customers see and what the invoices sa
   await customer.waitForSelector('#order-form:not([hidden])');
   assert.equal(await customer.locator('#brand').textContent(), 'Supa Juice Co');
   assert.equal(await page.locator('#s-delivery_area').count(), 0, 'there is no area for Maps any more');
+  await toCheckout(customer, { orange: 1 });
   await choose(customer, 'deliver');
-  await customer.click('[aria-label="One more Orange"]');
   assert.equal(await customer.locator('#submit').innerText(), 'Place order for R45');
   noErrors(errors);
 });
@@ -2420,7 +2681,7 @@ const NO_STORAGE = () => {
 test('storage blocked: the order page still takes an order', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', init: NO_STORAGE });
   await fillKiosk(page);
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(await text(page, '#bib .bib-number'), 'SJ-0001');
   assert.equal(orderRows(dev).length, 1);
@@ -2549,7 +2810,7 @@ async function everyScreen(t, scheme, check) {
   await k.page.waitForSelector('#order-form:not([hidden])');
   await run(k.page, 'order page: form');
   await fillKiosk(k.page, { more: 1 });
-  await k.page.click('#submit');
+  await submitKiosk(k.page);
   await k.page.waitForSelector('#view-done:not([hidden])');
   await k.page.waitForTimeout(600);
   await run(k.page, 'order page: confirmation');
@@ -2632,7 +2893,7 @@ for (const width of [320, 390, 768, 1280]) {
     await k.page.waitForSelector('#order-form:not([hidden])');
     bad.push(['form', await over(k.page)]);
     await fillKiosk(k.page, { name: 'A Very Long Name That Keeps Going And Going Without Any Break', address: 'Unit 1204, The Extraordinarily Long Building Name, 123456789 Very Long Street Name' });
-    await k.page.click('#submit');
+    await submitKiosk(k.page);
     await k.page.waitForSelector('#view-done:not([hidden])');
     bad.push(['confirmation', await over(k.page)]);
 
@@ -2678,7 +2939,9 @@ test('order page: a percent code comes off the sachets and is saved on the order
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
   await withCodes(dev, page, 'RUN10 10 on, OLD20 20 off');
   await fillKiosk(page, { more: 2 }); // 3 sachets
+  await toDetails(page);
   assert.equal(await page.locator('#code-field').isVisible(), true);
+  await showBag(page);
 
   await page.fill('#code', 'old20');
   await page.click('#code-apply');
@@ -2693,7 +2956,7 @@ test('order page: a percent code comes off the sachets and is saved on the order
   assert.match(await text(page, '#summary'), /Total\s+R138/);
   assert.equal(await text(page, '#submit'), 'Place order for R138');
 
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   const row = orderRows(dev)[0];
   assert.equal(row['Discount code'], 'RUN10');
@@ -2705,10 +2968,12 @@ test('order page: a typed code is checked when ordering, and Remove takes it off
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready' });
   await withCodes(dev, page, 'FREESHIP delivery on');
   await fillKiosk(page);
+  await toDetails(page);
+  await showBag(page);
   await page.fill('#code', 'nope');
-  await page.click('#submit');
-  await page.waitForSelector('#form-error:not([hidden])');
-  assert.match(await text(page, '#form-error'), /Check your discount code/);
+  await submitKiosk(page);
+  await waitFormError(page);
+  assert.match(await formError(page), /Check your discount code/);
   assert.equal(orderRows(dev).length, 0);
 
   await page.fill('#code', 'freeship');
@@ -2720,7 +2985,7 @@ test('order page: a typed code is checked when ordering, and Remove takes it off
   assert.equal(await page.inputValue('#code'), '');
 
   await page.fill('#code', 'FREESHIP');
-  await page.click('#submit'); // applied on the way
+  await submitKiosk(page); // applied on the way
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(orderRows(dev)[0]['Delivery fee'], 0);
   assert.equal(orderRows(dev)[0]['Free delivery'], 'yes');
@@ -2994,39 +3259,41 @@ async function fillCourier(page, over) {
 test('order page: the door price comes from The Courier Guy for the address, and is paid on the page', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', cardPay: true, courier: true });
   await fakePaystackPage(page);
+  await toCheckout(page, { orange: 1 });
   await choose(page, 'deliver');
   assert.match(await text(page, '#chosen-text'), /Deliver to your door/);
   assert.equal(await page.locator('#door-fields').isVisible(), true, 'the address in parts');
   assert.equal(await page.locator('#address-field').isHidden(), true);
   assert.match(await text(page, '#ship-sub'), /Enter your address to see the delivery price/);
-  await setFlavours(page, { orange: 1 });
   assert.equal(await text(page, '#submit'), 'Place order for R40 + delivery');
 
-  await fillCourier(page, { unit: 'Flat 4' });
+  await fillDoor(page, { unit: 'Flat 4' });
   await page.waitForSelector('.ship-card--ok');
   assert.equal(await text(page, '#ship-name'), 'The Courier Guy · Economy');
   assert.equal(await text(page, '#ship-sub'), 'To your door in 3 to 5 working days', 'a range, never an exact date');
   assert.equal(await text(page, '#ship-fee'), 'R90');
+  await showBag(page);
   assert.match(await text(page, '#summary'), /Delivery to your door\s+R90/);
-  assert.equal(await text(page, '#submit'), 'Continue to pay R130');
-  assert.equal(await page.locator('#pay-with').isVisible(), true);
+  assert.equal(await text(page, '#submit'), 'Pay R130 securely');
 
-  // More gels go in a bigger box, so the price is asked for again.
-  await page.click('[aria-label="One more Orange"]');
+  // More gels go in a bigger box, so the price is asked for again. The address is remembered.
+  await rebag(page, { orange: 2 });
+  assert.equal(await page.inputValue('#door-street'), '12 Beach Rd', 'what was typed is still there');
   await page.waitForSelector('.ship-card--ok');
   assert.equal(dev.gas.courier.requests.length, 2);
 
+  await setField(page, 'name', 'Jane Doe');
+  await setField(page, 'email', 'jane@example.com');
+  await setField(page, 'contact', '082 123 4567');
+  await submitKiosk(page, { pay: false });
+  assert.match(await text(page, '#step-delivery-done'), /Flat 4, 12 Beach Rd, Sea Point, Cape Town, 8005 · R90/);
   await page.click('#submit');
-  await page.waitForSelector('#view-done:not([hidden])');
+  await page.waitForURL(/checkout\.paystack\.com/);
   const row = orderRows(dev)[0];
   assert.equal(row.Status, 'Awaiting payment', 'no waiting for a fee');
   assert.equal(row.Address, 'Flat 4, 12 Beach Rd, Sea Point, Cape Town, 8005');
   assert.equal(row['Delivery fee'], 90);
   assert.equal(row.Total, 170);
-  assert.equal(await text(page, '#pay-card'), 'Pay R170 now');
-
-  await page.click('#pay-card');
-  await page.waitForURL(/checkout\.paystack\.com/);
   assert.equal(dev.gas.paystack.last().amount, 17000);
   noErrors(errors);
 });
@@ -3039,15 +3306,16 @@ test('order page: a door address The Courier Guy cannot price is sent for Greg t
   assert.equal(await page.locator('#ship-retry').isVisible(), true);
   assert.equal(await text(page, '#submit'), 'Send order for R40 + delivery');
   assert.equal(await page.locator('#pay-with').isHidden(), true, 'nothing to pay yet');
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(orderRows(dev)[0].Status, 'New request');
 
-  // Fixing the address gets a price again.
+  // A corrected address gets a price.
   await page.click('#new-order');
+  await page.waitForSelector('#bag-step:not([hidden])');
+  await toCheckout(page, { orange: 2 });
   await choose(page, 'deliver');
-  assert.match(await text(page, '#ship-sub'), /Choose your gels to see the delivery price/, 'the address is still there');
-  await setFlavours(page, { orange: 2 });
+  assert.match(await text(page, '#ship-sub'), /Enter your address to see the delivery price/, 'a new order starts afresh');
   await fillDoor(page, { code: '8005' });
   await page.waitForSelector('.ship-card--ok');
   noErrors(errors);
@@ -3058,8 +3326,8 @@ test('order page: the whole door address is needed, and an order placed while it
   await fillKiosk(page, { address: '' });
   assert.equal(await page.inputValue('#door-province'), '', 'the province is chosen, not assumed');
   const tries = async (message, focus) => {
-    await page.click('#submit');
-    assert.match(await text(page, '#form-error'), message);
+    await submitKiosk(page);
+    assert.match(await formError(page), message);
     assert.equal(await page.evaluate(() => document.activeElement.id), focus);
   };
   await tries(/type of address/, 'door-kind-house');
@@ -3087,12 +3355,13 @@ test('order page: the whole door address is needed, and an order placed while it
   await page.fill('#door-code', '80');
   await page.selectOption('#door-province', 'Western Cape');
 
-  // Typed quickly and placed straight away: the price is shown first, then the order goes in.
+  // Typed quickly and continued straight away: Delivery waits for the price, so it is shown before paying.
   dev.setLatency(300);
   await page.fill('#door-code', '8005');
-  await page.click('#submit');
-  await page.waitForSelector('.ship-card--ok');
-  assert.match(await text(page, '#form-error'), /Your delivery price is R90/);
+  await submitKiosk(page, { pay: false });
+  await page.waitForSelector('.ship-card--ok', { state: 'attached' }); // folded away with Delivery, once done
+  assert.match(await text(page, '#step-delivery-done'), /· R90/);
+  assert.equal(await text(page, '#submit'), 'Place order for R130');
   assert.equal(dev.gas.rows('Orders').length, 0);
   await page.click('#submit');
   await page.waitForSelector('#view-done:not([hidden])');
@@ -3107,13 +3376,13 @@ test('order page: a Courier Guy price that changed before ordering is shown befo
   // The courier's price goes up, and the kept price runs out.
   dev.gas.courier.rates = () => [{ rate: 99.2, service_level: { name: 'Economy' } }];
   dev.gas.cacheStore.clear();
-  await page.click('#submit');
-  await page.waitForSelector('#form-error:not([hidden])');
-  assert.match(await text(page, '#form-error'), /now R100/);
+  await submitKiosk(page);
+  await waitFormError(page);
+  assert.match(await formError(page), /now R100/);
   assert.equal(await text(page, '#ship-fee'), 'R100');
   assert.equal(await text(page, '#submit'), 'Place order for R140');
   assert.equal(dev.gas.rows('Orders').length, 0);
-  await page.click('#submit');
+  await submitKiosk(page);
   await page.waitForSelector('#view-done:not([hidden])');
   assert.equal(orderRows(dev)[0].Total, 140);
   noErrors(errors);
@@ -3121,12 +3390,13 @@ test('order page: a Courier Guy price that changed before ordering is shown befo
 
 test('order page: with card payments, Greg is not emailed until it is paid, and there is no bank transfer to pick', async (t) => {
   const { dev, page, errors } = await openKiosk(t, { mode: 'ready', cardPay: true });
+  await fakePaystackPage(page);
   await fillKiosk(page, {});
   assert.doesNotMatch(await text(page, '#pay-with'), /EFT|bank transfer/i);
-  await page.click('#submit');
-  await page.waitForSelector('#view-done:not([hidden])');
+  await submitKiosk(page);
+  await page.waitForURL(/checkout\.paystack\.com/);
   const toGreg = () => dev.gas.mail.filter((m) => m.to === 'greg@example.com');
   assert.equal(toGreg().length, 0, 'not paid yet: nothing to pack');
-  assert.equal(await page.locator('#pay-section').isVisible(), false, 'no bank transfer option');
   noErrors(errors);
 });
+

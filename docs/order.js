@@ -98,8 +98,8 @@
   function showView(id) {
     VIEWS.forEach(function (v) { $(v).hidden = v !== id; });
     // "Order below..." and the photo only make sense above the form.
-    $('lede').hidden = id !== 'order-form';
-    $('photo').hidden = !photo || id !== 'order-form';
+    $('lede').hidden = id !== 'order-form' || step !== 'bag';
+    $('photo').hidden = !photo || id !== 'order-form' || step !== 'bag';
     // After ordering (or while a card payment is checked) the invoice takes over the page.
     document.body.classList.toggle('shop--done', id === 'view-done' || (id === 'view-loading' && !!returnedReference()));
   }
@@ -146,12 +146,351 @@
 
   // ---------- Form ----------
 
+  // ---------- Steps: the bag, then a checkout in parts ----------
+  //
+  // 1. The bag: choose the gels, see the total, tap Checkout (the landing looks like the live page).
+  // 2. Checkout, one part at a time, like big online shops:
+  //      Delivery      how to get it and what that needs (collection time, or the address)
+  //      Your details  name, email, phone, notes, discount code
+  //      Payment       one Pay button, straight to the secure payment page
+  //    Parts not reached yet are blurred and can't be used. A finished part folds into one line
+  //    with Change. The bag sits on the right (on a phone, a "Show order summary" bar at the top).
+  //    The order number is shown only once paid.
+
+  // Two pages: this landing page (the bag) and checkout/ (its own address, like big online shops).
+  // Payment goes to Paystack's secure page and comes back to checkout/.
+  // The bag travels between them in this browser tab only (sessionStorage): just the gel counts.
+  var ON_CHECKOUT = document.body.getAttribute('data-page') === 'checkout';
+  var BAG_KEY = 'sj_bag';
+  var bagApplied = false;
+
+  function saveBag() {
+    try { sessionStorage.setItem(BAG_KEY, JSON.stringify({ flavours: stepper.get() })); } catch (err) { /* private browsing */ }
+  }
+  function readBag() {
+    try { return JSON.parse(sessionStorage.getItem(BAG_KEY) || 'null'); } catch (err) { return null; }
+  }
+  function clearBag() {
+    try {
+      sessionStorage.removeItem(BAG_KEY);
+      sessionStorage.removeItem(FORM_KEY);
+    } catch (err) { /* private browsing */ }
+  }
+
+  // What was typed at checkout, kept for this browser tab only, so going back to the bag (Edit, or
+  // the Back button) and returning loses nothing. Cleared once the order is placed.
+  var FORM_KEY = BAG_KEY + '_form';
+  var FORM_FIELDS = ['name', 'email', 'contact', 'notes', 'address', 'door-street', 'door-unit', 'door-suburb', 'door-city', 'door-code', 'door-province'];
+
+  function saveForm() {
+    if (!ON_CHECKOUT) return;
+    var f = { choice: choice, day: $('collect-day').value, hour: $('collect-hour').value, kind: doorKind(), fields: {} };
+    FORM_FIELDS.forEach(function (id) { f.fields[id] = $(id).value; });
+    try { sessionStorage.setItem(FORM_KEY, JSON.stringify(f)); } catch (err) { /* private browsing */ }
+  }
+
+  function restoreForm() {
+    var f = null;
+    try { f = JSON.parse(sessionStorage.getItem(FORM_KEY) || 'null'); } catch (err) { f = null; }
+    if (!f || typeof f !== 'object') return;
+    FORM_FIELDS.forEach(function (id) {
+      if (f.fields && typeof f.fields[id] === 'string' && !$(id).value) $(id).value = f.fields[id];
+    });
+    if (f.kind && $('door-kind-' + f.kind)) {
+      $('door-kind-' + f.kind).checked = true;
+      syncDoorKind();
+    }
+    if (f.choice === 'collect' || f.choice === 'deliver' || f.choice === 'locker') {
+      choice = f.choice;
+      syncFulfil();
+    }
+    // The collection time, if it is still free.
+    if (f.day && Array.prototype.some.call($('collect-day').options, function (o) { return o.value === f.day; })) {
+      $('collect-day').value = f.day;
+      fillTimes(f.hour || '');
+    }
+    renderTotals();
+    if (courierOn()) askShip(true);
+  }
+  function toLanding() {
+    location.href = ON_CHECKOUT ? '../#order' : '#order';
+  }
+
+  // The landing shows the bag again (after Back or Edit). Checkout takes its gels from it, and sends
+  // anyone without a bag back to choose some.
+  function applyBag() {
+    if (bagApplied || !stepper) return;
+    var bag = readBag();
+    if (!ON_CHECKOUT) {
+      if (bag && bag.flavours) stepper.set(bag.flavours);
+      bagApplied = true;
+      return;
+    }
+    if (!bag || !bag.flavours) {
+      if (!SJ.store.get(LAST_KEY)) location.replace('../#order'); // else init shows the order just placed
+      return;
+    }
+    stepper.set(bag.flavours);
+    if (stepper.total() < stepper.min() || stepper.total() > stepper.max()) { location.replace('../#order'); return; }
+    bagApplied = true;
+    showStep('checkout', false);
+    restoreForm();
+    // The Meta Pixel (pixel.js): someone started checkout, with what is in the bag.
+    if (typeof window.fbq === 'function') {
+      try {
+        window.fbq('track', 'InitiateCheckout', { value: bagTotal(), currency: 'ZAR', num_items: stepper.total() });
+      } catch (err) { /* never let tracking get in the way */ }
+    }
+  }
+
+  var step = 'bag';           // 'bag' or 'checkout'
+  var part = 'delivery';      // the open part of checkout: 'delivery', 'details' or 'pay'
+  var partDone = { delivery: false, details: false };
+  var PARTS = ['delivery', 'details', 'pay'];
+
+  function bagTotal() {
+    return SJ.totalFor(stepper.total(), config.price, 0, 0);
+  }
+
+  function renderBag() {
+    if (!config || !stepper) return;
+    var qty = stepper.total();
+    var sym = config.currency;
+    var min = stepper.min();
+    var max = stepper.max();
+    var lines = SJ.clear($('bag-lines'));
+    var picked = stepper.get();
+    stepper.list.forEach(function (f) {
+      var n = picked[f.key] || 0;
+      if (!n) return;
+      lines.appendChild(el('li', { class: 'bag-line' },
+        el('span', { class: 'bag-line-dot bag-line-dot--' + f.key, 'aria-hidden': 'true' }),
+        el('span', { class: 'bag-line-name' }, n + ' × ' + f.name),
+        el('span', { class: 'bag-line-price' }, SJ.money(SJ.totalFor(n, config.price, 0, 0), sym))));
+    });
+    if (!qty) lines.appendChild(el('li', { class: 'bag-line bag-line--empty' }, 'Your bag is empty. Choose your gels.'));
+
+    $('bag-total').textContent = qty === 0 ? 'Your bag is empty'
+      : qty + (qty === 1 ? ' gel' : ' gels') + ' · ' + SJ.money(bagTotal(), sym);
+    var btn = $('to-checkout');
+    btn.disabled = qty < min || qty > max;
+    btn.textContent = qty === 0 ? 'Choose your gels'
+      : qty < min ? 'Add ' + (min - qty) + ' more (at least ' + min + ')'
+      : qty > max ? 'At most ' + max + ' gels per order'
+      : 'Checkout';
+    $('bag-panel-title').textContent = qty ? 'Your bag (' + qty + ')' : 'Your bag';
+  }
+
+  function showStep(next, focus) {
+    step = next;
+    var checkout = next === 'checkout';
+    $('bag-step').hidden = checkout;
+    $('checkout-step').hidden = !checkout;
+    $('lede').hidden = checkout;
+    $('photo').hidden = !photo || checkout;
+    $('order-form').classList.toggle('in-checkout', checkout);
+    $('bag-edit').hidden = !checkout;
+    openSummary(false);
+    if (checkout) {
+      // Start at the first part that isn't finished.
+      part = !partDone.delivery ? 'delivery' : !partDone.details ? 'details' : 'pay';
+      renderParts();
+    }
+    renderBag();
+    renderTotals();
+    if (focus === false) return;
+    $('order').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (checkout) $('step-' + part + '-title').focus({ preventScroll: true });
+  }
+
+  // On a phone, the order summary at checkout folds into one bar.
+  function openSummary(open) {
+    $('bag-panel').classList.toggle('bagpanel--open', open);
+    $('bag-toggle').setAttribute('aria-expanded', String(open));
+    $('bag-toggle-text').textContent = open ? 'Hide order summary' : 'Show order summary';
+  }
+
+  // Each part: open (being filled in), done (folded, with Change) or locked (blurred, not reached).
+  function renderParts() {
+    PARTS.forEach(function (k) {
+      var state = k === part ? 'open' : (k !== 'pay' && partDone[k]) ? 'done' : 'locked';
+      var box = $('step-' + k);
+      var body = $('step-' + k + '-body');
+      box.setAttribute('data-state', state);
+      box.querySelector('.cstep-num').textContent = state === 'done' ? '✓' : String(PARTS.indexOf(k) + 1);
+      body.hidden = state === 'done';
+      if (state === 'locked') body.setAttribute('inert', '');
+      else body.removeAttribute('inert');
+      $('step-' + k + '-done').hidden = state !== 'done';
+      $('step-' + k + '-change').hidden = state !== 'done';
+      if (state === 'done') $('step-' + k + '-done').textContent = partSummary(k);
+    });
+  }
+
+  function partSummary(k) {
+    var d = readForm();
+    var sym = config.currency;
+    if (k === 'details') return [d.name, d.email, d.contact].filter(Boolean).join(' · ');
+    if (d.collect) {
+      var place = config.collectNote ? ' from ' + config.collectNote : '';
+      return 'Free collection' + place + (d.collectAt ? ', ' + SJ.formatWhen(d.collectAt) : '');
+    }
+    if (courierOn()) {
+      var fee = shipFee();
+      return 'To your door: ' + doorLine(d.door) + (fee === null ? '' : ' · ' + SJ.money(fee, sym));
+    }
+    if (choice === 'locker') return 'Pudo locker nearest ' + d.address;
+    return 'To your door: ' + d.address;
+  }
+
+  function partError(k, message) {
+    var box = $('step-' + k + '-error');
+    box.textContent = message || '';
+    box.hidden = !message;
+  }
+
+  // What the delivery part still needs: { id, message }, or null.
+  function deliveryProblem(d) {
+    if (!choice) return { id: 'choose-collect', message: 'Choose how you would like your order: collect, to your door or to a Pudo locker.' };
+    if (d.collect && slotsOn()) {
+      if (!config.collectSlots.length) return { id: 'choose-change', message: 'No collection times are free right now. Choose delivery, or send us a DM.' };
+      if (!$('collect-day').value) return { id: 'collect-day', message: 'Pick a day to collect.' };
+      if (!d.collectAt) return { id: 'collect-hour', message: 'Pick a time to collect.' };
+    }
+    if (pudoOn() && pudoFee() === null) return { id: 'choose-change', message: 'For more than ' + pudoMax() + ' sachets, please send us a DM and we will arrange delivery.' };
+    if (d.collect) return null;
+    if (d.door) return doorProblem(d.door);
+    if (d.ship === 'locker') return d.address ? null : { id: 'address', message: 'Enter your address so we can pick the Pudo locker nearest to you.' };
+    return d.address ? null : { id: 'address', message: 'Enter your delivery address.' };
+  }
+
+  // What the details part still needs: { id, message }, or null.
+  function detailsProblem(d) {
+    if (!d.name) return { id: 'name', message: 'Enter your name.' };
+    if (!d.email) return { id: 'email', message: 'Enter your email address so we can send your invoice.' };
+    if (!SJ.isEmail(d.email)) return { id: 'email', message: 'Check your email address. It should look like name@example.com.' };
+    if (!d.contact) return { id: 'contact', message: 'Enter your phone number.' };
+    if (!isPhone(d.contact)) return { id: 'contact', message: 'Check your phone number. It should look like 082 123 4567.' };
+    return null;
+  }
+
+  // Which part a field is in, for errors found when paying.
+  function partOf(id) {
+    if (/^(name|email|contact|notes|code)$/.test(id)) return 'details';
+    return 'delivery';
+  }
+
+  function openPart(k, focusId) {
+    part = k;
+    PARTS.forEach(function (x) { if (x !== 'pay') partError(x, ''); });
+    renderParts();
+    renderTotals();
+    var box = $('step-' + k);
+    box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    var target = focusId && $(focusId) ? $(focusId) : $('step-' + k + '-title');
+    target.focus({ preventScroll: true });
+  }
+
+  async function finishDelivery() {
+    var d = readForm();
+    var problem = deliveryProblem(d);
+    if (!problem && courierOn() && !freeDeliveryCode() && ship.status !== 'ok' && ship.status !== 'error') {
+      // The door price comes from The Courier Guy: wait for it, so the next parts show the real total.
+      $('step-delivery-next').disabled = true;
+      $('step-delivery-next').textContent = 'Getting your delivery price…';
+      askShip(true);
+      try { if (shipAsk) await shipAsk; } catch (err) { /* shown on the delivery card */ }
+      $('step-delivery-next').disabled = false;
+      $('step-delivery-next').textContent = 'Continue';
+      if (ship.status !== 'ok' && ship.status !== 'error') problem = { id: 'door-street', message: 'Check your address so we can work out the delivery price.' };
+    }
+    if (problem) {
+      partError('delivery', problem.message);
+      if ($(problem.id)) $(problem.id).focus();
+      return;
+    }
+    partError('delivery', '');
+    partDone.delivery = true;
+    openPart(partDone.details ? 'pay' : 'details');
+  }
+
+  async function finishDetails() {
+    // A code typed but not applied is checked first, so it is never silently left out.
+    var typedCode = $('code').value.trim();
+    if (!$('code-field').hidden && typedCode && !(discount && discount.code === typedCode.toUpperCase())) {
+      if (!(await applyCode())) {
+        partError('details', 'Check your discount code, or clear it to carry on without one.');
+        $('code').focus();
+        return;
+      }
+    }
+    var problem = detailsProblem(readForm());
+    if (problem) {
+      partError('details', problem.message);
+      $(problem.id).focus();
+      return;
+    }
+    partError('details', '');
+    partDone.details = true;
+    openPart(partDone.delivery ? 'pay' : 'delivery');
+  }
+
+  // Changing an earlier part: it opens, and payment waits until it is finished again.
+  function changePart(k) {
+    partDone[k] = false;
+    hideError();
+    openPart(k);
+  }
+
   function buildForm() {
     stepper = SJ.flavourPicker({ id: 'qty', list: SJ.flavoursFor(config), legend: 'Choose your flavours' });
     $('qty-slot').appendChild(stepper.node);
     stepper.onChange(function () {
+      renderBag();
       renderTotals();
       if (courierOn()) askShip(true);
+    });
+    $('to-checkout').addEventListener('click', function () {
+      if (stepper.total() < stepper.min() || stepper.total() > stepper.max()) return;
+      saveBag();
+      location.href = 'checkout/';
+    });
+    $('bag-edit').addEventListener('click', function () {
+      saveBag();
+      toLanding();
+    });
+    // Checkout remembers what is typed (see saveForm).
+    $('checkout-step').addEventListener('input', saveForm);
+    $('checkout-step').addEventListener('change', saveForm);
+    $('checkout-step').addEventListener('click', function (ev) {
+      if (ev.target.closest && ev.target.closest('.choose-btn, #choose-change')) setTimeout(saveForm, 0);
+    });
+    $('bag-toggle').addEventListener('click', function () {
+      openSummary(!$('bag-panel').classList.contains('bagpanel--open'));
+    });
+    $('step-delivery-next').addEventListener('click', function () { finishDelivery(); });
+    // An error goes away as soon as the customer starts fixing it.
+    ['delivery', 'details'].forEach(function (k) {
+      var body = $('step-' + k + '-body');
+      var clearIt = function (ev) {
+        if (ev.type === 'click' && !(ev.target.closest && ev.target.closest('.choose-btn, #choose-change'))) return;
+        partError(k, '');
+      };
+      body.addEventListener('input', clearIt);
+      body.addEventListener('change', clearIt);
+      body.addEventListener('click', clearIt);
+    });
+    $('step-details-next').addEventListener('click', function () { finishDetails(); });
+    $('step-delivery-change').addEventListener('click', function () { changePart('delivery'); });
+    $('step-details-change').addEventListener('click', function () { changePart('details'); });
+    // Enter in a field of an earlier part continues to the next part instead of paying.
+    $('order-form').addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter' || step !== 'checkout' || part === 'pay') return;
+      var t = ev.target;
+      if (!t || t.tagName === 'TEXTAREA' || t.tagName === 'BUTTON' || t.id === 'code') return;
+      ev.preventDefault();
+      if (part === 'delivery') finishDelivery();
+      else finishDetails();
     });
     DOOR_KINDS.forEach(function (k) {
       $('door-kind-' + k).addEventListener('change', function () {
@@ -561,7 +900,7 @@
   function applyConfig(c) {
     config = c;
     $('brand').textContent = c.brand;
-    document.title = c.brand;
+    document.title = (ON_CHECKOUT ? 'Checkout · ' : '') + c.brand;
     // Each sentence on its own line (the lede keeps line breaks, see shop.css).
     $('lede').textContent = (c.collectNote ? 'Collect in ' + c.collectNote + ', or we send them to you.\n' : 'We send them to you, or you can collect.\n') +
       (c.cardPay ? 'Pay securely here by card, Apple Pay or Google Pay.' : 'Pay by bank transfer.');
@@ -570,6 +909,8 @@
     stepper.setItem(SJ.itemLine(c));
     renderSlots();
     syncFulfil();
+    renderBag();
+    applyBag();
     applyPhoto(c.photo || null);
   }
 
@@ -604,19 +945,20 @@
     opts.flavours = SJ.flavourText(stepper.get(), stepper.list);
     var qty = stepper.total();
     var total = SJ.renderSummary($('summary'), config, qty, opts);
+    $('bag-toggle-total').textContent = SJ.money(total, config.currency);
     renderShip();
     var waiting = courierOn() && !quote && shipFee() === null && !freeDeliveryCode();
     if (!busy) {
       $('submit').textContent = qty < stepper.min() ? 'Choose at least ' + (stepper.min() === 1 ? '1 gel' : stepper.min() + ' gels')
         : waiting ? 'Place order for ' + SJ.money(total, config.currency) + ' + delivery'
         : quote ? 'Send order for ' + SJ.money(total, config.currency) + ' + delivery'
-        : payNow() ? 'Continue to pay ' + SJ.money(total, config.currency)
+        : payNow() ? 'Pay ' + SJ.money(total, config.currency) + ' securely'
         : 'Place order for ' + SJ.money(total, config.currency);
     }
     $('pay-with').hidden = !payNow();
     $('next-note').textContent = quote
       ? 'Next we work out the delivery fee for your address and email your invoice' + (config.cardPay ? ' with a link to pay.' : ' with the bank details.') + ' There is nothing to pay yet.'
-      : payNow() ? 'Next you get your invoice number and pay securely by card, Apple Pay or Google Pay.'
+      : payNow() ? 'You pay on Paystack\'s secure page by card, Apple Pay or Google Pay. Your order number comes once the payment goes through.'
       : 'Next you will see the bank details and your invoice number. Use the invoice number as your payment reference.';
   }
 
@@ -701,7 +1043,7 @@
   function setSubmitting(on) {
     busy = on;
     $('submit').disabled = on;
-    if (on) $('submit').textContent = 'Placing order…';
+    if (on) $('submit').textContent = payNow() ? 'Opening secure payment…' : 'Placing order…';
     else renderTotals();
   }
 
@@ -723,10 +1065,18 @@
     var data = readForm();
     var problem = validate(data);
     if (problem) {
-      showError(problem.message);
-      $(problem.id).focus();
+      if (problem.id === stepper.firstInput().id) {
+        saveBag();
+        toLanding();
+        return;
+      }
+      var k = partOf(problem.id);
+      partDone[k] = false;
+      openPart(k, problem.id);
+      partError(k, problem.message);
       return;
     }
+    if (part !== 'pay') return;
 
     // A door order waits for its delivery price, so the customer is charged what they see.
     if (courierOn() && !freeDeliveryCode() && ship.status !== 'ok' && ship.status !== 'error') {
@@ -769,12 +1119,38 @@
         website: $('website').value
       }));
       pending = null;
+      if (cardOn(res.order)) {
+        // Straight to the secure payment page. The order number is shown only once it is paid.
+        await payStraightAway(res);
+        return;
+      }
       SJ.store.set(LAST_KEY, { savedAt: Date.now(), data: res });
+      clearBag();
       showDone(res, false);
     } catch (err) {
       onOrderError(err);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function payStraightAway(res) {
+    current = res;
+    try {
+      var pay = await SJ.api('startPayment', {
+        invoice: res.order.invoice, email: res.order.email, returnUrl: location.origin + location.pathname
+      });
+      if (pay.paid) {
+        saveShown(Object.assign({}, res, { order: Object.assign({}, res.order, { status: 'Paid' }) }));
+        showDone(current, false);
+        return;
+      }
+      if (typeof pay.url !== 'string' || !/^https:\/\//.test(pay.url)) throw new Error('Card payment is not working right now. Please try again in a moment.');
+      window.location.assign(pay.url);
+    } catch (err) {
+      // Back at checkout, everything still filled in. No order number is shown.
+      current = null;
+      showError(err.code === 'cancelled' ? err.message : err.message + ' Nothing was charged.');
     }
   }
 
@@ -789,8 +1165,10 @@
       }
       syncCode(err.message);
       renderTotals();
-      showError(err.message);
-      $('code').focus();
+      // The code is in Your details: that part opens again, with the message there.
+      partDone.details = false;
+      openPart('details', 'code');
+      partError('details', err.message);
     } else if (err.code === 'quote_changed') {
       // The Courier Guy's price moved (or could not be had) since it was shown.
       pending = null;
@@ -811,8 +1189,10 @@
       pending = null;
       SJ.store.set(CONFIG_KEY, err.data.config);
       applyConfig(err.data.config);
-      showError(err.message);
-      $($('collect-day').value ? 'collect-hour' : 'collect-day').focus();
+      // The time is in Delivery: that part opens again, with the message there.
+      partDone.delivery = false;
+      openPart('delivery', $('collect-day').value ? 'collect-hour' : 'collect-day');
+      partError('delivery', err.message);
     } else if (err.code === 'not_ready') {
       showClosed('Ordering opens soon', 'We are not taking orders on this page yet. Please check back soon.');
     } else if (err.code === 'invalid') {
@@ -843,9 +1223,12 @@
     // A delivery request has no fee yet, so no bank details: the invoice comes by email later.
     var request = o.status === 'New request';
     var paid = isPaid(o);
+    if (paid) clearBag();
 
-    // Tell the Meta Pixel about a new order, once per invoice (pixel.js). The value is the gels' total.
-    if (!restored && typeof window.fbq === 'function') {
+    // Tell the Meta Pixel about a paid order, once per invoice (pixel.js). With card payments, only
+    // a paid order counts; without them (bank transfer only) a placed order does, as before.
+    var purchased = paid || (!request && !(config && config.cardPay));
+    if (!restored && purchased && typeof window.fbq === 'function') {
       var tracked = '';
       try { tracked = sessionStorage.getItem('sj_pixel_last') || ''; } catch (err) { /* private browsing */ }
       if (tracked !== String(o.invoice)) {
@@ -925,6 +1308,18 @@
     $('pay-note').textContent = res.paymentNote || '';
     hideCardError();
     syncCard();
+
+    // At checkout, an order that isn't paid yet (back from Paystack without paying) shows no
+    // order number: only what is owed and the way to pay.
+    var unpaidHere = ON_CHECKOUT && !paid && !request && cardOn(o);
+    $('bib').hidden = unpaidHere;
+    $('done-keep').hidden = unpaidHere;
+    if (unpaidHere) {
+      $('copy-invoice').hidden = true;
+      $('done-email').hidden = true;
+      $('done-title').textContent = 'Payment not completed';
+      $('done-sub').textContent = 'Nothing was charged. Pay ' + SJ.money(o.total, sym) + ' below to confirm your order.';
+    }
 
     showView('view-done');
     window.scrollTo(0, 0);
@@ -1073,6 +1468,11 @@
 
   function newOrder() {
     SJ.store.remove(LAST_KEY);
+    clearBag();
+    if (ON_CHECKOUT) {
+      location.href = '../#order';
+      return;
+    }
     current = null;
     pending = null;
     $('notes').value = '';
@@ -1084,6 +1484,9 @@
       syncFulfil();
     }
     hideError();
+    step = 'bag';
+    partDone = { delivery: false, details: false };
+    if (config) showStep('bag', false);
     showView(config && config.ready ? 'order-form' : 'view-loading');
     window.scrollTo(0, 0);
     if (!config) init();
@@ -1134,7 +1537,7 @@
     if (payLink && await payFromLink(payLink)) return;
 
     if (reference) await confirmReturn(reference, last);
-    else if (last) showDone(last.data, true);
+    else if (last && (!ON_CHECKOUT || !readBag())) showDone(last.data, true);
     else if (config) showView('order-form');
     else showView('view-loading');
 

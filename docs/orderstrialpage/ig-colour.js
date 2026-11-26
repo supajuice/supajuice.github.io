@@ -1,5 +1,5 @@
 /*
-  Trial page: the floating Instagram button matches what it floats over.
+  The floating Instagram button matches what it floats over.
   Over a light part of the page (yellow, cream, white) it is blue with a white glyph.
   Over a dark part (the blue strip, the navy footer) it is yellow with a black glyph.
   The colour is read from the page itself, so it keeps working when sections change.
